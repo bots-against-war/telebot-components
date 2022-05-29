@@ -1,8 +1,8 @@
 from typing import Optional
 
+from telebot_components.constants import times
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import SetStore
-from telebot_components.constants import time
 
 
 class BannedUsersStore:
@@ -14,7 +14,7 @@ class BannedUsersStore:
             name="banned-user-ids",
             prefix=bot_prefix,
             redis=redis,
-            expiration_time=time.FOREVER,
+            expiration_time=times.FOREVER,
         )
         self.cached = cached
         self._banned_user_ids_cache: Optional[set[int]] = None

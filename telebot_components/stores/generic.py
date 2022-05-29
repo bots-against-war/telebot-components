@@ -1,12 +1,11 @@
 import json
+import logging
 from dataclasses import dataclass
 from datetime import timedelta
-import logging
-from typing import Callable, Generic, Optional, Protocol, TypeVar, Set
+from typing import Callable, Generic, Optional, Protocol, Set, TypeVar
 
-from telebot_components.constants.time import MONTH
+from telebot_components.constants.times import MONTH
 from telebot_components.redis_utils.interface import RedisInterface
-
 
 T = TypeVar("T")
 
@@ -35,6 +34,7 @@ class GenericStore(Generic[T]):
 SetItemT = TypeVar("SetItemT")
 
 
+@dataclass
 class KeySetStore(GenericStore[SetItemT]):
     async def add(self, key: str_able, item: SetItemT) -> bool:
         async with self.redis.pipeline() as pipe:
@@ -101,6 +101,7 @@ class SetStore(GenericStore[SetItemT]):
 ValueT = TypeVar("ValueT")
 
 
+@dataclass
 class KeyValueStore(GenericStore[ValueT]):
     async def save(self, key: str_able, value: ValueT) -> bool:
         return await self.redis.set(

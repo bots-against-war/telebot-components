@@ -33,7 +33,7 @@ frozenlist = ">=1.1.0"
 name = "async-timeout"
 version = "4.0.2"
 description = "Timeout context manager for asyncio programs"
-category = "main"
+category = "dev"
 optional = false
 python-versions = ">=3.6"
 
@@ -123,7 +123,7 @@ python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 name = "deprecated"
 version = "1.2.13"
 description = "Python @deprecated decorator to deprecate old python classes, functions or methods."
-category = "main"
+category = "dev"
 optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
 
@@ -248,7 +248,7 @@ python-versions = "*"
 name = "packaging"
 version = "21.3"
 description = "Core utilities for Python packages"
-category = "main"
+category = "dev"
 optional = false
 python-versions = ">=3.6"
 
@@ -396,7 +396,7 @@ python-versions = ">=3.6"
 name = "redis"
 version = "4.3.1"
 description = "Python client for Redis database and key-value store"
-category = "main"
+category = "dev"
 optional = false
 python-versions = ">=3.6"
 
@@ -419,7 +419,7 @@ python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*"
 
 [[package]]
 name = "telebot-against-war"
-version = "0.2.1"
+version = "0.2.2"
 description = "Async-first fork of pyTelegramBotApi"
 category = "dev"
 optional = false
@@ -483,7 +483,7 @@ testing = ["coverage (>=4)", "coverage-enable-subprocess (>=1)", "flaky (>=3)", 
 name = "wrapt"
 version = "1.14.1"
 description = "Module for decorators, wrappers and monkey patching."
-category = "main"
+category = "dev"
 optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,>=2.7"
 
@@ -502,7 +502,7 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "047306710cd80aa79d03a263a388743052fe474f3ce4e3b1d2b4b0c329ee5493"
+content-hash = "c5de575a02db1164aee255b333c8ab2e7b82cfa108752262492c65d1899eae71"
 
 [metadata.files]
 aiohttp = [
@@ -908,8 +908,8 @@ six = [
     {file = "six-1.16.0.tar.gz", hash = "sha256:1e61c37477a1626458e36f7b1d82aa5c9b094fa4802892072e49de9c60c4c926"},
 ]
 telebot-against-war = [
-    {file = "telebot-against-war-0.2.1.tar.gz", hash = "sha256:bd5fb1b3080290f05dcad946d38bf60e6c242c324431a2b9f18ffd9619466d3c"},
-    {file = "telebot_against_war-0.2.1-py3-none-any.whl", hash = "sha256:a37df218e183c24c663710ead15bfe3c83fffc07f2a207f90c8a5c22189410ff"},
+    {file = "telebot-against-war-0.2.2.tar.gz", hash = "sha256:9c11eed19570cca7179fe3e80296429f608f0676f6c33b0912ca49d366f997c0"},
+    {file = "telebot_against_war-0.2.2-py3-none-any.whl", hash = "sha256:671842a9b833811e0216a25b783def986d71f2b42e1de0c6c23d34cb9d6e6e33"},
 ]
 toml = [
     {file = "toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b"},

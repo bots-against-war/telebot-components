@@ -1,8 +1,6 @@
 import datetime
 from abc import ABC, abstractmethod
-
-from typing import TypeVar, Union, Optional
-
+from typing import Optional, TypeVar, Union
 
 # type defs copied from redis
 
@@ -102,14 +100,13 @@ RedisCmdReturn = Union[bytes, list[bytes], None, int]
 
 
 class RedisPipelineInterface(RedisInterface):
-
     @abstractmethod
     async def execute(self, raise_on_error: bool = True) -> list[RedisCmdReturn]:
         """Execute all the commands in the current pipeline"""
         ...
 
     @abstractmethod
-    async def __aenter__(self) -> 'RedisPipelineInterface':
+    async def __aenter__(self) -> "RedisPipelineInterface":
         ...
 
     @abstractmethod
