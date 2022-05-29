@@ -16,7 +16,7 @@ style="semver"
 
 [tool.poetry.dependencies]
 python = "^3.9"
-telebot-against-war = "0.3.0"
+telebot-against-war = "0.3.1"
 redis = "^4.3.1"
 
 [tool.poetry.dev-dependencies]

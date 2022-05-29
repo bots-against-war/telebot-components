@@ -7,6 +7,7 @@ from typing import Any, Generic, MutableMapping, Optional, Protocol, TypeVar, ca
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
+from telebot.types import constants
 
 from telebot_components.form.field import FormField, ReplyKeyboard
 from telebot_components.stores.language import (
@@ -169,7 +170,7 @@ class FormHandler(Generic[FormResultT]):
         async def currently_filling_form(update_content: tg.Message) -> bool:
             return update_content.from_user.id in self.form_state_by_user_id
 
-        @bot.message_handler(func=currently_filling_form, chat_types=["private"], priority=100)
+        @bot.message_handler(func=currently_filling_form, chat_types=[constants.ChatType.private], priority=100)
         async def form_step_handler(message: tg.Message):
             user_id = message.from_user.id
             language = await self.get_maybe_language(message.from_user)
