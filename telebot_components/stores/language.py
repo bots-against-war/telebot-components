@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional, Union
 
 from telebot import AsyncTeleBot, types
 from telebot.callback_data import CallbackData
@@ -38,7 +38,37 @@ class Language(Enum):
         return known_emoji.get(self, str(self).upper())
 
 
+MaybeLanguage = Optional[Language]  # None = multilang mode is of, using normal strings
+
+
 MultilangText = dict[Language, str]
+
+
+def validate_multilang_text(t: Any, languages: list[Language]) -> MultilangText:
+    if not isinstance(t, dict):
+        raise TypeError(f"MultilangText expected, found {t.__class__.__name__}")
+    for language in languages:
+        if language not in t:
+            raise ValueError(f"Multilang dict {t} misses required language {language}")
+        if not isinstance(t[language], str):
+            raise ValueError(f"Non-string text for language {language}: {t[language]}")
+    return t
+
+
+AnyText = Union[str, MultilangText]
+
+
+def any_text_to_str(t: AnyText, language: MaybeLanguage) -> str:
+    if language is None:
+        if isinstance(t, str):
+            return t
+        else:
+            raise ValueError(f"MultilangText requires language to be turned into str")
+    else:
+        if isinstance(t, str):
+            raise ValueError(f"Simple text (not multilang) requires language to be set to None")
+        else:
+            return t[language]
 
 
 @dataclass

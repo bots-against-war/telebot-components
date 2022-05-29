@@ -7,3 +7,7 @@ def telegram_message_url(group_id: int, message_id: int, thread_op_message_id: O
     if thread_op_message_id is not None:
         message_url += f"?thread={thread_op_message_id}"
     return message_url
+
+
+def join_paragraphs(lines: list[str]) -> str:
+    return "\n\n".join(lines)

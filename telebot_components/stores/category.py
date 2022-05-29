@@ -1,14 +1,20 @@
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Callable, Dict, List, Optional, Union, cast
+from typing import Optional, cast
 
 from telebot import AsyncTeleBot, types
 from telebot.callback_data import CallbackData
 
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import KeyValueStore
-from telebot_components.stores.language import LanguageStore, MultilangText
+from telebot_components.stores.language import (
+    AnyText,
+    LanguageStore,
+    MultilangText,
+    any_text_to_str,
+    validate_multilang_text,
+)
 from telebot_components.stores.types import OnOptionSelected
 from telebot_components.stores.utils import callback_query_processing_error
 
@@ -17,7 +23,7 @@ from telebot_components.stores.utils import callback_query_processing_error
 class Category:
     id: int
     name: str
-    button_caption: Union[str, MultilangText]
+    button_caption: AnyText
     hashtag: Optional[str] = None
     hidden: bool = False  # hide category from menu for new users while keeping them for those who already selected it
 
@@ -27,7 +33,7 @@ class CategoryStore:
         self,
         bot_prefix: str,
         redis: RedisInterface,
-        categories: List[Category],
+        categories: list[Category],
         category_ttl: timedelta = timedelta(days=15),
         language_store: Optional[LanguageStore] = None,
     ):
@@ -48,18 +54,7 @@ class CategoryStore:
         self.language_store = language_store
         if language_store is not None:
             for category in categories:
-                if not isinstance(category.button_caption, dict):
-                    raise TypeError(
-                        "When using category store together with language store, "
-                        + "all categories must define button captions as multilang texts, "
-                        + f"but {category} does not"
-                    )
-                for language in language_store.languages:
-                    if language not in category.button_caption:
-                        raise ValueError(
-                            f"{language} language is in language store, but button caption "
-                            + f"of category {category} misses it"
-                        )
+                validate_multilang_text(category.button_caption, language_store.languages)
 
     async def save_user_category(self, user: types.User, category: Category) -> bool:
         return await self.user_category_store.save(user.id, category)
@@ -108,12 +103,7 @@ class CategoryStore:
         current_category = await self.get_user_category(for_user)
 
         def caption(category: Category) -> str:
-            if language is not None:
-                # see validation in __init__
-                button_caption = cast(MultilangText, category.button_caption)
-                caption = button_caption[language]
-            else:
-                caption = cast(str, category.button_caption)
+            caption = any_text_to_str(category.button_caption, language)
             if current_category is not None and category.id == current_category.id:
                 caption = "✅ " + caption
             return caption
