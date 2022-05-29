@@ -2,7 +2,7 @@ from collections import defaultdict
 from typing import Coroutine, Optional, Union
 
 
-from telebot_components.redis.interface import RedisInterface, RedisPipelineInterface, ExpiryT, RedisCmdReturn
+from telebot_components.redis_utils.interface import RedisInterface, RedisPipelineInterface, ExpiryT, RedisCmdReturn
 
 
 class RedisEmulation(RedisInterface):

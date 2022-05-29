@@ -5,7 +5,7 @@ import logging
 from typing import Callable, Generic, Optional, Protocol, TypeVar, Set
 
 from telebot_components.constants.time import LARGE_EXPIRATION_TIME
-from telebot_components.redis.interface import RedisInterface
+from telebot_components.redis_utils.interface import RedisInterface
 
 
 T = TypeVar("T")
