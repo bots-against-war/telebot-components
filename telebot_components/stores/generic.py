@@ -11,7 +11,6 @@ from telebot_components.redis.interface import RedisInterface
 T = TypeVar("T")
 
 
-
 class str_able(Protocol):
     def __str__(self) -> str:
         ...
@@ -39,7 +38,7 @@ SetItemT = TypeVar("SetItemT")
 class KeySetStore(GenericStore[SetItemT]):
     async def add(self, key: str_able, item: SetItemT) -> bool:
         async with self.redis.pipeline() as pipe:
-            await pipe.sadd(self._full_key(key), self.dumper(item))
+            await pipe.sadd(self._full_key(key), self.dumper(item).encode("utf-8"))
             await pipe.expire(self._full_key(key), self.expiration_time)
             try:
                 n_added, is_timeout_set = await pipe.execute()
@@ -49,7 +48,7 @@ class KeySetStore(GenericStore[SetItemT]):
                 return False
 
     async def remove(self, key: str_able, item: SetItemT) -> bool:
-        n_removed = await self.redis.srem(self._full_key(key), self.dumper(item))
+        n_removed = await self.redis.srem(self._full_key(key), self.dumper(item).encode("utf-8"))
         return n_removed == 1
 
     async def drop(self, key: str_able) -> bool:
@@ -65,20 +64,31 @@ class KeySetStore(GenericStore[SetItemT]):
             return set()
 
 
-class SetStore(KeySetStore[SetItemT]):
+@dataclass
+class SetStore(GenericStore[SetItemT]):
     const_key: str = "const"
 
+    def __post_init__(self):
+        self._key_set_store = KeySetStore[SetItemT](
+            name=self.name,
+            prefix=self.prefix,
+            redis=self.redis,
+            expiration_time=self.expiration_time,
+            dumper=self.dumper,
+            loader=self.loader,
+        )
+
     async def add(self, item: SetItemT):
-        return await super().add(self.const_key, item)
+        return await self._key_set_store.add(self.const_key, item)
 
     async def remove(self, item: SetItemT):
-        return await super().remove(self.const_key, item)
+        return await self._key_set_store.remove(self.const_key, item)
 
     async def drop(self):
-        return await super().drop(self.const_key)
+        return await self._key_set_store.drop(self.const_key)
 
     async def all(self):
-        return await super().all(self.const_key)
+        return await self._key_set_store.all(self.const_key)
 
 
 ValueT = TypeVar("ValueT")
@@ -86,7 +96,11 @@ ValueT = TypeVar("ValueT")
 
 class KeyValueStore(GenericStore[ValueT]):
     async def save(self, key: str_able, value: ValueT) -> bool:
-        return await self.redis.set(self._full_key(key), self.dumper(value), ex=self.expiration_time)
+        return await self.redis.set(
+            self._full_key(key),
+            self.dumper(value).encode("utf-8"),
+            ex=self.expiration_time,
+        )
 
     async def load(self, key: str_able) -> Optional[ValueT]:
         try:

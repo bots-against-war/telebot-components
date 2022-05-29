@@ -16,7 +16,7 @@ class RedisEmulation(RedisInterface):
         self.sets: dict[str, set[bytes]] = defaultdict(set)
         self._storages = (self.sets, self.values)
 
-    async def pipeline(self, transaction: bool = True, shard_hint: Optional[str] = None) -> "RedisPipelineEmulatiom":
+    def pipeline(self, transaction: bool = True, shard_hint: Optional[str] = None) -> "RedisPipelineEmulatiom":
         return RedisPipelineEmulatiom(self)
 
     async def set(
@@ -62,13 +62,19 @@ class RedisEmulation(RedisInterface):
         return list(self.sets[name])
 
 
-class RedisPipelineEmulatiom(RedisPipelineInterface):
+class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     """Simple pipeline emulation that just stores parent redis emulation coroutines
     in a list and awaits them on execute"""
 
     def __init__(self, redis: RedisEmulation):
         self.redis = redis
-        self._stack: list[Coroutine][None, None, RedisCmdReturn] = []
+        self._stack: list[Coroutine[None, None, RedisCmdReturn]] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self):
+        pass
 
     async def set(self, *args, **kwargs) -> bool:
         self._stack.append(self.redis.set(*args, **kwargs))
