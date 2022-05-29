@@ -61,6 +61,9 @@ class RedisEmulation(RedisInterface):
     async def smembers(self, name: str) -> list[bytes]:
         return list(self.sets[name])
 
+    async def sismember(self, name: str, value: bytes) -> int:
+        return int(value in self.sets.get(name, set()))
+
 
 class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     """Simple pipeline emulation that just stores parent redis emulation coroutines
@@ -99,6 +102,10 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def smembers(self, name: str) -> list[bytes]:
         self._stack.append(self.redis.smembers(name))
         return []
+
+    async def sismember(self, name: str, value: bytes) -> int:
+        self._stack.append(self.redis.sismember(name, value))
+        return 0
 
     async def execute(self, raise_on_error: bool = True) -> list[RedisCmdReturn]:
         results: list[RedisCmdReturn] = []

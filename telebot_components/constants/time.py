@@ -1,3 +1,7 @@
 from datetime import timedelta
 
-LARGE_EXPIRATION_TIME = timedelta(days=30)
+MONTH = timedelta(days=30)
+
+YEAR = timedelta(days=365)
+
+FOREVER = None

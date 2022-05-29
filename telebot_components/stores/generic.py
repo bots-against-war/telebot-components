@@ -4,7 +4,7 @@ from datetime import timedelta
 import logging
 from typing import Callable, Generic, Optional, Protocol, TypeVar, Set
 
-from telebot_components.constants.time import LARGE_EXPIRATION_TIME
+from telebot_components.constants.time import MONTH
 from telebot_components.redis_utils.interface import RedisInterface
 
 
@@ -21,7 +21,7 @@ class GenericStore(Generic[T]):
     name: str  # used to identifiy a particular store
     prefix: str  # used to identify bot that uses the store
     redis: RedisInterface
-    expiration_time: timedelta = LARGE_EXPIRATION_TIME
+    expiration_time: Optional[timedelta] = MONTH
     dumper: Callable[[T], str] = json.dumps
     loader: Callable[[str], T] = json.loads
 
@@ -39,10 +39,11 @@ class KeySetStore(GenericStore[SetItemT]):
     async def add(self, key: str_able, item: SetItemT) -> bool:
         async with self.redis.pipeline() as pipe:
             await pipe.sadd(self._full_key(key), self.dumper(item).encode("utf-8"))
-            await pipe.expire(self._full_key(key), self.expiration_time)
+            if self.expiration_time is not None:
+                await pipe.expire(self._full_key(key), self.expiration_time)
             try:
-                n_added, is_timeout_set = await pipe.execute()
-                return n_added == 1 and is_timeout_set == 1
+                results = await pipe.execute()
+                return all(r == 1 for r in results)
             except Exception:
                 self.logger.exception("Unexpected error adding item `")
                 return False
@@ -62,6 +63,9 @@ class KeySetStore(GenericStore[SetItemT]):
         except Exception:
             self.logger.exception("Unexpected error retrieving all set items, returning empty set")
             return set()
+
+    async def includes(self, key: str_able, item: SetItemT) -> bool:
+        return (await self.redis.sismember(self._full_key(key), self.dumper(item).encode("utf-8"))) == 1
 
 
 @dataclass
@@ -89,6 +93,9 @@ class SetStore(GenericStore[SetItemT]):
 
     async def all(self):
         return await self._key_set_store.all(self.const_key)
+
+    async def includes(self, item: SetItemT):
+        return await self._key_set_store.includes(self.const_key, item)
 
 
 ValueT = TypeVar("ValueT")

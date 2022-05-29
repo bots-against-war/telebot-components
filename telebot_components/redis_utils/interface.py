@@ -92,6 +92,11 @@ class RedisInterface(ABC):
         """Return all members of the set ``name``"""
         ...
 
+    @abstractmethod
+    async def sismember(self, name: KeyT, value: bytes) -> int:
+        """Return a boolean indicating if ``value`` is a member of set ``name``"""
+        ...
+
 
 RedisCmdReturn = Union[bytes, list[bytes], None, int]
 
