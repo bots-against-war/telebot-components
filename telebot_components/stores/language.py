@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Protocol
+from typing import Optional
 
 from telebot import AsyncTeleBot, types
 from telebot.callback_data import CallbackData
@@ -9,6 +9,8 @@ from telebot.callback_data import CallbackData
 from telebot_components.constants import times
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import KeyValueStore
+from telebot_components.stores.types import OnOptionSelected
+from telebot_components.stores.utils import callback_query_processing_error
 
 
 class Language(Enum):
@@ -37,13 +39,6 @@ class Language(Enum):
 
 
 MultilangText = dict[Language, str]
-
-
-class OnLanguageChangeCallback(Protocol):
-    async def __call__(
-        self, bot: AsyncTeleBot, language_menu_message: types.Message, user: types.User, new_language: Language
-    ) -> None:
-        pass
 
 
 @dataclass
@@ -92,41 +87,38 @@ class LanguageStore:
     async def set_user_language(self, user: types.User, lang: Language) -> bool:
         return await self.user_language_store.save(user.id, lang)
 
-    def setup(self, bot: AsyncTeleBot, on_language_change: Optional[OnLanguageChangeCallback] = None):
+    def setup(self, bot: AsyncTeleBot, on_language_change: Optional[OnOptionSelected[Language]] = None):
         @bot.callback_query_handler(callback_data=self.language_callback_data)
         async def language_selected(call: types.CallbackQuery):
-            async def show_error_to_user(text: str):
-                await bot.answer_callback_query(call.id, f"Server error: {text}", show_alert=True)
-
+            user = call.from_user
             try:
                 data = self.language_callback_data.parse(call.data)
-                user = call.from_user
-                selected_language = Language(data["code"])
-            except ValueError as e:
-                self.logger.error(f"Error parsing callback data: {e}")
-                await show_error_to_user(f"corrupted or outdated callback query '{call.data}' :(")
+                language = Language(data["code"])
+            except Exception:
+                await callback_query_processing_error(bot, call, f"corrupted callback query '{call.data}'", self.logger)
                 return
 
-            if selected_language not in self.languages:
-                self.logger.error(f"User has sent callback query with unsupported language '{selected_language}'")
-                await show_error_to_user(f"language '{selected_language}' is not supported :(")
+            if language not in self.languages:
+                await callback_query_processing_error(bot, call, f"language '{language}' is not supported", self.logger)
                 return
 
-            language_saved = await self.set_user_language(user, selected_language)
+            language_saved = await self.set_user_language(user, language)
             if not language_saved:
-                self.logger.error(f"Error saving language to the DB")
-                await show_error_to_user(f"unable to save selected language :(")
+                await callback_query_processing_error(bot, call, f"unable to save selected language", self.logger)
                 return
             try:
-                await bot.edit_message_reply_markup(
-                    user.id, call.message.id, reply_markup=self._markup_from_selected_language(selected_language)
-                )
                 await bot.answer_callback_query(call.id)
+                await bot.edit_message_reply_markup(
+                    user.id, call.message.id, reply_markup=self._markup_from_selected_language(language)
+                )
             except Exception:
                 # exception may be raised when user clicks on the same button and markup is not changed
                 pass
             if on_language_change is not None:
-                await on_language_change(bot, call.message, call.from_user, selected_language)
+                try:
+                    await on_language_change(bot, call.message, call.from_user, language)
+                except Exception:
+                    self.logger.exception("Error in on_language_change callback")
 
     def _markup_from_selected_language(self, selected_language: Language):
         def get_lang_text(lang: Language) -> str:
@@ -165,7 +157,7 @@ class DummyLanguageStore(LanguageStore):
     async def set_user_language(self, user: types.User, lang: Language) -> bool:
         raise NotImplementedError("You can't save user language in a dummy language store")
 
-    def setup(self, bot: AsyncTeleBot, on_language_change: Optional[OnLanguageChangeCallback] = None):
+    def setup(self, bot: AsyncTeleBot, on_language_change: Optional[OnOptionSelected[Language]] = None):
         pass
 
     async def markup(
