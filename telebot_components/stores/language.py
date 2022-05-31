@@ -94,7 +94,7 @@ class LanguageStore:
             dumper=str,
             loader=Language,
         )
-        self.logger = logging.getLogger(f"{__name__}.{bot_prefix}.language_store")
+        self.logger = logging.getLogger(f"{__name__}.{bot_prefix}")
         self.languages = supported_languages
         self.default_language = default_language
         self.language_callback_data = CallbackData("code", prefix="lang")

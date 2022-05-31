@@ -110,6 +110,12 @@ class KeyValueStore(GenericStore[ValueT]):
             ex=self.expiration_time,
         )
 
+    async def touch(self, key: str_able) -> bool:
+        if self.expiration_time is not None:
+            return (await self.redis.expire(self._full_key(key), self.expiration_time)) == 1
+        else:
+            return True
+
     async def load(self, key: str_able) -> Optional[ValueT]:
         try:
             value_dump = await self.redis.get(self._full_key(key))

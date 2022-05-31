@@ -37,7 +37,7 @@ class CategoryStore:
         category_ttl: timedelta = timedelta(days=15),
         language_store: Optional[LanguageStore] = None,
     ):
-        self.logger = logging.getLogger(f"{__name__}.{bot_prefix}.category_store")
+        self.logger = logging.getLogger(f"{__name__}.{bot_prefix}")
         self.categories = categories
         self.categories_by_id = {c.id: c for c in categories}
         self.user_category_store = KeyValueStore[Category](
