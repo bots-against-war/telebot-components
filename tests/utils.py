@@ -1,4 +1,5 @@
 import os
+
 import pytest
 import pytest_mock
 
@@ -15,7 +16,6 @@ class TimeSupplier:
 
     def emulate_wait(self, delay: float):
         self.current_time += delay
-
 
 
 def using_real_redis() -> bool:

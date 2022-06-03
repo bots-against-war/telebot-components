@@ -1,7 +1,7 @@
-import pytest
-
 from datetime import timedelta
 from uuid import uuid4
+
+import pytest
 
 from telebot_components.redis_utils.interface import RedisInterface
 from tests.utils import TimeSupplier, pytest_skip_on_real_redis
@@ -68,13 +68,13 @@ async def test_counter(redis: RedisInterface, time_supplier: TimeSupplier):
     assert await redis.incr(key) == 1
     assert await redis.incr(key) == 2
     assert await redis.incr(key) == 3
-    assert await redis.get(key) == b'3'
+    assert await redis.get(key) == b"3"
     await redis.expire(key, timedelta(seconds=60))
     time_supplier.emulate_wait(61)
     assert await redis.get(key) is None
     assert await redis.incr(key) == 1
     assert await redis.incr(key) == 2
-    assert await redis.get(key) == b'2'
+    assert await redis.get(key) == b"2"
 
 
 async def test_list(redis: RedisInterface):
