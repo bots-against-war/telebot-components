@@ -192,7 +192,7 @@ class FeedbackHandler:
             if self.config.forwarded_to_admin_confirmations_throttle_duration is not None
             else None
         )
-        # [optional] hashtag-related stored
+        # [optional] hashtag-related stores
         # user id -> hashtag message data; used to avoid sending hashtags too frequently
         self.recent_hashtag_message_for_user_store = (
             KeyValueStore[HashtagMessageData](
@@ -474,8 +474,8 @@ class FeedbackHandler:
                 if origin_chat_id is None:
                     return
 
-                # admin chat commands
                 if message.text is not None and message.text.startswith("/"):
+                    # admin chat commands
                     if message.text in self.admin_chat_response_action_by_command:
                         admin_chat_action = self.admin_chat_response_action_by_command[message.text]
                         await admin_chat_action.callback(message, forwarded_msg, origin_chat_id)
@@ -520,6 +520,7 @@ class FeedbackHandler:
                             + ", ".join(available_commands),
                         )
                 else:
+                    # actual response to user
                     await bot.copy_message(
                         chat_id=origin_chat_id, from_chat_id=self.admin_chat_id, message_id=message.id
                     )
