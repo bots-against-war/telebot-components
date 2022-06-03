@@ -19,9 +19,11 @@ poetry install
 pytest tests -vv
 ```
 
-By default all tests are run with in-memory Redis emulation. But if you have redis installed you can run them
-locally on real Redis by specifying
+By default all tests are run with in-memory Redis emulation. But if you have Redis installed you can run them
+locally on real Redis by specifying something like
 
 ```bash
-export REDIS_URL="
+export REDIS_URL="redis://localhost:1234"
 ```
+
+Tests must be able to find an empty Redis DB to use; they also clean up after themselves.
