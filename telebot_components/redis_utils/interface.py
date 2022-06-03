@@ -4,9 +4,6 @@ from typing import Optional, TypeVar, Union
 
 # type defs copied from redis
 
-AbsExpiryT = Union[int, datetime.datetime]
-ExpiryT = Union[int, datetime.timedelta]
-
 
 class RedisInterface(ABC):
     """Abstract interface for the parts of redis.asyncio.Redis class we're using;
@@ -36,11 +33,9 @@ class RedisInterface(ABC):
         self,
         name: str,
         value: bytes,
-        ex: Optional[ExpiryT] = None,
-        px: Optional[ExpiryT] = None,
-        nx: bool = False,
-        xx: bool = False,
-        keepttl: bool = False,
+        ex: Optional[datetime.timedelta] = None,
+        *args,
+        **kwargs,
     ) -> bool:
         """
         Set the value at key ``name`` to ``value``
@@ -63,7 +58,7 @@ class RedisInterface(ABC):
         ...
 
     @abstractmethod
-    async def expire(self, name: str, time: ExpiryT) -> int:
+    async def expire(self, name: str, time: datetime.timedelta) -> int:
         """
         Set an expire flag on key ``name`` for ``time`` seconds. ``time``
         can be represented by an integer or a Python timedelta object.
