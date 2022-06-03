@@ -30,5 +30,6 @@ jobs:
           poetry run isort . --check &&
           poetry run black . --check &&
           poetry run mypy .
-      - name: Run unit tests
-        run: poetry run pytest tests -vv
+      # TBD
+      # - name: Run unit tests
+      #   run: poetry run pytest tests -vv

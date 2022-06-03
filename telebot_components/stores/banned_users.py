@@ -1,5 +1,7 @@
 from typing import Optional
 
+from telebot import types as tg
+
 from telebot_components.constants import times
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import SetStore
@@ -35,3 +37,7 @@ class BannedUsersStore:
             return user_id in self._banned_user_ids_cache
         else:
             return await self.banned_user_ids_store.includes(user_id)
+
+    async def not_from_banned_user(self, update_content: tg.Message) -> bool:
+        """Can be used in telebot's 'func' filter"""
+        return not await self.is_banned(update_content.from_user.id)
