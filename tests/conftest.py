@@ -1,18 +1,19 @@
 import os
 import random
+from typing import AsyncGenerator
 from uuid import uuid4
+
 import pytest
 import pytest_mock
+from redis.asyncio import Redis  # type: ignore
 
-from redis.asyncio import Redis
-
-from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.redis_utils.emulation import RedisEmulation
+from telebot_components.redis_utils.interface import RedisInterface
 from tests.utils import TimeSupplier, using_real_redis
 
 
 @pytest.fixture
-async def redis() -> RedisInterface:
+async def redis() -> AsyncGenerator[RedisInterface, None]:
     if using_real_redis():
         redis = Redis.from_url(os.getenv("REDIS_URL"))
         for db_index in range(1, 11):

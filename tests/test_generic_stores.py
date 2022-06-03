@@ -2,16 +2,15 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Optional
 from uuid import uuid4
+
 import pytest
 from _pytest import fixtures
 
-from telebot_components.stores.generic import KeyListStore, KeyValueStore, str_able
 from telebot_components.redis_utils.interface import RedisInterface
-
+from telebot_components.stores.generic import KeyListStore, KeyValueStore, str_able
 from tests.utils import TimeSupplier, using_real_redis
 
-
-EXPIRATION_TIME_TEST_OPTIONS = [None]
+EXPIRATION_TIME_TEST_OPTIONS: list[Optional[timedelta]] = [None]
 
 if not using_real_redis():
     EXPIRATION_TIME_TEST_OPTIONS.append(timedelta(seconds=30))
@@ -41,7 +40,7 @@ def generate_str() -> str:
 
 async def test_key_value_store(
     redis: RedisInterface, expiration_time: Optional[timedelta], key: str_able, time_supplier: TimeSupplier
-) -> KeyValueStore:
+):
     store = KeyValueStore[str](
         name="testing",
         prefix="test-bot",
@@ -62,21 +61,22 @@ async def test_key_value_store(
         assert await store.load(key) == value
 
 
-
-@pytest.fixture(params=[
+@pytest.fixture(
+    params=[
         42,
         "hello world",
         ["potato", "cabbage"],
         {"mapping": "very good data structure", "array": ["sucks", "really", "bad"]},
         [1, 2, 3, {"key": "value"}],
         {"id": 1312, "nested": {"more-nested": {"text": "damn", "is_cool": True}, "something-else": ["what?", 1]}},
-    ])
+    ]
+)
 def jsonable_value(request: fixtures.SubRequest) -> Any:
     return request.param
 
 
-async def test_key_value_store_json_serialization(redis: RedisInterface, key: str_able, jsonable_value: Any) -> KeyValueStore:
-    store = KeyValueStore(
+async def test_key_value_store_json_serialization(redis: RedisInterface, key: str_able, jsonable_value: Any):
+    store = KeyValueStore[Any](
         name="testing",
         prefix="test-bot",
         redis=redis,
@@ -86,7 +86,7 @@ async def test_key_value_store_json_serialization(redis: RedisInterface, key: st
     assert await store.load(key) == jsonable_value
 
 
-async def test_key_value_store_custom_serialization(redis: RedisInterface, key: str_able) -> KeyValueStore:
+async def test_key_value_store_custom_serialization(redis: RedisInterface, key: str_able):
     @dataclass
     class UserData:
         name: str
@@ -94,9 +94,9 @@ async def test_key_value_store_custom_serialization(redis: RedisInterface, key: 
 
         def to_store(self) -> str:
             return f"{self.name}-{self.age}"
-        
+
         @classmethod
-        def from_store(cls, dump: str) -> 'UserData':
+        def from_store(cls, dump: str) -> "UserData":
             name, age_str = dump.split("-")
             return UserData(name=name, age=int(age_str))
 
@@ -114,7 +114,7 @@ async def test_key_value_store_custom_serialization(redis: RedisInterface, key: 
 
 
 async def test_key_list_store(redis: RedisInterface, key: str_able, jsonable_value: Any):
-    store = KeyListStore(
+    store = KeyListStore[Any](
         name="testing",
         prefix="test-bot",
         redis=redis,
