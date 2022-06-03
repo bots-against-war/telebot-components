@@ -184,6 +184,10 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
         self._stack.append(self.redis_em.exists(*names))
         return 0
 
+    async def expire(self, name: str, time: timedelta) -> int:
+        self._stack.append(self.redis_em.expire(name, time))
+        return 0
+
     async def execute(self, raise_on_error: bool = True) -> list[RedisCmdReturn]:
         results: list[RedisCmdReturn] = []
         for command_coro in self._stack:
