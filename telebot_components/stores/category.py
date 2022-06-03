@@ -34,7 +34,7 @@ class CategoryStore:
         bot_prefix: str,
         redis: RedisInterface,
         categories: list[Category],
-        category_ttl: timedelta = timedelta(days=15),
+        category_expiration_time: timedelta,
         language_store: Optional[LanguageStore] = None,
     ):
         self.logger = logging.getLogger(f"{__name__}.{bot_prefix}")
@@ -44,7 +44,7 @@ class CategoryStore:
             name="user-category",
             prefix=bot_prefix,
             redis=redis,
-            expiration_time=category_ttl,
+            expiration_time=category_expiration_time,
             dumper=lambda c: str(c.id),
             loader=lambda category_id: self.categories_by_id[int(category_id)],
         )

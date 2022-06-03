@@ -155,7 +155,9 @@ class TrelloIntegration:
             else:
                 card_description = ""
             try:  # try downloading document to attach it
-                doc_or_photo = cast(tg.Document, origin_message.document) or cast(list[tg.PhotoSize], origin_message.photo)[-1]
+                doc_or_photo = (
+                    cast(tg.Document, origin_message.document) or cast(list[tg.PhotoSize], origin_message.photo)[-1]
+                )
                 attachment_file = await self.bot.get_file(doc_or_photo.file_id)
                 attachment_file_content = await self.bot.download_file(attachment_file.file_path)
                 card_description = f"{card_description}\n📎 `{attachment_file.file_path}`"

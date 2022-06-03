@@ -6,7 +6,6 @@ from typing import Optional, TypeVar, Union
 
 AbsExpiryT = Union[int, datetime.datetime]
 ExpiryT = Union[int, datetime.timedelta]
-KeyT = str  # Main redis key space
 
 
 class RedisInterface(ABC):
@@ -91,8 +90,35 @@ class RedisInterface(ABC):
         ...
 
     @abstractmethod
-    async def sismember(self, name: KeyT, value: bytes) -> int:
+    async def sismember(self, name: str, value: bytes) -> int:
         """Return a boolean indicating if ``value`` is a member of set ``name``"""
+        ...
+
+    @abstractmethod
+    async def incr(self, name: str) -> int:
+        """Increments the value of ``key`` by 1 and return its value after the operation.
+         If no key exists, the value will be initialized as 0 and then incremented.
+        """
+        ...
+
+    @abstractmethod
+    async def rpush(self, name: str, *values: bytes) -> int:
+        """Push ``values`` onto the tail of the list ``name`` and return list length the operation"""
+        ...
+
+    @abstractmethod
+    async def lrange(self, name: str, start: int, end: int) -> list[bytes]:
+        """
+        Return a slice of the list ``name`` between
+        position ``start`` and ``end``
+        ``start`` and ``end`` can be negative numbers just like
+        Python slicing notation
+        """
+        ...
+
+    @abstractmethod
+    async def exists(self, *names: str) -> int:
+        """Returns the number of ``names`` that exist"""
         ...
 
 

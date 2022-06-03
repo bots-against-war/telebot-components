@@ -63,12 +63,15 @@ def any_text_to_str(t: AnyText, language: MaybeLanguage) -> str:
         if isinstance(t, str):
             return t
         else:
-            raise ValueError(f"MultilangText requires language to be turned into str")
+            raise ValueError(f"MultilangText requires Language to be turned into str")
     else:
         if isinstance(t, str):
-            raise ValueError(f"Simple text (not multilang) requires language to be set to None")
+            raise ValueError(f"Simple text requires language to be set to None")
         else:
-            return t[language]
+            localised_t = t.get(language)
+            if not isinstance(localised_t, str):
+                raise ValueError(f"No valid localisation found to {language} language")
+            return localised_t
 
 
 @dataclass
