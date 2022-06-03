@@ -1,4 +1,4 @@
-from typing import Callable, Coroutine, Optional
+from typing import Optional
 
 from telebot import types as tg
 
@@ -38,6 +38,6 @@ class BannedUsersStore:
         else:
             return await self.banned_user_ids_store.includes(user_id)
 
-    async def not_from_banned_user(self, message: tg.Message):
+    async def not_from_banned_user(self, update_content: tg.Message) -> bool:
         """Can be used in telebot's 'func' filter"""
-        return not await self.is_banned(message.from_user.id)
+        return not await self.is_banned(update_content.from_user.id)

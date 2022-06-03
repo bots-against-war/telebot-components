@@ -16,6 +16,7 @@ from telebot_components.stores.language import (
     Language,
     LanguageSelectionMenuConfig,
     LanguageStore,
+    any_text_to_str,
 )
 
 
@@ -147,7 +148,7 @@ def create_feedback_bot(BotClass: Type[AsyncTeleBot], redis: RedisInterface, tok
     async def on_category_selected(bot: AsyncTeleBot, menu_message: tg.Message, user: tg.User, new_option: Category):
         language = await language_store.get_user_language(user)
         await bot.send_message(
-            user.id, ON_CATEGORY_SELECTED_MESSAGE[language].format(new_option.button_caption[language])
+            user.id, ON_CATEGORY_SELECTED_MESSAGE[language].format(any_text_to_str(new_option.button_caption, language))
         )
 
     category_store.setup(bot, on_category_selected=on_category_selected)
@@ -164,7 +165,7 @@ if __name__ == "__main__":
     import asyncio
     import os
 
-    from redis.asyncio import Redis
+    from redis.asyncio import Redis  # type: ignore
 
     from telebot_components.redis_utils.emulation import RedisEmulation
 
