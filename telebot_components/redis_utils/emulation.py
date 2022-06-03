@@ -1,8 +1,9 @@
+import time as time_module
 from collections import defaultdict
-from typing import Coroutine, Optional, Union
+from datetime import timedelta
+from typing import Coroutine, Optional
 
 from telebot_components.redis_utils.interface import (
-    ExpiryT,
     RedisCmdReturn,
     RedisInterface,
     RedisPipelineInterface,
@@ -10,16 +11,14 @@ from telebot_components.redis_utils.interface import (
 
 
 class RedisEmulation(RedisInterface):
-    """Inmemory redis emulation, compliant with interface, useful for local runs and tests.
-
-    NOTE: key expiration is not currently emulated.
-    """
+    """Inmemory redis emulation, compliant with interface, useful for local runs and tests."""
 
     def __init__(self):
         self.values: dict[str, bytes] = dict()
         self.sets: dict[str, set[bytes]] = defaultdict(set)
         self.lists: dict[str, list[bytes]] = defaultdict(list)
         self._storages = (self.sets, self.values, self.lists)
+        self.key_eviction_time: dict[str, float] = dict()
 
     def pipeline(self, transaction: bool = True, shard_hint: Optional[str] = None) -> "RedisPipelineEmulatiom":
         return RedisPipelineEmulatiom(self)
@@ -28,16 +27,28 @@ class RedisEmulation(RedisInterface):
         self,
         name: str,
         value: bytes,
-        ex: Optional[ExpiryT] = None,
-        px: Optional[ExpiryT] = None,
-        nx: bool = False,
-        xx: bool = False,
-        keepttl: bool = False,
+        ex: Optional[timedelta] = None,
+        *args,
+        **kwargs,
     ) -> bool:
-        self.values[name] = value  # expiration is not currently emulated!
+        self.values[name] = value
+        if ex is not None:
+            self.key_eviction_time[name] = time_module.time() + ex.total_seconds()
         return True
 
+    def _evict_if_expired(self, key: str):
+        if key not in self.key_eviction_time:
+            return
+        evict_at = self.key_eviction_time[key]
+        if time_module.time() <= evict_at:
+            return
+        self.key_eviction_time.pop(key)
+        for storage in self._storages:
+            if key in storage:
+                storage.pop(key)
+
     async def get(self, name: str) -> Optional[bytes]:
+        self._evict_if_expired(name)
         return self.values.get(name)
 
     async def delete(self, *names: str) -> int:
@@ -48,28 +59,34 @@ class RedisEmulation(RedisInterface):
                     n_deleted += 1
         return n_deleted
 
-    async def expire(self, name: str, time: ExpiryT) -> int:
+    async def expire(self, name: str, time: timedelta) -> int:
+        self.key_eviction_time[name] = time_module.time() + time.total_seconds()
         return 1
 
     async def sadd(self, name: str, *values: bytes) -> int:
+        self._evict_if_expired(name)
         target_set = self.sets[name]
         new_values = {v for v in values if v not in target_set}
         target_set.update(new_values)
         return len(new_values)
 
     async def srem(self, name: str, *values: bytes) -> int:
+        self._evict_if_expired(name)
         target_set = self.sets[name]
-        values_to_remove = {v for v in values if v not in target_set}
+        values_to_remove = {v for v in values if v in target_set}
         target_set.difference_update(values_to_remove)
         return len(values_to_remove)
 
     async def smembers(self, name: str) -> list[bytes]:
+        self._evict_if_expired(name)
         return list(self.sets[name])
 
     async def sismember(self, name: str, value: bytes) -> int:
+        self._evict_if_expired(name)
         return int(value in self.sets.get(name, set()))
 
     async def incr(self, name: str) -> int:
+        self._evict_if_expired(name)
         current_value_bytes = self.values.get(name)
         if current_value_bytes is None:
             current_value = 0
@@ -80,11 +97,13 @@ class RedisEmulation(RedisInterface):
         return new_value
 
     async def rpush(self, name: str, *values: bytes) -> int:
+        self._evict_if_expired(name)
         for v in values:
             self.lists[name].append(v)
         return len(self.lists[name])
 
     async def lrange(self, name: str, start: int, end: int) -> list[bytes]:
+        self._evict_if_expired(name)
         if name not in self.lists:
             return []
         list_ = self.lists[name]
@@ -121,8 +140,8 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def __aexit__(self, *args, **kwargs):
         pass
 
-    async def set(self, *args, **kwargs) -> bool:
-        self._stack.append(self.redis_em.set(*args, **kwargs))
+    async def set(self, name: str, value: bytes, ex: Optional[timedelta] = None, *args, **kwargs) -> bool:
+        self._stack.append(self.redis_em.set(name, value, ex, *args, **kwargs))
         return False
 
     async def get(self, name: str) -> Optional[bytes]:
