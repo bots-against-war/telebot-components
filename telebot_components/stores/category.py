@@ -1,15 +1,16 @@
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Optional, cast
+from typing import Optional
 
-from telebot import AsyncTeleBot, types
+from telebot import AsyncTeleBot, types as tg
 from telebot.callback_data import CallbackData
 
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import KeyValueStore
 from telebot_components.stores.language import (
     AnyText,
+    Language,
     LanguageStore,
     MultilangText,
     any_text_to_str,
@@ -52,19 +53,19 @@ class CategoryStore:
         self.select_category_callback_data = CallbackData("cat_id", prefix="category")
 
         self.language_store = language_store
-        if language_store is not None:
+        if self.language_store is not None:
             for category in categories:
-                validate_multilang_text(category.button_caption, language_store.languages)
+                self.language_store.validate_multilang(category.button_caption)
 
-    async def save_user_category(self, user: types.User, category: Category) -> bool:
+    async def save_user_category(self, user: tg.User, category: Category) -> bool:
         return await self.user_category_store.save(user.id, category)
 
-    async def get_user_category(self, user: types.User) -> Optional[Category]:
+    async def get_user_category(self, user: tg.User) -> Optional[Category]:
         return await self.user_category_store.load(user.id)
 
     def setup(self, bot: AsyncTeleBot, on_category_selected: Optional[OnOptionSelected[Category]] = None):
         @bot.callback_query_handler(callback_data=self.select_category_callback_data)
-        async def category_selected(call: types.CallbackQuery):
+        async def category_selected(call: tg.CallbackQuery):
             user = call.from_user
             try:
                 data = self.select_category_callback_data.parse(call.data)
@@ -83,7 +84,7 @@ class CategoryStore:
             try:
                 await bot.answer_callback_query(call.id)
                 await bot.edit_message_reply_markup(
-                    user.id, call.message.id, reply_markup=(await self.markup(call.from_user))
+                    user.id, call.message.id, reply_markup=(await self.markup_for_user(call.from_user))
                 )
             except Exception:
                 # exceptions are raised when user clicks on the same button and markup is not changed
@@ -94,13 +95,8 @@ class CategoryStore:
                 except Exception:
                     self.logger.exception("Error in on_category_selected callback")
 
-    async def markup(self, for_user: types.User) -> types.InlineKeyboardMarkup:
-        if self.language_store is None:
-            language = None
-        else:
-            language = await self.language_store.get_user_language(for_user)
-
-        current_category = await self.get_user_category(for_user)
+    async def markup_for_user_localised(self, user: tg.User, language: Optional[Language]) -> tg.InlineKeyboardMarkup:
+        current_category = await self.get_user_category(user)
 
         def caption(category: Category) -> str:
             caption = any_text_to_str(category.button_caption, language)
@@ -108,10 +104,10 @@ class CategoryStore:
                 caption = "✅ " + caption
             return caption
 
-        return types.InlineKeyboardMarkup(
+        return tg.InlineKeyboardMarkup(
             keyboard=[
                 [
-                    types.InlineKeyboardButton(
+                    tg.InlineKeyboardButton(
                         text=caption(category),
                         callback_data=self.select_category_callback_data.new(cat_id=category.id),
                     )
@@ -120,3 +116,11 @@ class CategoryStore:
                 if not category.hidden
             ]
         )
+
+    async def markup_for_user(self, user: tg.User) -> tg.InlineKeyboardMarkup:
+        if self.language_store is None:
+            language = None
+        else:
+            language = await self.language_store.get_user_language(user)
+
+        return await self.markup_for_user_localised(user, language)

@@ -49,7 +49,7 @@ class KeySetStore(GenericStore[ItemT]):
                 results = await pipe.execute()
                 return all(r == 1 for r in results)
             except Exception:
-                self.logger.exception("Unexpected error adding item `")
+                self.logger.exception("Unexpected error adding item")
                 return False
 
     async def remove(self, key: str_able, item: ItemT) -> bool:
@@ -75,7 +75,7 @@ class KeyListStore(GenericStore[ItemT]):
             await pipe.rpush(self._full_key(key), self.dumper(item).encode("utf-8"))
             if reset_ttl and self.expiration_time is not None:
                 await pipe.expire(self._full_key(key), self.expiration_time)
-            (after_push_len, _) = await pipe.execute()
+            after_push_len, *_ = await pipe.execute()
             return after_push_len
 
     async def all(self, key: str_able) -> list[ItemT]:
@@ -156,7 +156,7 @@ class KeyIntegerStore(KeyValueStore[int]):
             await pipe.incr(self._full_key(key))
             if reset_ttl and self.expiration_time is not None:
                 await pipe.expire(self._full_key(key), self.expiration_time)
-            (after_incr, _) = await pipe.execute()
+            after_incr, *_ = await pipe.execute()
             return cast(int, after_incr)
 
 

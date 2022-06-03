@@ -117,7 +117,7 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def __aenter__(self):
         return self
 
-    async def __aexit__(self):
+    async def __aexit__(self, *args, **kwargs):
         pass
 
     async def set(self, *args, **kwargs) -> bool:

@@ -32,7 +32,7 @@ class Language(Enum):
         known_emoji = {
             Language.EN: "🇬🇧",
             Language.UK: "🇺🇦",
-            Language.UK: "🇷🇺",
+            Language.RU: "🇷🇺",
             Language.PL: "🇵🇱",
         }
         return known_emoji.get(self, str(self).upper())
@@ -46,12 +46,12 @@ MultilangText = dict[Language, str]
 
 def validate_multilang_text(t: Any, languages: list[Language]) -> MultilangText:
     if not isinstance(t, dict):
-        raise TypeError(f"MultilangText expected, found {t.__class__.__name__}")
+        raise TypeError(f"Language -> str dictionary expected, found {t.__class__.__name__}")
     for language in languages:
         if language not in t:
             raise ValueError(f"Multilang dict {t} misses required language {language}")
         if not isinstance(t[language], str):
-            raise ValueError(f"Non-string text for language {language}: {t[language]}")
+            raise ValueError(f"Non-string text for language {language}: {t[language]!r}")
     return t
 
 
@@ -103,6 +103,9 @@ class LanguageStore:
         self.language_callback_data = CallbackData("code", prefix="lang")
         self.menu_config = menu_config
 
+    def validate_multilang(self, ml_text: Any):
+        validate_multilang_text(ml_text, self.languages)
+
     async def get_user_language(self, user: types.User) -> Language:
         stored_lang = await self.user_language_store.load(user.id)
         if stored_lang is not None:
@@ -142,7 +145,7 @@ class LanguageStore:
             try:
                 await bot.answer_callback_query(call.id)
                 await bot.edit_message_reply_markup(
-                    user.id, call.message.id, reply_markup=self._markup_from_selected_language(language)
+                    user.id, call.message.id, reply_markup=self.markup_for_selected_language(language)
                 )
             except Exception:
                 # exception may be raised when user clicks on the same button and markup is not changed
@@ -153,7 +156,7 @@ class LanguageStore:
                 except Exception:
                     self.logger.exception("Error in on_language_change callback")
 
-    def _markup_from_selected_language(self, selected_language: Language):
+    def markup_for_selected_language(self, selected_language: Language):
         def get_lang_text(lang: Language) -> str:
             lang_str = lang.emoji() if self.menu_config.emojj_buttons else str(lang).upper()
             if lang is selected_language:
@@ -175,9 +178,9 @@ class LanguageStore:
             row_width=len(self.languages),
         )
 
-    async def markup(self, for_user: types.User) -> types.InlineKeyboardMarkup:
-        user_lang = await self.get_user_language(for_user)
-        return self._markup_from_selected_language(selected_language=user_lang)
+    async def markup_for_user(self, user: types.User) -> types.InlineKeyboardMarkup:
+        user_lang = await self.get_user_language(user)
+        return self.markup_for_selected_language(selected_language=user_lang)
 
 
 class DummyLanguageStore(LanguageStore):
@@ -193,7 +196,7 @@ class DummyLanguageStore(LanguageStore):
     def setup(self, bot: AsyncTeleBot, on_language_change: Optional[OnOptionSelected[Language]] = None):
         pass
 
-    async def markup(
+    async def markup_for_user(
         self, for_user: types.User, use_emoji: bool = False, selected_language_checkmark: bool = False
     ) -> types.InlineKeyboardMarkup:
         raise NotImplementedError("You can't use markup with a dummy language store")

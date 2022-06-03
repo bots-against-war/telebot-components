@@ -106,8 +106,8 @@ class FeedbackHandler:
         self,
         admin_chat_id: int,
         bot_prefix: str,
-        config: FeedbackConfig,
         redis: RedisInterface,
+        config: FeedbackConfig,
         anti_spam: AntiSpamInterface,
         service_messages: ServiceMessages,
         banned_users_store: Optional[BannedUsersStore] = None,
@@ -323,6 +323,7 @@ class FeedbackHandler:
             func=cast(FilterFunc, self._user_message_filter),
             chat_types=[tg_constants.ChatType.private],
             content_types=list(tg_constants.MediaContentType),
+            priority=-100,  # lower priority to process the rest of the handlers first
         )
         async def user_to_bot(message: tg.Message):
             user = message.from_user
@@ -352,7 +353,7 @@ class FeedbackHandler:
                             await bot.reply_to(
                                 message,
                                 any_text_to_str(you_must_select_category, language),
-                                reply_markup=(await self.category_store.markup(user)),
+                                reply_markup=(await self.category_store.markup_for_user(user)),
                             )
                             return
                     else:
@@ -403,9 +404,7 @@ class FeedbackHandler:
                     await bot.reply_to(message, any_text_to_str(self.service_messages.forwarded_to_admin_ok, language))
 
             if self.trello_integration is not None:
-                category = (
-                    await self.category_store.get_user_category(user) if self.category_store else None
-                )
+                category = await self.category_store.get_user_category(user) if self.category_store else None
                 # HACK: we're pretending pre- and postforwarded messages are actually part of user's message, that's not good
                 card_text = message.text_content
                 if preforwarded_msg is not None:
@@ -452,7 +451,9 @@ class FeedbackHandler:
             await self.hashtag_message_for_forwarded_message_store.save(message_id, hashtag_message_data)
 
         @bot.message_handler(
-            chat_id=[self.admin_chat_id], is_reply=True, content_types=list(tg_constants.MediaContentType)
+            chat_id=[self.admin_chat_id],
+            is_reply=True,
+            content_types=list(tg_constants.MediaContentType),
         )
         async def admin_to_bot(message: tg.Message):
             try:
