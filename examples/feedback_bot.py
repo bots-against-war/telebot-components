@@ -1,16 +1,22 @@
 import logging
 from typing import Type
-from telebot import AsyncTeleBot, types as tg
-from telebot.types import constants as tg_constants
-from telebot.runner import BotRunner
 
+from telebot import AsyncTeleBot
+from telebot import types as tg
+from telebot.runner import BotRunner
+from telebot.types import constants as tg_constants
+
+from telebot_components.constants import times
 from telebot_components.feedback import FeedbackConfig, FeedbackHandler, ServiceMessages
 from telebot_components.feedback.anti_spam import AntiSpam, AntiSpamConfig
 from telebot_components.redis_utils.interface import RedisInterface
-from telebot_components.constants import times
 from telebot_components.stores.banned_users import BannedUsersStore
 from telebot_components.stores.category import Category, CategoryStore
-from telebot_components.stores.language import Language, LanguageSelectionMenuConfig, LanguageStore
+from telebot_components.stores.language import (
+    Language,
+    LanguageSelectionMenuConfig,
+    LanguageStore,
+)
 
 
 def create_feedback_bot(BotClass: Type[AsyncTeleBot], redis: RedisInterface, token: str, admin_chat_id: int):
@@ -80,7 +86,9 @@ def create_feedback_bot(BotClass: Type[AsyncTeleBot], redis: RedisInterface, tok
     async def start_cmd_handler(message: tg.Message):
         await welcome(message.from_user)
 
-    @bot.message_handler(commands=["language"], chat_types=[tg_constants.ChatType.private], func=banned_store.not_from_banned_user)
+    @bot.message_handler(
+        commands=["language"], chat_types=[tg_constants.ChatType.private], func=banned_store.not_from_banned_user
+    )
     async def select_language_cmd_handler(message: tg.Message):
         await bot.send_message(
             message.from_user.id,
@@ -153,8 +161,9 @@ def create_feedback_bot(BotClass: Type[AsyncTeleBot], redis: RedisInterface, tok
 
 
 if __name__ == "__main__":
-    import os
     import asyncio
+    import os
+
     from redis.asyncio import Redis
 
     from telebot_components.redis_utils.emulation import RedisEmulation

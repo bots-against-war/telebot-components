@@ -4,24 +4,34 @@ from datetime import timedelta
 from itertools import chain
 from typing import Callable, Coroutine, Optional, Protocol, TypedDict, cast
 
-from telebot import AsyncTeleBot, types as tg
+from telebot import AsyncTeleBot
+from telebot import types as tg
 from telebot.types import constants as tg_constants
 from telebot.types.service import FilterFunc
 
-from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.constants import times
+from telebot_components.feedback.anti_spam import (
+    AntiSpam,
+    AntiSpamConfig,
+    AntiSpamInterface,
+    AntiSpamStatus,
+)
+from telebot_components.feedback.trello_integration import TrelloIntegration
+from telebot_components.redis_utils.interface import RedisInterface
+from telebot_components.stores.banned_users import BannedUsersStore
 from telebot_components.stores.category import CategoryStore
+from telebot_components.stores.generic import (
+    KeyFlagStore,
+    KeyListStore,
+    KeySetStore,
+    KeyValueStore,
+)
 from telebot_components.stores.language import (
     AnyText,
     Language,
-    any_text_to_str,
     LanguageStore,
+    any_text_to_str,
 )
-from telebot_components.stores.banned_users import BannedUsersStore
-from telebot_components.stores.generic import KeyFlagStore, KeyListStore, KeySetStore, KeyValueStore
-
-from telebot_components.feedback.anti_spam import AntiSpam, AntiSpamConfig, AntiSpamInterface, AntiSpamStatus
-from telebot_components.feedback.trello_integration import TrelloIntegration
 
 
 @dataclass

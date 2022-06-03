@@ -163,7 +163,7 @@ class KeyIntegerStore(KeyValueStore[int]):
 @dataclass
 class KeyFlagStore(GenericStore[bool]):
     async def set_flag(self, key: str_able) -> bool:
-        success = await self.redis.set(self._full_key(key), b'1', ex=self.expiration_time)
+        success = await self.redis.set(self._full_key(key), b"1", ex=self.expiration_time)
         return success == 1
 
     async def is_flag_set(self, key: str_able) -> bool:

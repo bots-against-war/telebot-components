@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Optional
 
-from telebot import AsyncTeleBot, types as tg
+from telebot import AsyncTeleBot
+from telebot import types as tg
 from telebot.callback_data import CallbackData
 
 from telebot_components.redis_utils.interface import RedisInterface

@@ -95,7 +95,7 @@ class RedisEmulation(RedisInterface):
             return []
         start = max(start, 0)
         if end < -1:
-            end +=1
+            end += 1
         elif end == -1:
             end = length
         else:
@@ -105,6 +105,7 @@ class RedisEmulation(RedisInterface):
 
     async def exists(self, *names: str) -> int:
         return sum([1 for key in names if self.values.get(key) is not None])
+
 
 class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     """Simple pipeline emulation that just stores parent redis emulation coroutines
@@ -163,7 +164,6 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def exists(self, *names: str) -> int:
         self._stack.append(self.redis_em.exists(*names))
         return 0
-
 
     async def execute(self, raise_on_error: bool = True) -> list[RedisCmdReturn]:
         results: list[RedisCmdReturn] = []

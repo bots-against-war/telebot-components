@@ -97,7 +97,7 @@ class RedisInterface(ABC):
     @abstractmethod
     async def incr(self, name: str) -> int:
         """Increments the value of ``key`` by 1 and return its value after the operation.
-         If no key exists, the value will be initialized as 0 and then incremented.
+        If no key exists, the value will be initialized as 0 and then incremented.
         """
         ...
 
