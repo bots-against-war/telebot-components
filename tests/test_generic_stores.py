@@ -7,7 +7,15 @@ import pytest
 from _pytest import fixtures
 
 from telebot_components.redis_utils.interface import RedisInterface
-from telebot_components.stores.generic import KeyListStore, KeyValueStore, str_able
+from telebot_components.stores.generic import (
+    KeyFlagStore,
+    KeyIntegerStore,
+    KeyListStore,
+    KeySetStore,
+    KeyValueStore,
+    SetStore,
+    str_able,
+)
 from tests.utils import TimeSupplier, using_real_redis
 
 EXPIRATION_TIME_TEST_OPTIONS: list[Optional[timedelta]] = [None]
@@ -124,3 +132,62 @@ async def test_key_list_store(redis: RedisInterface, key: str_able, jsonable_val
     assert await store.all(key) == [jsonable_value] * 10
     assert await store.drop(key)
     assert await store.all(key) == []
+
+
+@pytest.fixture(params=[17, "stinky", None])
+def hashable_value(request: fixtures.SubRequest) -> Any:
+    return request.param
+
+
+async def test_key_set_store(redis: RedisInterface, key: str_able, hashable_value: Any):
+    store = KeySetStore[Any](
+        name="testing",
+        prefix="test-bot",
+        redis=redis,
+    )
+    for _ in range(10):
+        await store.add(key, hashable_value)
+    assert hashable_value in await store.all(key)
+    assert await store.includes(key, hashable_value)
+    assert await store.drop(key)
+    assert await store.all(key) == set()
+
+
+async def test_set_store(redis: RedisInterface, hashable_value: Any):
+    store = SetStore[Any](
+        name="testing",
+        prefix="test-bot",
+        redis=redis,
+    )
+    for _ in range(10):
+        await store.add(hashable_value)
+    assert hashable_value in await store.all()
+    assert await store.includes(hashable_value)
+    assert await store.drop()
+    assert await store.all() == set()
+
+
+async def test_integer_store(redis: RedisInterface, key: str_able):
+    store = KeyIntegerStore(
+        name="testing",
+        prefix="test-bot",
+        redis=redis,
+    )
+    assert await store.load(key) is None
+    assert await store.increment(key) == 1
+    assert await store.increment(key) == 2
+    assert await store.increment(key) == 3
+    assert await store.drop(key)
+    assert await store.load(key) is None
+    assert await store.increment(key) == 1
+
+
+async def test_flag_store(redis: RedisInterface, key: str_able):
+    store = KeyFlagStore(
+        name="testing",
+        prefix="test-bot",
+        redis=redis,
+    )
+    assert not (await store.is_flag_set(key))
+    assert await store.set_flag(key)
+    assert await store.is_flag_set(key)
