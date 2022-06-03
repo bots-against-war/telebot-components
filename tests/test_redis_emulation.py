@@ -1,17 +1,20 @@
+import pytest
+
 from datetime import timedelta
 from uuid import uuid4
 
-from telebot_components.redis_utils.emulation import RedisEmulation
-from tests.utils import TimeSupplier
+from telebot_components.redis_utils.interface import RedisInterface
+from tests.utils import TimeSupplier, pytest_skip_on_real_redis
 
 
-async def test_basic_set_get(redis: RedisEmulation):
+async def test_basic_set_get(redis: RedisInterface):
     key, value = generate_key_value()
     await redis.set(key, value)
     assert (await redis.get(key)) == value
 
 
-async def test_set_get_with_expiration(redis: RedisEmulation, time_supplier: TimeSupplier):
+@pytest_skip_on_real_redis
+async def test_set_get_with_expiration(redis: RedisInterface, time_supplier: TimeSupplier):
     key, value = generate_key_value()
     assert (await redis.get(key)) is None
     await redis.set(key, value, ex=timedelta(seconds=30))
@@ -21,7 +24,8 @@ async def test_set_get_with_expiration(redis: RedisEmulation, time_supplier: Tim
     assert (await redis.get(key)) is None
 
 
-async def test_pipelining(redis: RedisEmulation, time_supplier: TimeSupplier):
+@pytest_skip_on_real_redis
+async def test_pipelining(redis: RedisInterface, time_supplier: TimeSupplier):
     key, value = generate_key_value()
     await redis.set(key, value, ex=timedelta(seconds=60))
     assert (await redis.get(key)) == value
@@ -34,7 +38,7 @@ async def test_pipelining(redis: RedisEmulation, time_supplier: TimeSupplier):
     assert get_res_2 is None
 
 
-async def test_sets(redis: RedisEmulation):
+async def test_sets(redis: RedisInterface):
     key, value1 = generate_key_value()
     value2, value3 = generate_values(2)
 
@@ -46,7 +50,8 @@ async def test_sets(redis: RedisEmulation):
     assert set(await redis.smembers(key)) == {value2, value3}
 
 
-async def test_set_with_ttl(redis: RedisEmulation, time_supplier: TimeSupplier):
+@pytest_skip_on_real_redis
+async def test_set_with_ttl(redis: RedisInterface, time_supplier: TimeSupplier):
     key, _ = generate_key_value()
     value1, value2, value3, value4 = generate_values(4)
 
@@ -57,7 +62,8 @@ async def test_set_with_ttl(redis: RedisEmulation, time_supplier: TimeSupplier):
     assert set(await redis.smembers(key)) == {value3, value4}
 
 
-async def test_counter(redis: RedisEmulation, time_supplier: TimeSupplier):
+@pytest_skip_on_real_redis
+async def test_counter(redis: RedisInterface, time_supplier: TimeSupplier):
     key, _ = generate_key_value()
     assert await redis.incr(key) == 1
     assert await redis.incr(key) == 2
@@ -71,7 +77,7 @@ async def test_counter(redis: RedisEmulation, time_supplier: TimeSupplier):
     assert await redis.get(key) == b'2'
 
 
-async def test_list(redis: RedisEmulation):
+async def test_list(redis: RedisInterface):
     key, _ = generate_key_value()
     assert await redis.lrange(key, 0, -1) == []
     values = generate_values(10)
@@ -87,7 +93,8 @@ async def test_list(redis: RedisEmulation):
     assert await redis.lrange(key, 1, -100) == []
 
 
-async def test_list_expiration(redis: RedisEmulation, time_supplier: TimeSupplier):
+@pytest_skip_on_real_redis
+async def test_list_expiration(redis: RedisInterface, time_supplier: TimeSupplier):
     key, _ = generate_key_value()
     values = generate_values(10)
     await redis.rpush(key, *values)

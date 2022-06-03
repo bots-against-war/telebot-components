@@ -1,13 +1,32 @@
+import os
+import random
+from uuid import uuid4
 import pytest
 import pytest_mock
 
+from redis.asyncio import Redis
+
+from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.redis_utils.emulation import RedisEmulation
-from tests.utils import TimeSupplier
+from tests.utils import TimeSupplier, using_real_redis
 
 
 @pytest.fixture
-def redis() -> RedisEmulation:
-    return RedisEmulation()
+async def redis() -> RedisInterface:
+    if using_real_redis():
+        redis = Redis.from_url(os.getenv("REDIS_URL"))
+        for db_index in range(1, 11):
+            await redis.select(db_index)
+            async for key in redis.scan_iter("*"):
+                break  # at least one key is found - we shouldn't use this db for tests
+            else:
+                break  # from outer cycle - found empty database
+        else:
+            raise RuntimeError(f"Didn't found an empy Redis DB for testing")
+        yield redis
+        await redis.flushdb(asynchronous=False)
+    else:
+        yield RedisEmulation()
 
 
 @pytest.fixture
