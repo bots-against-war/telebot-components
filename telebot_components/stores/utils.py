@@ -1,7 +1,5 @@
-import json
 import logging
-from dataclasses import asdict, is_dataclass
-from typing import Any, Optional, Type
+from typing import Optional
 
 from telebot import AsyncTeleBot, types
 
