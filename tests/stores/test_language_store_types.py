@@ -5,7 +5,6 @@ import pytest
 from telebot_components.stores.language import (
     AnyText,
     Language,
-    LanguageStore,
     MaybeLanguage,
     any_text_to_str,
     validate_multilang_text,

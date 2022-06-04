@@ -29,3 +29,7 @@ def using_real_redis() -> bool:
 
 
 pytest_skip_on_real_redis = pytest.mark.skipif(using_real_redis(), reason="Can't emulate sleeping with real redis")
+
+
+def mock_bot_user_json() -> dict[str, str]:
+    return {"id": 124521435, "is_bot": True, "first_name": "this bot", "username": "something"}
