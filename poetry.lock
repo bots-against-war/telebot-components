@@ -388,7 +388,7 @@ diagrams = ["railroad-diagrams", "jinja2"]
 name = "pytest"
 version = "7.1.2"
 description = "pytest: simple powerful testing with Python"
-category = "main"
+category = "dev"
 optional = false
 python-versions = ">=3.7"
 
@@ -439,7 +439,7 @@ testing = ["coverage (==6.2)", "hypothesis (>=5.7.1)", "flaky (>=3.5.0)", "mypy 
 name = "pytest-mock"
 version = "3.7.0"
 description = "Thin-wrapper around the mock package for easier use with pytest"
-category = "main"
+category = "dev"
 optional = false
 python-versions = ">=3.7"
 
@@ -555,7 +555,7 @@ python-versions = ">=3.6"
 
 [[package]]
 name = "telebot-against-war"
-version = "0.3.4"
+version = "0.3.5"
 description = "Async-first fork of pyTelegramBotApi"
 category = "dev"
 optional = false
@@ -651,7 +651,7 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "76a9a8f4355c248d6cf05c2805853cafdf3c4bc1b3c28ce160674021a64b8d9d"
+content-hash = "772297155ac2ae7fb98c88716b85ebdf8e6648e4be649088db98c45561ea2b3d"
 
 [metadata.files]
 aiohttp = [
@@ -1100,8 +1100,8 @@ soupsieve = [
     {file = "soupsieve-2.3.2.post1.tar.gz", hash = "sha256:fc53893b3da2c33de295667a0e19f078c14bf86544af307354de5fcf12a3f30d"},
 ]
 telebot-against-war = [
-    {file = "telebot-against-war-0.3.4.tar.gz", hash = "sha256:43928c1e40e112ddb8f1d15d47fcf007aad238e9124d6ba95acf76877440c5c3"},
-    {file = "telebot_against_war-0.3.4-py3-none-any.whl", hash = "sha256:18bb411314f91e6f05d14ff1449ec5990daa9e5030032b2aa00024c630f22607"},
+    {file = "telebot-against-war-0.3.5.tar.gz", hash = "sha256:aa248a8483b6c142aeacb863780adcaca25afd621d40757598ce3735cefe949e"},
+    {file = "telebot_against_war-0.3.5-py3-none-any.whl", hash = "sha256:a97cac1c8e8a4b80f4d18650b9db06068fdf181e7fa2cf564598f2eac8ed1bb3"},
 ]
 toml = [
     {file = "toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b"},

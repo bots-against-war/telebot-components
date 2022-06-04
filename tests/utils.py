@@ -7,12 +7,18 @@ import pytest_mock
 class TimeSupplier:
     def __init__(self, mocker: pytest_mock.MockerFixture):
         self.current_time = 0.0
-        mocker.patch("time.time", new=self.mock_time)
+        mocker.patch("time.time", new=self.mock_time_time)
+        mocker.patch("time.sleep", new=self.mock_time_sleep)
+        mocker.patch("asyncio.sleep", new=self.mock_asyncio_sleep)
 
-    def mock_time(self) -> float:
+    def mock_time_time(self) -> float:
         return self.current_time
 
-    # TODO: mock time.sleep and asyncio.sleep functions
+    def mock_time_sleep(self, delay: float):
+        self.current_time += delay
+
+    async def mock_asyncio_sleep(self, delay: float):
+        self.current_time += delay
 
     def emulate_wait(self, delay: float):
         self.current_time += delay

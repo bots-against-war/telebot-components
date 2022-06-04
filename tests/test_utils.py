@@ -1,6 +1,12 @@
 from typing import Optional, Union
+
 import pytest
-from telebot_components.utils import join_paragraphs, telegram_message_url, trim_with_ellipsis
+
+from telebot_components.utils import (
+    join_paragraphs,
+    telegram_message_url,
+    trim_with_ellipsis,
+)
 
 
 @pytest.mark.parametrize(
