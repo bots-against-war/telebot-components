@@ -43,6 +43,7 @@ def telegram_api_mock(form_data_handler: Callable[[dict[str, str]], dict[str, An
     """Used to create callback for aioresponses"""
     
     def callback(url: URL, data: aiohttp.FormData, **kwargs):
+        print(f"Telegram API request: {url}")
         # parsing aiohttp form format to dict
         form_data = dict()
         for mdict, _, dump in data._fields:

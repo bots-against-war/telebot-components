@@ -8,8 +8,11 @@ from telebot_components.stores.generic import SetStore
 
 
 class BannedUsersStore:
-    """Simple store for banned users. Implements inmemory cache -- we have to check
-    if a user is banned far more often than we need to ban someone"""
+    """Simple store for banned users. Implements inmemory cache: we have to check
+    if a user is banned far more often than we need to ban someone.
+    
+    Currently only supports permanent ban.
+    """
 
     def __init__(self, bot_prefix: str, redis: RedisInterface, cached: bool):
         self.banned_user_ids_store = SetStore[int](
