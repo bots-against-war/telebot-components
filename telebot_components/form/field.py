@@ -84,7 +84,6 @@ class FormField(Generic[FieldValueType]):
     required: bool
     query_message: AnyText
     echo_result_template: Optional[AnyText]  # must contain 1 {} for field value
-    # all fields are sequential by default: pass None and override get_next_field to alter this behaviour
     next_field: Union[FormField, None, NextFieldGetter]
 
     @final
