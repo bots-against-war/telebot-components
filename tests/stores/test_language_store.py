@@ -16,7 +16,7 @@ from telebot_components.stores.language import (
     LanguageSelectionMenuConfig,
     LanguageStore,
 )
-from tests.utils import mock_bot_user_json
+from tests.utils import mock_bot_user_json, telegram_api_mock
 
 
 @pytest.mark.parametrize(
@@ -131,39 +131,27 @@ async def test_language_store_markup(
     user_json = {"id": 131242069, "is_bot": False, "first_name": "user"}
     user = tg.User.de_json(user_json)
 
-    async def send_message_callback(url: URL, data: aiohttp.FormData, **kwargs):
-        """Mocking telegram server response"""
-        reply_markup = None
-        for field in data._fields:
-            mdict, _, dump = field
-            if mdict["name"] == "reply_markup":
-                reply_markup = json.loads(dump)
-
+    @telegram_api_mock
+    def check_inline_keyboard(form_data: dict[str, str]):
+        reply_markup = json.loads(form_data["reply_markup"])
         assert reply_markup == {"inline_keyboard": [expected_inline_keyboard_row]}
-
-        return CallbackResult(
-            status=200,
-            payload={
-                "ok": True,
-                "result": {
-                    "message_id": 1312,
-                    "from": mock_bot_user_json(),
-                    "chat": {
-                        "id": MOCK_CHAT_ID,
-                        "first_name": "user",
-                        "type": "private",
-                    },
-                    "date": 1654340488,
-                    "text": MOCK_MESSAGE_TEXT,
-                    "reply_markup": reply_markup,
-                },
+        return {
+            "message_id": 1312,
+            "from": mock_bot_user_json(),
+            "chat": {
+                "id": MOCK_CHAT_ID,
+                "first_name": "user",
+                "type": "private",
             },
-        )
+            "date": 1654340488,
+            "text": MOCK_MESSAGE_TEXT,
+            "reply_markup": reply_markup,
+        }
 
-    mock_request.get(f"https://api.telegram.org/bot{MOCK_TOKEN}/sendMessage", callback=send_message_callback)
+    mock_request.get(f"https://api.telegram.org/bot{MOCK_TOKEN}/sendMessage", callback=check_inline_keyboard)
 
     language_select_message = await bot.send_message(
-        MOCK_CHAT_ID, "please select language", reply_markup=(await language_store.markup_for_user(user))
+        MOCK_CHAT_ID, MOCK_MESSAGE_TEXT, reply_markup=(await language_store.markup_for_user(user))
     )
 
     button_clicked_update_json = {
