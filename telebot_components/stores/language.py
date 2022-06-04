@@ -121,6 +121,8 @@ class LanguageStore:
         return self.default_language
 
     async def set_user_language(self, user: types.User, lang: Language) -> bool:
+        if lang not in self.languages:
+            raise ValueError(f"Can't set user language to unsupported value {lang!r}")
         return await self.user_language_store.save(user.id, lang)
 
     def setup(self, bot: AsyncTeleBot, on_language_change: Optional[OnOptionSelected[Language]] = None):
