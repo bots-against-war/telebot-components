@@ -22,7 +22,7 @@ FormResultT = TypeVar("FormResultT", bound=MutableMapping[str, Any], contravaria
 
 
 @dataclass
-class FormConfig:
+class FormHandlerConfig:
     echo_filled_field: bool
     retry_field_msg: AnyText
     cancelling_because_of_error_template: AnyText
@@ -67,14 +67,14 @@ class _MutableFormState(Generic[FormResultT]):
     """User's state when they are filling out a form. Please note that a single object is
     used throughout the form with result_so_far mutating attribute.
 
-    TODO: persistent form state?
+    TODO: make persistent in redis?
     """
 
     current_field: FormField
     result_so_far: FormResultT
 
     async def update(
-        self, message: tg.Message, language: MaybeLanguage, form_params: FormConfig
+        self, message: tg.Message, language: MaybeLanguage, form_params: FormHandlerConfig
     ) -> _FormStateUpdateEffect:
         try:
             reply_paragraphs: list[str] = []
@@ -111,7 +111,7 @@ class _MutableFormState(Generic[FormResultT]):
             if form_params.echo_filled_field and result_msg is not None:
                 reply_paragraphs.append(result_msg)
 
-            next_field = self.current_field.get_next_field(message.from_user, value)
+            next_field = self.current_field.next_field_getter.get_next_field(message.from_user, value)
             if next_field is None:
                 return _FormStateUpdateEffect(
                     _FormAction.COMPLETED,
@@ -146,7 +146,7 @@ class FormResultCallback(Protocol[FormResultT]):
 class FormHandler(Generic[FormResultT]):
     def __init__(
         self,
-        params: FormConfig,
+        params: FormHandlerConfig,
         start_field: FormField,
         language_store: Optional[LanguageStore] = None,
     ):

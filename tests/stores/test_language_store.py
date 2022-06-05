@@ -3,9 +3,10 @@ import random
 import re
 from typing import Any, Optional, Type
 from uuid import uuid4
+
 import aiohttp
-from aioresponses import aioresponses, CallbackResult
 import pytest
+from aioresponses import CallbackResult, aioresponses
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from yarl import URL
@@ -54,7 +55,7 @@ async def test_get_user_language_basic(
         await language_store.set_user_language(user, Language.PL)
 
     with pytest.raises(ValueError, match="Can't set user language to unsupported value 'this is wrong'"):
-        await language_store.set_user_language(user, "this is wrong")
+        await language_store.set_user_language(user, "this is wrong")  # type: ignore
 
 
 @pytest.mark.parametrize(
@@ -154,16 +155,18 @@ async def test_language_store_markup(
         MOCK_CHAT_ID, MOCK_MESSAGE_TEXT, reply_markup=(await language_store.markup_for_user(user))
     )
 
-    button_clicked_update_json = {
-        "update_id": 694134158,
-        "callback_query": {
-            "id": "1334532895174033954",
-            "from": user_json,
-            "message": language_select_message.json,
-            "chat_instance": "-1351451435134665",
-            "data": clicked_callback_data,
-        },
-    }
-
-    await bot.process_new_updates([tg.Update.de_json(button_clicked_update_json)])
+    button_clicked_update = tg.Update.de_json(
+        {
+            "update_id": 694134158,
+            "callback_query": {
+                "id": "1334532895174033954",
+                "from": user_json,
+                "message": language_select_message.json,
+                "chat_instance": "-1351451435134665",
+                "data": clicked_callback_data,
+            },
+        }
+    )
+    assert button_clicked_update is not None
+    await bot.process_new_updates([button_clicked_update])
     assert await language_store.get_user_language(user) is expected_selected_language

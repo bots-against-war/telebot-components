@@ -1,12 +1,11 @@
 import random
-from telebot import types as tg
 
 import pytest
 from _pytest import fixtures
+from telebot import types as tg
 
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
-
 from tests.utils import mock_bot_user_json
 
 
@@ -20,7 +19,6 @@ def banned_users_store(request: fixtures.SubRequest, redis: RedisInterface) -> B
 
 
 async def test_banned_users_store(banned_users_store: BannedUsersStore):
-
     def new_user() -> tg.User:
         json = mock_bot_user_json()
         json["id"] = random.randint(10**4, 10**5)
@@ -33,4 +31,3 @@ async def test_banned_users_store(banned_users_store: BannedUsersStore):
     await banned_users_store.ban_user(user_1.id)
     assert await banned_users_store.is_banned(user_1.id)
     assert not await banned_users_store.is_banned(user_2.id)
-

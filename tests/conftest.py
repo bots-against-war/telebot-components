@@ -1,11 +1,11 @@
 import os
 from typing import AsyncGenerator
-from aioresponses import aioresponses
 
 import pytest
 import pytest_mock
-from redis.asyncio import Redis
-import telebot  # type: ignore
+import telebot
+from aioresponses import aioresponses
+from redis.asyncio import Redis  # type: ignore
 
 from telebot_components.redis_utils.emulation import RedisEmulation
 from telebot_components.redis_utils.interface import RedisInterface
@@ -35,9 +35,8 @@ def time_supplier(mocker: pytest_mock.MockerFixture) -> TimeSupplier:
     return TimeSupplier(mocker)
 
 
-
 @pytest.fixture
-async def mock_request() -> aioresponses:
+async def mock_request() -> AsyncGenerator[aioresponses, None]:
     with aioresponses() as m:
         yield m
     await telebot.api.session_manager.close_session()

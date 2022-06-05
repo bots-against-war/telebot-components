@@ -10,7 +10,7 @@ from telebot_components.stores.generic import SetStore
 class BannedUsersStore:
     """Simple store for banned users. Implements inmemory cache: we have to check
     if a user is banned far more often than we need to ban someone.
-    
+
     Currently only supports permanent ban.
     """
 
