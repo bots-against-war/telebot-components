@@ -162,7 +162,6 @@ def create_feedback_bot(BotClass: Type[AsyncTeleBot], redis: RedisInterface, tok
 
 
 if __name__ == "__main__":
-    import asyncio
     import os
 
     from redis.asyncio import Redis  # type: ignore

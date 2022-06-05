@@ -10,6 +10,7 @@ from telebot import types as tg
 from telebot.types import constants
 
 from telebot_components.form.field import FormField, ReplyKeyboard
+from telebot_components.form.form import Form
 from telebot_components.stores.language import (
     AnyText,
     LanguageStore,
@@ -25,8 +26,13 @@ FormResultT = TypeVar("FormResultT", bound=MutableMapping[str, Any], contravaria
 class FormHandlerConfig:
     echo_filled_field: bool
     retry_field_msg: AnyText
+    # should have placeholder for available commands
+    unsupported_cmd_error_template: AnyText
+    # should have placeholder for error
     cancelling_because_of_error_template: AnyText
+    # should have placeholder for cancel commands
     form_starting_template: AnyText
+    # should have placeholder for skip command
     can_skip_field_template: AnyText
     cant_skip_field_msg: AnyText
     cancel_cmd: str = "/cancel"
@@ -37,11 +43,18 @@ class FormHandlerConfig:
     def cancel_cmds(self) -> list[str]:
         return [self.cancel_cmd] + self.cancel_aliases
 
+    @property
+    def available_cmds(self) -> list[str]:
+        return [self.skip_cmd] + self.cancel_cmds
+
     def can_skip_field_msg(self, language: MaybeLanguage) -> str:
         return any_text_to_str(self.can_skip_field_template, language).format(self.skip_cmd)
 
     def form_starting_msg(self, language: MaybeLanguage) -> str:
         return any_text_to_str(self.form_starting_template, language).format(", ".join(self.cancel_cmds))
+
+    def unsupported_cmd_error_msg(self, language: MaybeLanguage) -> str:
+        return any_text_to_str(self.unsupported_cmd_error_template, language).format(", ".join(self.available_cmds))
 
 
 class _FormAction(Enum):
@@ -74,23 +87,32 @@ class _MutableFormState(Generic[FormResultT]):
     result_so_far: FormResultT
 
     async def update(
-        self, message: tg.Message, language: MaybeLanguage, form_params: FormHandlerConfig
+        self, message: tg.Message, language: MaybeLanguage, form_handler_config: FormHandlerConfig
     ) -> _FormStateUpdateEffect:
         try:
             reply_paragraphs: list[str] = []
 
             message_cmd = message.text_content.strip() if message.content_type == "text" else None
-            if message_cmd is not None and message_cmd in form_params.cancel_cmds:
-                return _FormStateUpdateEffect(_FormAction.CANCELLED)
-            elif message_cmd is not None and message_cmd == form_params.skip_cmd:
-                if not self.current_field.required:
-                    value = None
-                    result_msg = None
-                    field_ok = True
+            if message_cmd is not None and message_cmd.startswith("/"):
+                if message_cmd in form_handler_config.cancel_cmds:
+                    return _FormStateUpdateEffect(_FormAction.CANCELLED)
+                elif message_cmd == form_handler_config.skip_cmd:
+                    if not self.current_field.required:
+                        value = None
+                        result_msg = None
+                        field_ok = True
+                    else:
+                        value = None
+                        result_msg = any_text_to_str(form_handler_config.cant_skip_field_msg, language)
+                        field_ok = False
                 else:
-                    value = None
-                    result_msg = any_text_to_str(form_params.cant_skip_field_msg, language)
-                    field_ok = False
+                    return _FormStateUpdateEffect(
+                        _FormAction.KEEP_GOING,
+                        user_response=_UserResponse(
+                            form_handler_config.unsupported_cmd_error_msg(language),
+                            reply_keyboard=self.current_field.get_reply_markup(language),
+                        ),
+                    )
             else:
                 result_msg, value = self.current_field.process_message(message, language)
                 field_ok = value is not None
@@ -98,7 +120,7 @@ class _MutableFormState(Generic[FormResultT]):
             if not field_ok:
                 if result_msg:
                     reply_paragraphs.append(result_msg)
-                reply_paragraphs.append(any_text_to_str(form_params.retry_field_msg, language))
+                reply_paragraphs.append(any_text_to_str(form_handler_config.retry_field_msg, language))
                 return _FormStateUpdateEffect(
                     _FormAction.KEEP_GOING,
                     user_response=_UserResponse(
@@ -108,7 +130,7 @@ class _MutableFormState(Generic[FormResultT]):
                 )
 
             self.result_so_far[self.current_field.name] = value
-            if form_params.echo_filled_field and result_msg is not None:
+            if form_handler_config.echo_filled_field and result_msg is not None:
                 reply_paragraphs.append(result_msg)
 
             next_field = self.current_field.next_field_getter.get_next_field(message.from_user, value)
@@ -119,7 +141,7 @@ class _MutableFormState(Generic[FormResultT]):
                 )
             query_text = any_text_to_str(await next_field.get_query_message(message.from_user), language)
             if not next_field.required:
-                query_text += " " + form_params.can_skip_field_msg(language)
+                query_text += " " + form_handler_config.can_skip_field_msg(language)
             reply_paragraphs.append(query_text)
             self.current_field = next_field
             return _FormStateUpdateEffect(
@@ -133,7 +155,7 @@ class _MutableFormState(Generic[FormResultT]):
             return _FormStateUpdateEffect(
                 _FormAction.CANCELLED,
                 user_response=_UserResponse(
-                    any_text_to_str(form_params.cancelling_because_of_error_template, language).format(str(e))
+                    any_text_to_str(form_handler_config.cancelling_because_of_error_template, language).format(str(e))
                 ),
             )
 
@@ -146,14 +168,34 @@ class FormResultCallback(Protocol[FormResultT]):
 class FormHandler(Generic[FormResultT]):
     def __init__(
         self,
-        params: FormHandlerConfig,
-        start_field: FormField,
+        form: Form,
+        config: FormHandlerConfig,
         language_store: Optional[LanguageStore] = None,
     ):
-        self.params = params
-        self.start_field = start_field
+        self.config = config
+        self.form = form
         self.form_state_by_user_id: dict[int, _MutableFormState[FormResultT]] = dict()
         self.language_store = language_store
+
+        form_related_texts = [
+            self.config.retry_field_msg,
+            self.config.cancelling_because_of_error_template,
+            self.config.form_starting_template,
+            self.config.can_skip_field_template,
+            self.config.cant_skip_field_msg,
+            self.config.unsupported_cmd_error_template,
+        ]
+        for field in self.form.fields:
+            form_related_texts.extend(field.texts())
+
+        for text in form_related_texts:
+            if self.language_store is not None:
+                self.language_store.validate_multilang(text)
+            else:
+                if not isinstance(text, str):
+                    raise ValueError(
+                        "All form-related texts are expected to be strings when language store is not used"
+                    )
 
     async def get_maybe_language(self, user: tg.User) -> MaybeLanguage:
         if self.language_store is None:
@@ -175,7 +217,7 @@ class FormHandler(Generic[FormResultT]):
             user_id = message.from_user.id
             language = await self.get_maybe_language(message.from_user)
             form_state = self.form_state_by_user_id[user_id]
-            state_update_effect = await form_state.update(message, language, form_params=self.params)
+            state_update_effect = await form_state.update(message, language, form_handler_config=self.config)
             response_to_user = state_update_effect.user_response
             if response_to_user is not None:
                 await bot.send_message(
@@ -197,7 +239,7 @@ class FormHandler(Generic[FormResultT]):
         self, bot: AsyncTeleBot, user: tg.User, initial_form_result: Optional[FormResultT] = None
     ) -> tg.Message:
         self.form_state_by_user_id[user.id] = _MutableFormState(
-            current_field=self.start_field,
+            current_field=self.form.start_field,
             result_so_far=initial_form_result or cast(FormResultT, dict()),
         )
         language = await self.get_maybe_language(user)
@@ -205,10 +247,10 @@ class FormHandler(Generic[FormResultT]):
             user.id,
             text=join_paragraphs(
                 [
-                    self.params.form_starting_msg(language),
-                    any_text_to_str((await self.start_field.get_query_message(user)), language),
+                    self.config.form_starting_msg(language),
+                    any_text_to_str((await self.form.start_field.get_query_message(user)), language),
                 ]
             ),
-            reply_markup=self.start_field.get_reply_markup(language),
+            reply_markup=self.form.start_field.get_reply_markup(language),
             parse_mode="HTML",
         )
