@@ -46,10 +46,10 @@ MultilangText = dict[Language, str]
 
 def validate_multilang_text(t: Any, languages: list[Language]) -> MultilangText:
     if not isinstance(t, dict):
-        raise TypeError(f"Language -> str dictionary expected, found {type(t).__name__}")
+        raise TypeError(f"Language -> str dictionary expected, found {type(t).__name__}: {t}")
     for language in languages:
         if language not in t:
-            raise ValueError(f"Multilang text misses localisation to '{language}'")
+            raise ValueError(f"Multilang text misses localisation to '{language}': {t}")
         if not isinstance(t[language], str):
             raise ValueError(f"Non-string text for language {language}: {t[language]!r}")
     return t

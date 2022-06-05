@@ -39,13 +39,13 @@ class BadFieldValueError(Exception):
 class NextFieldGetter:
     """Service class to forward-reference the next field in a form"""
 
-    next_field_name_getter: Callable[[types.User, FieldValueT], Optional[str]]
+    next_field_name_getter: Callable[[types.User, Optional[FieldValueT]], Optional[str]]
     # used for startup form connectedness validation
     possible_next_field_names: list[Optional[str]]
     # filled on Form object initialization
     fields_by_name: Optional[Dict[str, "FormField"]] = None
 
-    def get_next_field(self, user: types.User, value: FieldValueT) -> Optional["FormField"]:
+    def get_next_field(self, user: types.User, value: Optional[FieldValueT]) -> Optional["FormField"]:
         if self.fields_by_name is None:
             raise RuntimeError(
                 "Next field getter hasn't been properly initialized, did you forget to call bind_form_fields?"
@@ -62,7 +62,7 @@ class NextFieldGetter:
 
     @classmethod
     def by_mapping(
-        cls, value_to_next_field_name: Dict[Any, Optional[str]], default: Optional[str] = None
+        cls, value_to_next_field_name: Dict[Optional[FieldValueT], Optional[str]], default: Optional[str]
     ) -> "NextFieldGetter":
         possible_next_field_names = [next_field_name for v, next_field_name in value_to_next_field_name.items()]
         possible_next_field_names.append(default)
@@ -71,7 +71,7 @@ class NextFieldGetter:
         )
 
     @classmethod
-    def end(cls) -> "NextFieldGetter":
+    def form_end(cls) -> "NextFieldGetter":
         return NextFieldGetter(lambda u, v: None, possible_next_field_names=[None])
 
 
