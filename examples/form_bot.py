@@ -1,9 +1,9 @@
 import html
 import json
-from enum import Enum
 import logging
+from enum import Enum
 from pprint import pformat, pprint
-from typing import Type
+from typing import Any, Type, cast
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -18,11 +18,7 @@ from telebot_components.form.field import (
 from telebot_components.form.form import Form
 from telebot_components.form.handler import FormHandler, FormHandlerConfig
 from telebot_components.redis_utils.interface import RedisInterface
-from telebot_components.stores.language import (
-    Language,
-    LanguageStore,
-)
-
+from telebot_components.stores.language import Language, LanguageStore
 
 logging.basicConfig(level=logging.INFO)
 
@@ -43,7 +39,8 @@ name_field = PlainTextField(
 )
 
 
-def after_age_field(u: tg.User, v: int) -> str:
+def after_age_field(u: tg.User, v: Any) -> str:
+    v = cast(int, v)
     if v < 16:
         return "favorite_subject"
     elif v < 18:
@@ -215,7 +212,7 @@ def create_form_bot(BotClass: Type[AsyncTeleBot], redis: RedisInterface, token: 
             reply_markup=(await language_store.markup_for_user(message.from_user)),
         )
 
-    form_handler = FormHandler(
+    form_handler = FormHandler[dict](
         form,
         config=FormHandlerConfig(
             echo_filled_field=True,
