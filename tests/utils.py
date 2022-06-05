@@ -1,10 +1,10 @@
 import os
 from typing import Any, Callable
-import aiohttp
-from aioresponses import CallbackResult
 
+import aiohttp
 import pytest
 import pytest_mock
+from aioresponses import CallbackResult
 from yarl import URL
 
 
@@ -35,13 +35,13 @@ def using_real_redis() -> bool:
 pytest_skip_on_real_redis = pytest.mark.skipif(using_real_redis(), reason="Can't emulate sleeping with real redis")
 
 
-def mock_bot_user_json() -> dict[str, str]:
+def mock_bot_user_json() -> dict[str, Any]:
     return {"id": 124521435, "is_bot": True, "first_name": "this bot", "username": "something"}
 
 
 def telegram_api_mock(form_data_handler: Callable[[dict[str, str]], dict[str, Any]]):
     """Used to create callback for aioresponses"""
-    
+
     def callback(url: URL, data: aiohttp.FormData, **kwargs):
         print(f"Telegram API request: {url}")
         # parsing aiohttp form format to dict
@@ -49,7 +49,8 @@ def telegram_api_mock(form_data_handler: Callable[[dict[str, str]], dict[str, An
         for mdict, _, dump in data._fields:
             form_data[mdict["name"]] = dump
         return CallbackResult(
-            status=200, payload={
+            status=200,
+            payload={
                 "ok": True,
                 "result": form_data_handler(form_data),
             },
