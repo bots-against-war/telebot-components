@@ -1,10 +1,14 @@
-from typing import Optional, Union
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Optional, Union
 
 import pytest
 
 from telebot_components.utils import (
+    from_yaml_unsafe,
     join_paragraphs,
     telegram_message_url,
+    to_yaml_unsafe,
     trim_with_ellipsis,
 )
 
@@ -111,3 +115,39 @@ def test_telegram_message_url_mutually_exclusive_params():
 )
 def test_trim_with_ellipsis(message: str, target_len: int, expected_trimmed: str):
     assert trim_with_ellipsis(message, target_len) == expected_trimmed
+
+
+class Color(Enum):
+    RED = "red"
+    GREEN = "green"
+    BLUE = "blue"
+    OTHER = {"complex": "enum value"}
+
+
+@dataclass
+class Container:
+    @dataclass
+    class Nested:
+        some_other_data: bytes
+
+    data: str
+    param: int
+    nested: Nested
+
+
+@pytest.mark.parametrize(
+    "obj",
+    [
+        pytest.param("hi"),
+        pytest.param(420),
+        pytest.param(14.30),
+        pytest.param({"name": "John", "age": 35, "gender": None}, id="json-like dict"),
+        pytest.param([{"name": "John", "age": 35, "gender": None}, 7, {"another": "mapping"}]),
+        pytest.param(Color.RED),
+        pytest.param(Color.OTHER),
+        pytest.param([Color.BLUE, Color.GREEN]),
+        pytest.param(Container("hello world", 1312, nested=Container.Nested(b"001110010"))),
+    ],
+)
+def test_yaml_serialization(obj: Any):
+    assert from_yaml_unsafe(to_yaml_unsafe(obj)) == obj

@@ -196,8 +196,8 @@ form.print_graph()
 # └─────────────────────┘
 
 
-def create_form_bot(BotClass: Type[AsyncTeleBot], redis: RedisInterface, token: str):
-    bot = BotClass(token)
+def create_form_bot(redis: RedisInterface, token: str):
+    bot = AsyncTeleBot(token)
     bot_prefix = "example-form-bot"
 
     language_store = LanguageStore(
@@ -213,7 +213,9 @@ def create_form_bot(BotClass: Type[AsyncTeleBot], redis: RedisInterface, token: 
         )
 
     form_handler = FormHandler[dict](
-        form,
+        redis=redis,
+        bot_prefix=bot_prefix,
+        form=form,
         config=FormHandlerConfig(
             echo_filled_field=True,
             retry_field_msg={
@@ -280,11 +282,15 @@ def create_form_bot(BotClass: Type[AsyncTeleBot], redis: RedisInterface, token: 
 if __name__ == "__main__":
     import os
 
+    from redis.asyncio import Redis  # type: ignore
+
     from telebot_components.redis_utils.emulation import RedisEmulation
 
+    redis_url = os.environ.get("REDIS_URL")
+    redis = Redis.from_url(redis_url) if redis_url is not None else RedisEmulation()
+
     bot_runner = create_form_bot(
-        AsyncTeleBot,
-        redis=RedisEmulation(),
+        redis=redis,
         token=os.environ["TOKEN"],
     )
     bot_runner.run_polling()

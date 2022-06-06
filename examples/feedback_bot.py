@@ -20,9 +20,9 @@ from telebot_components.stores.language import (
 )
 
 
-def create_feedback_bot(BotClass: Type[AsyncTeleBot], redis: RedisInterface, token: str, admin_chat_id: int):
+def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
     bot_prefix = "example-feedback-bot"
-    bot = BotClass(token)
+    bot = AsyncTeleBot(token)
 
     logging.basicConfig(level=logging.DEBUG)
 
@@ -171,7 +171,6 @@ if __name__ == "__main__":
     redis = RedisEmulation()
     # redis = Redis.from_url(os.environ["REDIS_URL"])
     bot_runner = create_feedback_bot(
-        AsyncTeleBot,
         redis=redis,
         token=os.environ["TOKEN"],
         admin_chat_id=int(os.environ["ADMIN_CHAT_ID"]),

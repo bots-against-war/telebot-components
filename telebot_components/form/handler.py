@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from enum import Enum, auto
@@ -9,17 +11,23 @@ from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.types import constants
 
+from telebot_components.constants import times
 from telebot_components.form.field import FormField, ReplyKeyboard
 from telebot_components.form.form import Form
+from telebot_components.redis_utils.interface import RedisInterface
+from telebot_components.stores.generic import KeyValueStore
 from telebot_components.stores.language import (
     AnyText,
     LanguageStore,
     MaybeLanguage,
     any_text_to_str,
 )
-from telebot_components.utils import join_paragraphs
+from telebot_components.utils import from_yaml_unsafe, join_paragraphs, to_yaml_unsafe
 
 FormResultT = TypeVar("FormResultT", bound=MutableMapping[str, Any], contravariant=True)
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -76,15 +84,34 @@ class _FormStateUpdateEffect:
 
 
 @dataclass
-class _MutableFormState(Generic[FormResultT]):
+class FormState(Generic[FormResultT]):
     """User's state when they are filling out a form. Please note that a single object is
     used throughout the form with result_so_far mutating attribute.
-
-    TODO: make persistent in redis?
     """
 
     current_field: FormField
     result_so_far: FormResultT
+
+    def to_store(self) -> str:
+        return json.dumps(
+            {
+                "current_field": self.current_field.name,
+                "result_so_far": to_yaml_unsafe(self.result_so_far),
+            }
+        )
+
+    @classmethod
+    def from_store(self, dump: str, form_fields: list[FormField]) -> Optional["FormState"]:
+        try:
+            asdict = json.loads(dump)
+            form_field_by_name = {f.name: f for f in form_fields}
+            return FormState(
+                current_field=form_field_by_name[asdict["current_field"]],
+                result_so_far=from_yaml_unsafe(asdict["result_so_far"]),
+            )
+        except Exception:
+            logger.exception("Error loading form state from persistent storage")
+            return None
 
     async def update(
         self, message: tg.Message, language: MaybeLanguage, form_handler_config: FormHandlerConfig
@@ -168,13 +195,25 @@ class FormResultCallback(Protocol[FormResultT]):
 class FormHandler(Generic[FormResultT]):
     def __init__(
         self,
+        redis: RedisInterface,
+        bot_prefix: str,
         form: Form,
         config: FormHandlerConfig,
         language_store: Optional[LanguageStore] = None,
     ):
         self.config = config
         self.form = form
-        self.form_state_by_user_id: dict[int, _MutableFormState[FormResultT]] = dict()
+
+        self.form_state_by_user_id_store = KeyValueStore[Optional[FormState]](
+            name="form-state-for",
+            prefix=bot_prefix,
+            redis=redis,
+            expiration_time=times.HOUR,
+            # NOTE: unsafe is ok here because we fully control the data
+            dumper=lambda fs: fs.to_store() if fs is not None else "",
+            loader=lambda dump: FormState.from_store(dump, form.fields),
+        )
+
         self.language_store = language_store
 
         form_related_texts = [
@@ -210,14 +249,19 @@ class FormHandler(Generic[FormResultT]):
         on_form_cancelled: Optional[FormResultCallback[FormResultT]] = None,
     ):
         async def currently_filling_form(update_content: tg.Message) -> bool:
-            return update_content.from_user.id in self.form_state_by_user_id
+            return await self.form_state_by_user_id_store.exists(update_content.from_user.id)
 
         @bot.message_handler(func=currently_filling_form, chat_types=[constants.ChatType.private], priority=100)
         async def form_step_handler(message: tg.Message):
             user_id = message.from_user.id
             language = await self.get_maybe_language(message.from_user)
-            form_state = self.form_state_by_user_id[user_id]
+            form_state = await self.form_state_by_user_id_store.load(user_id)
+            if form_state is None:
+                logger.error("Error loading form state from the store, dropping it")
+                await self.form_state_by_user_id_store.drop(user_id)
+                return
             state_update_effect = await form_state.update(message, language, form_handler_config=self.config)
+            await self.form_state_by_user_id_store.save(user_id, form_state)
             response_to_user = state_update_effect.user_response
             if response_to_user is not None:
                 await bot.send_message(
@@ -228,7 +272,7 @@ class FormHandler(Generic[FormResultT]):
                 )
             if state_update_effect.action is _FormAction.KEEP_GOING:
                 return
-            self.form_state_by_user_id.pop(user_id)
+            await self.form_state_by_user_id_store.drop(user_id)
             if state_update_effect.action is _FormAction.CANCELLED:
                 if on_form_cancelled is not None:
                     await on_form_cancelled(bot, message, message.from_user, form_state.result_so_far)
@@ -238,10 +282,11 @@ class FormHandler(Generic[FormResultT]):
     async def start(
         self, bot: AsyncTeleBot, user: tg.User, initial_form_result: Optional[FormResultT] = None
     ) -> tg.Message:
-        self.form_state_by_user_id[user.id] = _MutableFormState(
+        initial_form_state = FormState(
             current_field=self.form.start_field,
             result_so_far=initial_form_result or cast(FormResultT, dict()),
         )
+        await self.form_state_by_user_id_store.save(user.id, initial_form_state)
         language = await self.get_maybe_language(user)
         return await bot.send_message(
             user.id,
@@ -252,5 +297,4 @@ class FormHandler(Generic[FormResultT]):
                 ]
             ),
             reply_markup=self.form.start_field.get_reply_markup(language),
-            parse_mode="HTML",
         )
