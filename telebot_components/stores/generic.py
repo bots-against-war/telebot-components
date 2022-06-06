@@ -34,6 +34,9 @@ class GenericStore(Generic[T]):
         n_deleted = await self.redis.delete(self._full_key(key))
         return n_deleted == 1
 
+    async def exists(self, key: str_able) -> bool:
+        return (await self.redis.exists(self._full_key(key))) == 1
+
 
 ItemT = TypeVar("ItemT")
 
@@ -167,4 +170,4 @@ class KeyFlagStore(GenericStore[bool]):
         return success == 1
 
     async def is_flag_set(self, key: str_able) -> bool:
-        return (await self.redis.exists(self._full_key(key))) == 1
+        return await self.exists(key)

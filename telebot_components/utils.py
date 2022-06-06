@@ -1,4 +1,7 @@
-from typing import Optional, Union
+import io
+from typing import Any, Optional, Union
+
+from ruamel.yaml import YAML  # type: ignore
 
 
 def telegram_message_url(
@@ -47,3 +50,16 @@ def trim_with_ellipsis(message: str, target_len: int) -> str:
 
 def join_paragraphs(lines: list[str]) -> str:
     return "\n\n".join([l for l in lines if l])
+
+
+yaml = YAML(typ="unsafe")
+
+
+def to_yaml_unsafe(obj: Any) -> str:
+    in_memory_stream = io.StringIO()
+    yaml.dump(obj, in_memory_stream)
+    return in_memory_stream.getvalue()
+
+
+def from_yaml_unsafe(dump: str) -> Any:
+    return yaml.load(dump)
