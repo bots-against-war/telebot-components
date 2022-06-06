@@ -532,7 +532,7 @@ class FeedbackHandler:
                         await _remove_unanswered_hashtag(forwarded_msg.id)
             except Exception as e:
                 await bot.reply_to(message, f"Something went wrong: {e}")
-                self.logger.warning(f"Unexpected error while replying to forwarded msg: {e}")
+                self.logger.exception(f"Unexpected error while replying to forwarded msg")
 
 
 def _join_hashtags(hashtags: list[str]) -> str:
