@@ -14,7 +14,7 @@ class BannedUsersStore:
     Currently only supports permanent ban.
     """
 
-    def __init__(self, bot_prefix: str, redis: RedisInterface, cached: bool):
+    def __init__(self, redis: RedisInterface, bot_prefix: str, cached: bool):
         self.banned_user_ids_store = SetStore[int](
             name="banned-user-ids",
             prefix=bot_prefix,

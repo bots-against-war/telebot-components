@@ -201,7 +201,7 @@ def create_form_bot(redis: RedisInterface, token: str):
     bot_prefix = "example-form-bot"
 
     language_store = LanguageStore(
-        bot_prefix, redis, supported_languages=[Language.RU, Language.EN], default_language=Language.RU
+        redis, bot_prefix, supported_languages=[Language.RU, Language.EN], default_language=Language.RU
     )
 
     @bot.message_handler(commands=["language"])
