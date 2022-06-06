@@ -9,7 +9,7 @@ FieldNameT = Optional[str]
 
 
 class Form:
-    def __init__(self, fields: list[FormField], start_field: FormField):
+    def __init__(self, fields: list[FormField], start_field: FormField, allow_cyclic: bool = False):
         self.fields = fields
         self.start_field = start_field
 
@@ -27,7 +27,7 @@ class Form:
 
         # validating that field graph is connected and that the start field has no incoming edges
         reachable_field_names = set(chain.from_iterable(f.next_field_getter.possible_next_field_names for f in fields))
-        if start_field.name in reachable_field_names:
+        if not allow_cyclic and start_field.name in reachable_field_names:
             raise ValueError(
                 f"Form configuration error: start field '{start_field.name}' is reachable from other field(s)"
             )
@@ -50,34 +50,39 @@ class Form:
                 )
 
         # topological sort to validate acyclicity + for nice rendering
-        next_field_names: dict[FieldNameT, set[FieldNameT]] = {
-            f.name: set(f.next_field_getter.possible_next_field_names) for f in fields
-        }
-        prev_field_names: dict[FieldNameT, set[FieldNameT]] = defaultdict(set)
-        for field_name, nexts in next_field_names.items():
-            for next in nexts:
-                prev_field_names[next].add(field_name)
+        if not allow_cyclic:
+            next_field_names: dict[FieldNameT, set[FieldNameT]] = {
+                f.name: set(f.next_field_getter.possible_next_field_names) for f in fields
+            }
+            prev_field_names: dict[FieldNameT, set[FieldNameT]] = defaultdict(set)
+            for field_name, nexts in next_field_names.items():
+                for next in nexts:
+                    prev_field_names[next].add(field_name)
 
-        topologically_sorted: list[Optional[str]] = []
-        vertices_without_incoming_edges: set[Optional[str]] = {start_field.name}
-        while vertices_without_incoming_edges:
-            from_ = vertices_without_incoming_edges.pop()
-            topologically_sorted.append(from_)
-            tos = next_field_names.get(from_)
-            if tos is None:
-                continue
-            tos = tos.copy()
-            for to in tos:
-                next_field_names[from_].remove(to)
-                prev_field_names[to].remove(from_)
-                if not prev_field_names[to]:
-                    vertices_without_incoming_edges.add(to)
+            topologically_sorted: list[Optional[str]] = []
+            vertices_without_incoming_edges: set[Optional[str]] = {start_field.name}
+            while vertices_without_incoming_edges:
+                from_ = vertices_without_incoming_edges.pop()
+                topologically_sorted.append(from_)
+                tos = next_field_names.get(from_)
+                if tos is None:
+                    continue
+                tos = tos.copy()
+                for to in tos:
+                    next_field_names[from_].remove(to)
+                    prev_field_names[to].remove(from_)
+                    if not prev_field_names[to]:
+                        vertices_without_incoming_edges.add(to)
 
-        if any(next_field_names.values()):
-            raise ValueError("Form graph has at least one cycle")
-        self.topologically_sorted_field_names = topologically_sorted
+            if any(next_field_names.values()):
+                raise ValueError("Form graph has at least one cycle")
+            self.topologically_sorted_field_names: Optional[list[FieldNameT]] = topologically_sorted
+        else:
+            self.topologically_sorted_field_names = None
 
     def print_graph(self):
+        if self.topologically_sorted_field_names is None:
+            raise ValueError("print_graph method only available for acyclic form graphs")
         DEFAULT_FORM_END_PRINT = "END"
         form_end_print_name = DEFAULT_FORM_END_PRINT
         idx = 0
@@ -138,7 +143,7 @@ class Form:
             n_arcs_out[arc.from_] -= 1
             n_arcs_in[arc.to] -= 1
             arc_canvas = CharCanvas()
-            arc_margin = arc_idx + 1
+            arc_margin = 1 + 2 * arc_idx
             arc_canvas.insert_string(0, 0, ("─" * arc_margin) + "┐")
             arc_canvas.insert_string(1, arc_margin, "|" * (arc_end_i - arc_start_i - 1), vertical=True)
             arc_canvas.insert_string(arc_end_i - arc_start_i, 0, ("─" * arc_margin) + "┘")
