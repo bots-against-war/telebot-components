@@ -83,8 +83,8 @@ class LanguageSelectionMenuConfig:
 class LanguageStore:
     def __init__(
         self,
-        bot_prefix: str,
         redis: RedisInterface,
+        bot_prefix: str,
         supported_languages: list[Language],
         default_language: Language,
         menu_config: LanguageSelectionMenuConfig = LanguageSelectionMenuConfig(True, True),

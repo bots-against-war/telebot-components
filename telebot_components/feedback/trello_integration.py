@@ -58,8 +58,8 @@ class TrelloIntegration:
     def __init__(
         self,
         bot: AsyncTeleBot,
-        bot_prefix: str,
         redis: RedisInterface,
+        bot_prefix: str,
         admin_chat_id: int,
         config: TrelloIntegrationConfig,
         categories: Optional[list[Category]],

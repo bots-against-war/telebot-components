@@ -115,8 +115,8 @@ class FeedbackHandler:
     def __init__(
         self,
         admin_chat_id: int,
-        bot_prefix: str,
         redis: RedisInterface,
+        bot_prefix: str,
         config: FeedbackConfig,
         anti_spam: AntiSpamInterface,
         service_messages: ServiceMessages,

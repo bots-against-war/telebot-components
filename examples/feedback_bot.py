@@ -27,8 +27,8 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
     logging.basicConfig(level=logging.DEBUG)
 
     language_store = LanguageStore(
-        bot_prefix,
         redis,
+        bot_prefix,
         supported_languages=[Language.RU, Language.EN],
         default_language=Language.RU,
         menu_config=LanguageSelectionMenuConfig(emojj_buttons=True, select_with_checkmark=True),
@@ -56,8 +56,8 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
     )
 
     banned_store = BannedUsersStore(
-        bot_prefix,
         redis,
+        bot_prefix,
         cached=False,
     )
 
@@ -99,8 +99,8 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
 
     feedback_handler = FeedbackHandler(
         admin_chat_id,
-        bot_prefix,
         redis,
+        bot_prefix,
         config=FeedbackConfig(
             message_log_to_admin_chat=True,
             force_category_selection=True,
