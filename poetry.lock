@@ -552,7 +552,7 @@ rsa = ["oauthlib[signedtoken] (>=3.0.0)"]
 name = "ruamel-yaml"
 version = "0.17.21"
 description = "ruamel.yaml is a YAML parser/emitter that supports roundtrip preservation of comments, seq/map flow style, and map key order"
-category = "main"
+category = "dev"
 optional = false
 python-versions = ">=3"
 
@@ -567,7 +567,7 @@ jinja2 = ["ruamel.yaml.jinja2 (>=0.2)"]
 name = "ruamel-yaml-clib"
 version = "0.2.6"
 description = "C version of reader, parser and emitter for ruamel.yaml derived from libyaml"
-category = "main"
+category = "dev"
 optional = false
 python-versions = ">=3.5"
 
@@ -589,7 +589,7 @@ python-versions = ">=3.6"
 
 [[package]]
 name = "telebot-against-war"
-version = "0.3.5"
+version = "0.3.6"
 description = "Async-first fork of pyTelegramBotApi"
 category = "dev"
 optional = false
@@ -597,6 +597,7 @@ python-versions = ">=3.9,<4.0"
 
 [package.dependencies]
 aiohttp = ">=3.8.1,<4.0.0"
+typing-extensions = ">=4.2.0,<5.0.0"
 ujson = ">=5.3.0,<6.0.0"
 
 [[package]]
@@ -685,7 +686,7 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "94628450307bdb029221c2bc1eec182e7cbd2911869b8f794820888d5b90a376"
+content-hash = "693a427dc8f876b8844621fd0b2031d9dfce53db2c7a07a591510b1445e22058"
 
 [metadata.files]
 aiohttp = [
@@ -1169,8 +1170,8 @@ soupsieve = [
     {file = "soupsieve-2.3.2.post1.tar.gz", hash = "sha256:fc53893b3da2c33de295667a0e19f078c14bf86544af307354de5fcf12a3f30d"},
 ]
 telebot-against-war = [
-    {file = "telebot-against-war-0.3.5.tar.gz", hash = "sha256:aa248a8483b6c142aeacb863780adcaca25afd621d40757598ce3735cefe949e"},
-    {file = "telebot_against_war-0.3.5-py3-none-any.whl", hash = "sha256:a97cac1c8e8a4b80f4d18650b9db06068fdf181e7fa2cf564598f2eac8ed1bb3"},
+    {file = "telebot-against-war-0.3.6.tar.gz", hash = "sha256:f9758ecf98d6714c30273a9e7cd51e6e408eb82e6b2d49d622c42d45246131fc"},
+    {file = "telebot_against_war-0.3.6-py3-none-any.whl", hash = "sha256:d6ff1b9646fa534618629d1f79bcf263bb178d54b837c0eed0f07c2aecc2f3ee"},
 ]
 toml = [
     {file = "toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b"},
