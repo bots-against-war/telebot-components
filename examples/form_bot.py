@@ -1,9 +1,8 @@
 import html
-import json
 import logging
 from enum import Enum
-from pprint import pformat, pprint
-from typing import Any, Type, cast
+from pprint import pformat
+from typing import Any, cast
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -280,6 +279,7 @@ def create_form_bot(redis: RedisInterface, token: str):
 
 
 if __name__ == "__main__":
+    import asyncio
     import os
 
     from redis.asyncio import Redis  # type: ignore
@@ -293,4 +293,4 @@ if __name__ == "__main__":
         redis=redis,
         token=os.environ["TOKEN"],
     )
-    bot_runner.run_polling()
+    asyncio.run(bot_runner.run_polling())

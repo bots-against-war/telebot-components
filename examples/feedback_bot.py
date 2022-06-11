@@ -1,5 +1,4 @@
 import logging
-from typing import Type
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -162,6 +161,7 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
 
 
 if __name__ == "__main__":
+    import asyncio
     import os
 
     from redis.asyncio import Redis  # type: ignore
@@ -175,4 +175,5 @@ if __name__ == "__main__":
         token=os.environ["TOKEN"],
         admin_chat_id=int(os.environ["ADMIN_CHAT_ID"]),
     )
-    bot_runner.run_polling()
+
+    asyncio.run(bot_runner.run_polling())

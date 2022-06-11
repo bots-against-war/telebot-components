@@ -517,20 +517,20 @@ ocsp = ["cryptography (>=36.0.1)", "pyopenssl (==20.0.1)", "requests (>=2.26.0)"
 
 [[package]]
 name = "requests"
-version = "2.27.1"
+version = "2.28.0"
 description = "Python HTTP for Humans."
 category = "dev"
 optional = false
-python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.5.*"
+python-versions = ">=3.7, <4"
 
 [package.dependencies]
 certifi = ">=2017.4.17"
-charset-normalizer = {version = ">=2.0.0,<2.1.0", markers = "python_version >= \"3\""}
-idna = {version = ">=2.5,<4", markers = "python_version >= \"3\""}
+charset-normalizer = ">=2.0.0,<2.1.0"
+idna = ">=2.5,<4"
 urllib3 = ">=1.21.1,<1.27"
 
 [package.extras]
-socks = ["PySocks (>=1.5.6,!=1.5.7)", "win-inet-pton"]
+socks = ["PySocks (>=1.5.6,!=1.5.7)"]
 use_chardet_on_py3 = ["chardet (>=3.0.2,<5)"]
 
 [[package]]
@@ -589,7 +589,7 @@ python-versions = ">=3.6"
 
 [[package]]
 name = "telebot-against-war"
-version = "0.3.6"
+version = "0.3.7"
 description = "Async-first fork of pyTelegramBotApi"
 category = "dev"
 optional = false
@@ -686,7 +686,7 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "693a427dc8f876b8844621fd0b2031d9dfce53db2c7a07a591510b1445e22058"
+content-hash = "c6b74ef5774c8d4e35e72f58952c604ce57eadc9dac9f601e30b164d6c8422d6"
 
 [metadata.files]
 aiohttp = [
@@ -1123,8 +1123,8 @@ redis = [
     {file = "redis-4.3.3.tar.gz", hash = "sha256:2f7a57cf4af15cd543c4394bcbe2b9148db2606a37edba755368836e3a1d053e"},
 ]
 requests = [
-    {file = "requests-2.27.1-py2.py3-none-any.whl", hash = "sha256:f22fa1e554c9ddfd16e6e41ac79759e17be9e492b3587efa038054674760e72d"},
-    {file = "requests-2.27.1.tar.gz", hash = "sha256:68d7c56fd5a8999887728ef304a6d12edc7be74f1cfa47714fc8b414525c9a61"},
+    {file = "requests-2.28.0-py3-none-any.whl", hash = "sha256:bc7861137fbce630f17b03d3ad02ad0bf978c844f3536d0edda6499dafce2b6f"},
+    {file = "requests-2.28.0.tar.gz", hash = "sha256:d568723a7ebd25875d8d1eaf5dfa068cd2fc8194b2e483d7b1f7c81918dbec6b"},
 ]
 requests-oauthlib = [
     {file = "requests-oauthlib-1.3.1.tar.gz", hash = "sha256:75beac4a47881eeb94d5ea5d6ad31ef88856affe2332b9aafb52c6452ccf0d7a"},
@@ -1170,8 +1170,8 @@ soupsieve = [
     {file = "soupsieve-2.3.2.post1.tar.gz", hash = "sha256:fc53893b3da2c33de295667a0e19f078c14bf86544af307354de5fcf12a3f30d"},
 ]
 telebot-against-war = [
-    {file = "telebot-against-war-0.3.6.tar.gz", hash = "sha256:f9758ecf98d6714c30273a9e7cd51e6e408eb82e6b2d49d622c42d45246131fc"},
-    {file = "telebot_against_war-0.3.6-py3-none-any.whl", hash = "sha256:d6ff1b9646fa534618629d1f79bcf263bb178d54b837c0eed0f07c2aecc2f3ee"},
+    {file = "telebot-against-war-0.3.7.tar.gz", hash = "sha256:9419f2845397b67e6383efce173b433db86d244bfd6ae12de296cb1c51c38caf"},
+    {file = "telebot_against_war-0.3.7-py3-none-any.whl", hash = "sha256:3e9aa2b9d8a4bf97a2c72cf2f48e2ffe23581af88389fc671a0b6e6920e7d3bb"},
 ]
 toml = [
     {file = "toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b"},
