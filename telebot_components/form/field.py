@@ -15,7 +15,7 @@ from typing import (
     final,
 )
 
-from telebot import types
+from telebot import types as tg
 
 from telebot_components.stores.language import (
     AnyText,
@@ -27,7 +27,7 @@ from telebot_components.stores.language import (
 
 FieldValueT = TypeVar("FieldValueT")
 
-ReplyKeyboard = Union[types.ReplyKeyboardMarkup, types.ReplyKeyboardRemove]
+ReplyKeyboard = Union[tg.ReplyKeyboardMarkup, tg.ReplyKeyboardRemove]
 
 
 class BadFieldValueError(Exception):
@@ -39,13 +39,13 @@ class BadFieldValueError(Exception):
 class NextFieldGetter:
     """Service class to forward-reference the next field in a form"""
 
-    next_field_name_getter: Callable[[types.User, Optional[FieldValueT]], Optional[str]]
+    next_field_name_getter: Callable[[tg.User, Optional[FieldValueT]], Optional[str]]
     # used for startup form connectedness validation
     possible_next_field_names: list[Optional[str]]
     # filled on Form object initialization
     fields_by_name: Optional[Dict[str, "FormField"]] = None
 
-    def get_next_field(self, user: types.User, value: Optional[FieldValueT]) -> Optional["FormField"]:
+    def get_next_field(self, user: tg.User, value: Optional[FieldValueT]) -> Optional["FormField"]:
         if self.fields_by_name is None:
             raise RuntimeError(
                 "Next field getter hasn't been properly initialized, did you forget to call bind_form_fields?"
@@ -85,7 +85,7 @@ class FormField(Generic[FieldValueT]):
 
     @final
     def process_message(
-        self, message: types.Message, language: MaybeLanguage
+        self, message: tg.Message, language: MaybeLanguage
     ) -> Tuple[Optional[str], Optional[FieldValueT]]:
         try:
             value = self.parse(message)
@@ -93,7 +93,7 @@ class FormField(Generic[FieldValueT]):
         except BadFieldValueError as error:
             return any_text_to_str(error.msg, language), None
 
-    async def get_query_message(self, user: types.User) -> AnyText:
+    async def get_query_message(self, user: tg.User) -> AnyText:
         return self.query_message
 
     def value_to_str(self, value: FieldValueT, language: MaybeLanguage) -> str:
@@ -105,10 +105,10 @@ class FormField(Generic[FieldValueT]):
         return any_text_to_str(self.echo_result_template, language).format(self.value_to_str(value, language))
 
     def get_reply_markup(self, language: MaybeLanguage) -> ReplyKeyboard:
-        return types.ReplyKeyboardRemove()
+        return tg.ReplyKeyboardRemove()
 
     # NOTE: not using abstractmethod here because of https://github.com/python/mypy/issues/5374
-    def parse(self, message: types.Message) -> FieldValueT:
+    def parse(self, message: tg.Message) -> FieldValueT:
         raise NotImplementedError("FormField cannot be used directly, please use concrete suclasses")
 
     def texts(self) -> list[AnyText]:
@@ -129,7 +129,7 @@ class FormField(Generic[FieldValueT]):
 class PlainTextField(FormField[str]):
     empty_text_error_msg: AnyText
 
-    def parse(self, message: types.Message) -> str:
+    def parse(self, message: tg.Message) -> str:
         text = message.text_content
         if not text:
             raise BadFieldValueError(self.empty_text_error_msg)
@@ -143,7 +143,7 @@ class PlainTextField(FormField[str]):
 class IntegerField(FormField[int]):
     not_an_integer_error_msg: AnyText
 
-    def parse(self, message: types.Message) -> int:
+    def parse(self, message: tg.Message) -> int:
         text = message.text_content.strip()
         try:
             return int(text)
@@ -161,7 +161,7 @@ class DateField(FormField[date]):
     # if specified, the date is checked to be in the future
     cant_be_in_the_past_error_msg: Optional[AnyText] = None
 
-    def parse(self, message: types.Message) -> date:
+    def parse(self, message: tg.Message) -> date:
         date_parts = message.text_content.strip().split(".")
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         now_local = now_utc.astimezone(self.timezone)
@@ -195,13 +195,13 @@ class EnumField(FormField[Enum]):
     def value_to_str(self, value: Enum, language: MaybeLanguage) -> str:
         return any_text_to_str(value.value, language)
 
-    def get_reply_markup(self, language: MaybeLanguage) -> types.ReplyKeyboardMarkup:
-        kbd = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=self.menu_row_width)
+    def get_reply_markup(self, language: MaybeLanguage) -> tg.ReplyKeyboardMarkup:
+        kbd = tg.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=self.menu_row_width)
         for option in self.EnumClass:
-            kbd.add(types.KeyboardButton(any_text_to_str(option.value, language)))
+            kbd.add(tg.KeyboardButton(any_text_to_str(option.value, language)))
         return kbd
 
-    def parse(self, message: types.Message) -> Enum:
+    def parse(self, message: tg.Message) -> Enum:
         for enum in self.EnumClass:
             for _, lang_text in enum.value.items():
                 if lang_text == message.text:
