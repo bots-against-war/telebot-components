@@ -1,8 +1,8 @@
 import time as time_module
 from collections import defaultdict
 from datetime import timedelta
-from typing import Coroutine, Optional
 from fnmatch import fnmatch
+from typing import Coroutine, Optional
 
 from telebot_components.redis_utils.interface import (
     RedisCmdReturn,
@@ -134,7 +134,7 @@ class RedisEmulation(RedisInterface):
 
     async def keys(self, pattern: str = "*") -> list[bytes]:
         """NOTE: this implementation uses fnmatch and may deviate from the actual Redis matching rules
-        
+
         See docs for fnmatch: https://docs.python.org/3/library/fnmatch.html#module-fnmatch
         and for Redis KEYS: https://redis.io/commands/keys/
         """
