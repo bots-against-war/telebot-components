@@ -106,7 +106,7 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
             hashtags_in_admin_chat=True,
             hashtag_message_rarer_than=times.FIVE_MINUTES,
             unanswered_hashtag="неотвечено",
-            forwarded_to_admin_confirmations_throttle_duration=times.FIVE_MINUTES,
+            confirm_forwarded_to_admin_rarer_than=times.FIVE_MINUTES,
         ),
         anti_spam=AntiSpam(
             redis,

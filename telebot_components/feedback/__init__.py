@@ -94,7 +94,7 @@ class FeedbackConfig:
     unanswered_hashtag: Optional[str]
     # when users sent a lot of messages, they can grow tired of constant confirmations
     # this parameter allows to limit confirmations to user to one per a specified time
-    forwarded_to_admin_confirmations_throttle_duration: Optional[timedelta] = None
+    confirm_forwarded_to_admin_rarer_than: Optional[timedelta] = None
     # custom filters and hooks
     custom_user_message_filter: Optional[Callable[[tg.Message], Coroutine[None, None, bool]]] = None
     before_forwarding: Optional[Callable[[tg.User], Coroutine[None, None, Optional[tg.Message]]]] = None
@@ -187,9 +187,9 @@ class FeedbackHandler:
                 name="recently-sent-confirmation-to",
                 prefix=bot_prefix,
                 redis=redis,
-                expiration_time=self.config.forwarded_to_admin_confirmations_throttle_duration,
+                expiration_time=self.config.confirm_forwarded_to_admin_rarer_than,
             )
-            if self.config.forwarded_to_admin_confirmations_throttle_duration is not None
+            if self.config.confirm_forwarded_to_admin_rarer_than is not None
             else None
         )
         # [optional] hashtag-related stores
@@ -414,6 +414,8 @@ class FeedbackHandler:
                     confirmation_recently_sent = False
                 if not confirmation_recently_sent:
                     await bot.reply_to(message, any_text_to_str(self.service_messages.forwarded_to_admin_ok, language))
+                    if self.recently_sent_confirmation_flag_store is not None:
+                        await self.recently_sent_confirmation_flag_store.set_flag(user.id)
 
             if self.trello_integration is not None:
                 category = await self.category_store.get_user_category(user) if self.category_store else None
