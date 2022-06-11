@@ -225,6 +225,8 @@ class FeedbackHandler:
         else:
             languages = [None]
         for message in self.service_messages.user_facing:
+            if message is None:
+                continue
             for language in languages:
                 any_text_to_str(message, language)
 
