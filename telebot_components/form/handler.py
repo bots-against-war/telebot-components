@@ -297,4 +297,5 @@ class FormHandler(Generic[FormResultT]):
                 ]
             ),
             reply_markup=self.form.start_field.get_reply_markup(language),
+            parse_mode="HTML",
         )
