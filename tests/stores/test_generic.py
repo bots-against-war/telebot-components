@@ -191,7 +191,7 @@ async def test_flag_store(redis: RedisInterface, key: str_able):
 
 async def test_list_keys(redis: RedisInterface):
     bot_prefix = generate_str()
-    store_1 = KeyValueStore(
+    store_1 = KeyValueStore[str](
         name="testing",
         prefix=bot_prefix,
         redis=redis,
@@ -200,7 +200,7 @@ async def test_list_keys(redis: RedisInterface):
     for k in store_1_keys:
         await store_1.save(k, uuid4().hex)
 
-    store_2 = KeyValueStore(
+    store_2 = KeyValueStore[str](
         name="testing-something",
         prefix=bot_prefix,
         redis=redis,
