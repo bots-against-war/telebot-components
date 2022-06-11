@@ -16,7 +16,7 @@ from telebot_components.stores.generic import (
     SetStore,
     str_able,
 )
-from tests.utils import TimeSupplier, using_real_redis, generate_str
+from tests.utils import TimeSupplier, generate_str, using_real_redis
 
 EXPIRATION_TIME_TEST_OPTIONS: list[Optional[timedelta]] = [None]
 
@@ -199,7 +199,7 @@ async def test_list_keys(redis: RedisInterface):
     store_1_keys = [uuid4().hex for _ in range(100)]
     for k in store_1_keys:
         await store_1.save(k, uuid4().hex)
-    
+
     store_2 = KeyValueStore(
         name="testing-something",
         prefix=bot_prefix,
