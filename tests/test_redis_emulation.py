@@ -1,7 +1,9 @@
 from datetime import timedelta
+from typing import Callable, Coroutine
 from uuid import uuid4
 
 import pytest
+from _pytest import fixtures
 
 from telebot_components.redis_utils.interface import RedisInterface
 from tests.utils import TimeSupplier, pytest_skip_on_real_redis
@@ -105,6 +107,41 @@ async def test_list_expiration(redis: RedisInterface, time_supplier: TimeSupplie
     new_values = generate_values(3)
     await redis.rpush(key, *new_values)
     assert await redis.lrange(key, 0, -1) == new_values
+
+
+@pytest.fixture(params=["set", "sadd", "rpush"])
+async def create_key_func(redis: RedisInterface, request: fixtures.SubRequest) -> Callable[[str], Coroutine]:
+    method_name: str = request.param
+
+    async def create_key(key: str):
+        method = getattr(redis, method_name)
+        await method(key, generate_values(1)[0])
+
+    return create_key
+
+
+@pytest.mark.parametrize(
+    "keys, pattern, expected_matching_keys",
+    [
+        pytest.param(["hello"], "hello", [b"hello"]),
+        pytest.param(["hello"], "hell?", [b"hello"]),
+        pytest.param(["hello", "hello world"], "hell?", [b"hello"]),
+        pytest.param(["hello", "hello world"], "he*", [b"hello", b"hello world"]),
+        pytest.param(["one", "two", "three", "four"], "*", [b"one", b"two", b"three", b"four"]),
+    ],
+)
+async def test_keys(
+    keys: list[str],
+    pattern: str,
+    expected_matching_keys: list[str],
+    create_key_func: Callable[[str], Coroutine],
+    redis: RedisInterface,
+):
+    for key in keys:
+        await create_key_func(key)
+
+    matching_keys = await redis.keys(pattern)
+    assert set(matching_keys) == set(expected_matching_keys)
 
 
 def generate_key_value() -> tuple[str, bytes]:

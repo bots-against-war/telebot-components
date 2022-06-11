@@ -17,7 +17,7 @@ from telebot_components.stores.language import (
     LanguageSelectionMenuConfig,
     LanguageStore,
 )
-from tests.utils import mock_bot_user_json, telegram_api_mock
+from tests.utils import generate_str, mock_bot_user_json, telegram_api_mock
 
 
 @pytest.mark.parametrize(
@@ -34,7 +34,7 @@ async def test_get_user_language_basic(
     redis: RedisInterface, user_language_code: Optional[str], expected_language: Language
 ):
     language_store = LanguageStore(
-        bot_prefix="testing",
+        bot_prefix=generate_str(),
         redis=redis,
         supported_languages=[Language.RU, Language.EN, Language.UK],
         default_language=Language.RU,
@@ -118,7 +118,7 @@ async def test_language_store_markup(
     bot = AsyncTeleBot(MOCK_TOKEN)
 
     language_store = LanguageStore(
-        bot_prefix="testing",
+        bot_prefix=generate_str(),
         redis=redis,
         supported_languages=supported_languages,
         default_language=default_language,

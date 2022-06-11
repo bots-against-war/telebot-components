@@ -1,5 +1,6 @@
 import os
 from typing import Any, Callable
+from uuid import uuid4
 
 import aiohttp
 import pytest
@@ -57,3 +58,7 @@ def telegram_api_mock(form_data_handler: Callable[[dict[str, str]], dict[str, An
         )
 
     return callback
+
+
+def generate_str() -> str:
+    return uuid4().hex

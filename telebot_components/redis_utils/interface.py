@@ -116,6 +116,11 @@ class RedisInterface(ABC):
         """Returns the number of ``names`` that exist"""
         ...
 
+    @abstractmethod
+    async def keys(self, pattern: str = "*") -> list[bytes]:
+        """Returns a list of keys matching ``pattern``. Note that keys are returned as bytes"""
+        ...
+
 
 RedisCmdReturn = Union[bytes, list[bytes], None, int]
 

@@ -2,6 +2,7 @@ import time as time_module
 from collections import defaultdict
 from datetime import timedelta
 from typing import Coroutine, Optional
+from fnmatch import fnmatch
 
 from telebot_components.redis_utils.interface import (
     RedisCmdReturn,
@@ -123,7 +124,26 @@ class RedisEmulation(RedisInterface):
         return list_[start:end]
 
     async def exists(self, *names: str) -> int:
-        return sum([1 for key in names if self.values.get(key) is not None])
+        n_exist = 0
+        for name in names:
+            for storage in self._storages:
+                if name in storage:
+                    n_exist += 1
+                    break
+        return n_exist
+
+    async def keys(self, pattern: str = "*") -> list[bytes]:
+        """NOTE: this implementation uses fnmatch and may deviate from the actual Redis matching rules
+        
+        See docs for fnmatch: https://docs.python.org/3/library/fnmatch.html#module-fnmatch
+        and for Redis KEYS: https://redis.io/commands/keys/
+        """
+        matches: list[bytes] = []
+        for storage in self._storages:
+            for key in storage:
+                if fnmatch(key, pattern):
+                    matches.append(key.encode("utf-8"))
+        return matches
 
 
 class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
@@ -183,6 +203,10 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def exists(self, *names: str) -> int:
         self._stack.append(self.redis_em.exists(*names))
         return 0
+
+    async def keys(self, pattern: str = "*") -> list[bytes]:
+        self._stack.append(self.redis_em.keys(pattern))
+        return []
 
     async def expire(self, name: str, time: timedelta) -> int:
         self._stack.append(self.redis_em.expire(name, time))

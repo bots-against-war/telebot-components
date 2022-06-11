@@ -16,7 +16,7 @@ from telebot_components.stores.generic import (
     SetStore,
     str_able,
 )
-from tests.utils import TimeSupplier, using_real_redis
+from tests.utils import TimeSupplier, using_real_redis, generate_str
 
 EXPIRATION_TIME_TEST_OPTIONS: list[Optional[timedelta]] = [None]
 
@@ -42,16 +42,12 @@ def key(request: fixtures.SubRequest) -> str_able:
     return request.param
 
 
-def generate_str() -> str:
-    return uuid4().hex
-
-
 async def test_key_value_store(
     redis: RedisInterface, expiration_time: Optional[timedelta], key: str_able, time_supplier: TimeSupplier
 ):
     store = KeyValueStore[str](
         name="testing",
-        prefix="test-bot",
+        prefix=generate_str(),
         redis=redis,
         expiration_time=expiration_time,
     )
@@ -86,7 +82,7 @@ def jsonable_value(request: fixtures.SubRequest) -> Any:
 async def test_key_value_store_json_serialization(redis: RedisInterface, key: str_able, jsonable_value: Any):
     store = KeyValueStore[Any](
         name="testing",
-        prefix="test-bot",
+        prefix=generate_str(),
         redis=redis,
     )
     assert await store.load(key) is None
@@ -110,7 +106,7 @@ async def test_key_value_store_custom_serialization(redis: RedisInterface, key: 
 
     store = KeyValueStore[UserData](
         name="testing",
-        prefix="test-bot",
+        prefix=generate_str(),
         redis=redis,
         dumper=lambda ud: ud.to_store(),
         loader=UserData.from_store,
@@ -124,7 +120,7 @@ async def test_key_value_store_custom_serialization(redis: RedisInterface, key: 
 async def test_key_list_store(redis: RedisInterface, key: str_able, jsonable_value: Any):
     store = KeyListStore[Any](
         name="testing",
-        prefix="test-bot",
+        prefix=generate_str(),
         redis=redis,
     )
     for _ in range(10):
@@ -142,7 +138,7 @@ def hashable_value(request: fixtures.SubRequest) -> Any:
 async def test_key_set_store(redis: RedisInterface, key: str_able, hashable_value: Any):
     store = KeySetStore[Any](
         name="testing",
-        prefix="test-bot",
+        prefix=generate_str(),
         redis=redis,
     )
     for _ in range(10):
@@ -156,7 +152,7 @@ async def test_key_set_store(redis: RedisInterface, key: str_able, hashable_valu
 async def test_set_store(redis: RedisInterface, hashable_value: Any):
     store = SetStore[Any](
         name="testing",
-        prefix="test-bot",
+        prefix=generate_str(),
         redis=redis,
     )
     for _ in range(10):
@@ -170,7 +166,7 @@ async def test_set_store(redis: RedisInterface, hashable_value: Any):
 async def test_integer_store(redis: RedisInterface, key: str_able):
     store = KeyIntegerStore(
         name="testing",
-        prefix="test-bot",
+        prefix=generate_str(),
         redis=redis,
     )
     assert await store.load(key) is None
@@ -185,9 +181,48 @@ async def test_integer_store(redis: RedisInterface, key: str_able):
 async def test_flag_store(redis: RedisInterface, key: str_able):
     store = KeyFlagStore(
         name="testing",
-        prefix="test-bot",
+        prefix=generate_str(),
         redis=redis,
     )
     assert not (await store.is_flag_set(key))
     assert await store.set_flag(key)
     assert await store.is_flag_set(key)
+
+
+async def test_list_keys(redis: RedisInterface):
+    bot_prefix = generate_str()
+    store_1 = KeyValueStore(
+        name="testing",
+        prefix=bot_prefix,
+        redis=redis,
+    )
+    store_1_keys = [uuid4().hex for _ in range(100)]
+    for k in store_1_keys:
+        await store_1.save(k, uuid4().hex)
+    
+    store_2 = KeyValueStore(
+        name="testing-something",
+        prefix=bot_prefix,
+        redis=redis,
+    )
+    store_2_keys = [uuid4().hex for _ in range(100)]
+    for k in store_2_keys:
+        await store_2.save(k, uuid4().hex)
+
+    assert set(await store_1.list_keys()) == set(store_1_keys)
+    assert set(await store_2.list_keys()) == set(store_2_keys)
+
+
+async def test_cant_create_conflicting_stores(redis: RedisInterface):
+    bot_prefix = generate_str()
+    KeyValueStore(
+        name="some-prefix",
+        prefix=bot_prefix,
+        redis=redis,
+    )
+    with pytest.raises(ValueError, match="Attempt to create KeyValueStore with prefix "):
+        KeyValueStore(
+            name="some-prefix",
+            prefix=bot_prefix,
+            redis=redis,
+        )

@@ -1,8 +1,9 @@
+from hashlib import md5
 import json
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Callable, Generic, Optional, Protocol, TypeVar, cast
+from typing import Callable, ClassVar, Generic, Optional, Protocol, TypeVar, cast
 
 from telebot_components.constants.times import MONTH
 from telebot_components.redis_utils.interface import RedisInterface
@@ -24,11 +25,25 @@ class GenericStore(Generic[T]):
     dumper: Callable[[T], str] = json.dumps
     loader: Callable[[str], T] = json.loads
 
+    _prefix_registry: ClassVar[set[str]] = set()
+
     def __post_init__(self):
         self.logger = logging.getLogger(f"{__name__}.{self.prefix}-{self.name}")
+        # adding prefix hash to allow stores with nested prefixes
+        # e.g. stores with prefixes 'a' and 'ab' could cause a collision but
+        # we transform them to 'a-0cc17' and 'ab-187ef' and voila
+        plain_prefix = f"{self.prefix}-{self.name}"
+        prefix_hash = md5(plain_prefix.encode("utf-8")).hexdigest()[:5]
+        self._full_prefix = f"{plain_prefix}-{prefix_hash}-"
+        if self._full_prefix in self._prefix_registry:
+            raise ValueError(
+                f"Attempt to create {self.__class__.__name__} with prefix {self._full_prefix!r} already in use"
+            )
+        else:
+            self._prefix_registry.add(self._full_prefix)
 
     def _full_key(self, key: str_able) -> str:
-        return "-".join([self.prefix, self.name, str(key)])
+        return f"{self._full_prefix}{key}"
 
     async def drop(self, key: str_able) -> bool:
         n_deleted = await self.redis.delete(self._full_key(key))
@@ -36,6 +51,10 @@ class GenericStore(Generic[T]):
 
     async def exists(self, key: str_able) -> bool:
         return (await self.redis.exists(self._full_key(key))) == 1
+
+    async def list_keys(self) -> list[str]:
+        matching_full_keys = await self.redis.keys(self._full_prefix + "*")
+        return [fk.decode("utf-8").removeprefix(self._full_prefix) for fk in matching_full_keys]
 
 
 ItemT = TypeVar("ItemT")
@@ -95,8 +114,9 @@ class SetStore(GenericStore[ItemT]):
     const_key: str = "const"
 
     def __post_init__(self):
+        super().__post_init__()
         self._key_set_store = KeySetStore[ItemT](
-            name=self.name,
+            name=f"{self.name}-fixed",
             prefix=self.prefix,
             redis=self.redis,
             expiration_time=self.expiration_time,

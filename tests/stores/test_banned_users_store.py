@@ -6,13 +6,13 @@ from telebot import types as tg
 
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
-from tests.utils import mock_bot_user_json
+from tests.utils import generate_str, mock_bot_user_json
 
 
 @pytest.fixture(params=[True, False])
 def banned_users_store(request: fixtures.SubRequest, redis: RedisInterface) -> BannedUsersStore:
     return BannedUsersStore(
-        bot_prefix="testing",
+        bot_prefix=generate_str(),
         redis=redis,
         cached=request.param,
     )
