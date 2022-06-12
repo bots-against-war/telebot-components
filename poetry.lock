@@ -589,7 +589,7 @@ python-versions = ">=3.6"
 
 [[package]]
 name = "telebot-against-war"
-version = "0.3.8"
+version = "0.4.0"
 description = "Async-first fork of pyTelegramBotApi"
 category = "dev"
 optional = false
@@ -686,7 +686,7 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "94b2f2841d3fe60febb9280d49a7049f83ea051c6e3c9f5a48d516e24aadf0df"
+content-hash = "ede35961249ba3e981dc2105d5edb8d58ac9898d5d8f2e840630f3c9fba82d9d"
 
 [metadata.files]
 aiohttp = [
@@ -1170,8 +1170,8 @@ soupsieve = [
     {file = "soupsieve-2.3.2.post1.tar.gz", hash = "sha256:fc53893b3da2c33de295667a0e19f078c14bf86544af307354de5fcf12a3f30d"},
 ]
 telebot-against-war = [
-    {file = "telebot-against-war-0.3.8.tar.gz", hash = "sha256:e6781d233970ba748312fe2fa5fa4578e6aa4d4a93cbc1d9de95502a5bd16a57"},
-    {file = "telebot_against_war-0.3.8-py3-none-any.whl", hash = "sha256:65eb08419dec6f4697961953639ab13d236650634ab7271c3d1c419c3f69489a"},
+    {file = "telebot-against-war-0.4.0.tar.gz", hash = "sha256:b3a92a435bb2fc605430bfb326d5b363945889ce2cc2a256667bd8c58eddd704"},
+    {file = "telebot_against_war-0.4.0-py3-none-any.whl", hash = "sha256:b04ff6aa3fbdb0d15e3ef0249567e8e58a719dcaf8c9ea0a5745431ce9a6c9bc"},
 ]
 toml = [
     {file = "toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b"},
