@@ -31,7 +31,7 @@ from telebot_components.utils import telegram_message_url, trim_with_ellipsis
 
 class TrelloCardData(TypedDict):
     id: str
-    category_id: int
+    category_name: str
 
 
 class OriginMessageData(TypedDict):
@@ -88,7 +88,7 @@ class TrelloIntegration:
         if not categories:
             # is no categories were supplied to the integration, is just create a "virtual" category
             # with the bot prefix as name
-            self.categories = [Category(-1, name=self.bot_prefix, button_caption="not used")]
+            self.categories = [Category(name=self.bot_prefix, button_caption="not used")]
         else:
             self.categories = categories
         self.trello_client = TrelloClient(config.api_key, token=config.user_token)
@@ -123,15 +123,15 @@ class TrelloIntegration:
 
         lists_on_board = await loop.run_in_executor(self.thread_pool, self.board.all_lists)
         lists_by_name: dict[str, trello.List] = {l.name: l for l in lists_on_board}
-        self.lists_by_category_id: dict[int, trello.List] = dict()
+        self.lists_by_category_name: dict[str, trello.List] = dict()
 
         for category in self.categories:
             if category.name in lists_by_name:
                 list_ = lists_by_name[category.name]
             else:
-                self.logger.info(f"Creating new list '{category.name}' ({id = })")
+                self.logger.info(f"Creating new list '{category.name}'")
                 list_ = await loop.run_in_executor(self.thread_pool, self.board.add_list, category.name, "bottom")
-            self.lists_by_category_id[category.id] = list_
+            self.lists_by_category_name[category.name] = list_
 
     async def export_message(
         self, origin_message: tg.Message, forwarded_message: tg.Message, category: Optional[Category] = None
@@ -139,7 +139,7 @@ class TrelloIntegration:
         if category is None:
             category = self.categories[0]  # guaranteed to exist
 
-        if category.id not in self.lists_by_category_id:
+        if category.name not in self.lists_by_category_name:
             return
 
         loop = asyncio.get_event_loop()
@@ -171,12 +171,12 @@ class TrelloIntegration:
             card_description += f"\n[💬]({telegram_message_url(self.admin_chat_id, forwarded_message.id)})"
 
         existing_trello_card_data = await self.trello_card_data_for_user.load(user.id)
-        if existing_trello_card_data is None or existing_trello_card_data["category_id"] != category.id:
+        if existing_trello_card_data is None or existing_trello_card_data["category_name"] != category.name:
             new_card_reason = (
                 "no card was found for the user" if existing_trello_card_data is None else "user category has changed"
             )
             self.logger.debug(f"Adding new card because {new_card_reason}")
-            trello_list = self.lists_by_category_id[category.id]
+            trello_list = self.lists_by_category_name[category.name]
             trello_card = await loop.run_in_executor(
                 self.thread_pool,
                 partial(
@@ -188,7 +188,7 @@ class TrelloIntegration:
             )
             await self.trello_card_data_for_user.save(
                 user.id,
-                TrelloCardData(id=trello_card.id, category_id=category.id),
+                TrelloCardData(id=trello_card.id, category_name=category.name),
             )
             await self.origin_message_data_for_trello_card_id.save(
                 trello_card.id,

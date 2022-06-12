@@ -38,14 +38,12 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
         redis,
         categories=[
             Category(
-                id=1,
-                name="Картошка",
+                name="картошка",
                 button_caption={Language.RU: "🥔 Картошка", Language.EN: "🥔 Potato"},
                 hashtag="картофель",
             ),
             Category(
-                id=2,
-                name="Капуста",
+                name="капуста",
                 button_caption={Language.RU: "🥦 Капуста", Language.EN: "🥦 Cabbage"},
                 hashtag="капуста",
             ),

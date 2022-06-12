@@ -23,7 +23,6 @@ from telebot_components.stores.utils import callback_query_processing_error
 
 @dataclass
 class Category:
-    id: int
     name: str
     button_caption: AnyText
     hashtag: Optional[str] = None
@@ -41,17 +40,17 @@ class CategoryStore:
     ):
         self.logger = logging.getLogger(f"{__name__}.{bot_prefix}")
         self.categories = categories
-        self.categories_by_id = {c.id: c for c in categories}
-        self.user_category_store = KeyValueStore[Category](
+        self.categories_by_name = {c.name: c for c in categories}
+        self.user_category_store = KeyValueStore[Optional[Category]](
             name="user-category",
             prefix=bot_prefix,
             redis=redis,
             expiration_time=category_expiration_time,
-            dumper=lambda c: str(c.id),
-            loader=lambda category_id: self.categories_by_id[int(category_id)],
+            dumper=lambda c: c.name if c else "None",
+            loader=lambda category_name: self.categories_by_name.get(category_name),
         )
 
-        self.select_category_callback_data = CallbackData("cat_id", prefix="category")
+        self.select_category_callback_data = CallbackData("cat_name", prefix="category")
 
         self.language_store = language_store
         if self.language_store is not None:
@@ -70,13 +69,13 @@ class CategoryStore:
             user = call.from_user
             try:
                 data = self.select_category_callback_data.parse(call.data)
-                category_id = int(data["cat_id"])
+                category_name = data["cat_name"]
             except Exception:
                 await callback_query_processing_error(bot, call, f"corrupted callback query '{call.data}'", self.logger)
                 return
-            category = self.categories_by_id.get(category_id)
+            category = self.categories_by_name.get(category_name)
             if category is None:
-                await callback_query_processing_error(bot, call, f"corrupted category id: {category_id}", self.logger)
+                await callback_query_processing_error(bot, call, f"unknown category name: {category_name}", self.logger)
                 return
             category_saved = await self.save_user_category(user, category)
             if not category_saved:
@@ -101,7 +100,7 @@ class CategoryStore:
 
         def caption(category: Category) -> str:
             caption = any_text_to_str(category.button_caption, language)
-            if current_category is not None and category.id == current_category.id:
+            if current_category is not None and category.name == current_category.name:
                 caption = "✅ " + caption
             return caption
 
@@ -110,7 +109,7 @@ class CategoryStore:
                 [
                     tg.InlineKeyboardButton(
                         text=caption(category),
-                        callback_data=self.select_category_callback_data.new(cat_id=category.id),
+                        callback_data=self.select_category_callback_data.new(cat_name=category.name),
                     )
                 ]
                 for category in self.categories

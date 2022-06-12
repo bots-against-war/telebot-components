@@ -301,7 +301,9 @@ class FeedbackHandler:
             )
             if self.trello_integration.categories is not None:
                 help_msg += "в несколько списков по категориям (хештегам): "
-                help_msg += ", ".join(f"<b>{l.name}</b>" for l in self.trello_integration.lists_by_category_id.values())
+                help_msg += ", ".join(
+                    f"<b>{l.name}</b>" for l in self.trello_integration.lists_by_category_name.values()
+                )
             else:
                 help_msg += f"в список <b>{self.trello_integration.bot_prefix}</b>"
             help_msg += (
