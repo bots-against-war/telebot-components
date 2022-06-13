@@ -45,6 +45,10 @@ class GenericStore(Generic[T]):
     def __del__(self):
         self._prefix_registry.discard(self._full_prefix)
 
+    @classmethod
+    def allow_duplicate_stores(cls, prefix: str):
+        cls._prefix_registry = {fp for fp in cls._prefix_registry if not fp.startswith(prefix)}
+
     def _full_key(self, key: str_able) -> str:
         return f"{self._full_prefix}{key}"
 
