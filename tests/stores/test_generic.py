@@ -215,13 +215,13 @@ async def test_list_keys(redis: RedisInterface):
 
 async def test_cant_create_conflicting_stores(redis: RedisInterface):
     bot_prefix = generate_str()
-    KeyValueStore(
+    store_1 = KeyValueStore(
         name="some-prefix",
         prefix=bot_prefix,
         redis=redis,
     )
     with pytest.raises(ValueError, match="Attempt to create KeyValueStore with prefix "):
-        KeyValueStore(
+        store_2 = KeyValueStore(
             name="some-prefix",
             prefix=bot_prefix,
             redis=redis,

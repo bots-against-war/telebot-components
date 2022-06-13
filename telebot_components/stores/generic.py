@@ -42,6 +42,9 @@ class GenericStore(Generic[T]):
         else:
             self._prefix_registry.add(self._full_prefix)
 
+    def __del__(self):
+        self._prefix_registry.discard(self._full_prefix)
+
     def _full_key(self, key: str_able) -> str:
         return f"{self._full_prefix}{key}"
 
