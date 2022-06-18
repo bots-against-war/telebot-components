@@ -214,8 +214,8 @@ class KeyDictStore(GenericStore[ValueT]):
             if reset_ttl and self.expiration_time is not None:
                 await pipe.expire(self._full_key(key), self.expiration_time)
             try:
-                after_push_len, *_ = await pipe.execute()
-                return bool(after_push_len)
+                n_added_keys, *_ = await pipe.execute()
+                return n_added_keys == 1
             except Exception:
                 self.logger.exception("Unexpected error adding subkey to hash")
                 return False
