@@ -1,6 +1,6 @@
 import datetime
 from abc import ABC, abstractmethod
-from typing import Optional, TypeVar, Union
+from typing import Mapping, Optional, TypeVar, Union
 
 # type defs copied from redis
 
@@ -119,6 +119,32 @@ class RedisInterface(ABC):
     @abstractmethod
     async def keys(self, pattern: str = "*") -> list[bytes]:
         """Returns a list of keys matching ``pattern``. Note that keys are returned as bytes"""
+        ...
+
+    @abstractmethod
+    async def hset(
+        self,
+        name: str,
+        key: Optional[str] = None,
+        value: Optional[bytes] = None,
+        mapping: Optional[Mapping[str, bytes]] = None,
+    ) -> int:
+        """
+        Set ``key`` to ``value`` within hash ``name``,
+        ``mapping`` accepts a dict of key/value pairs that that will be
+        added to hash ``name``.
+        Returns the number of fields that were added.
+        """
+        ...
+
+    @abstractmethod
+    async def hget(self, name: str, key: str) -> Optional[bytes]:
+        """Return the value of ``key`` within the hash ``name``"""
+        ...
+
+    @abstractmethod
+    async def hkeys(self, name: str) -> list[bytes]:
+        """Return the list of keys within hash ``name``"""
         ...
 
 
