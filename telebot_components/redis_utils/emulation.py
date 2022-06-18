@@ -2,7 +2,7 @@ import time as time_module
 from collections import defaultdict
 from datetime import timedelta
 from fnmatch import fnmatch
-from typing import Coroutine, Optional
+from typing import Coroutine, Mapping, Optional
 
 from telebot_components.redis_utils.interface import (
     RedisCmdReturn,
@@ -18,6 +18,7 @@ class RedisEmulation(RedisInterface):
         self.values: dict[str, bytes] = dict()
         self.sets: dict[str, set[bytes]] = defaultdict(set)
         self.lists: dict[str, list[bytes]] = defaultdict(list)
+        self.hashes: dict[str, dict[str, bytes]] = defaultdict(dict)
         self._storages = (self.sets, self.values, self.lists)
         self.key_eviction_time: dict[str, float] = dict()
 
@@ -145,6 +146,28 @@ class RedisEmulation(RedisInterface):
                     matches.append(key.encode("utf-8"))
         return matches
 
+    async def hset(
+        self,
+        name: str,
+        key: Optional[str] = None,
+        value: Optional[bytes] = None,
+        mapping: Optional[Mapping[str, bytes]] = None,
+    ) -> int:
+        if mapping is None:
+            if key is None or value is None:
+                raise TypeError("If mapping is not specified, key and value must be set")
+            mapping = {key: value}
+        self.hashes[name].update(mapping)
+        return len(mapping)
+
+    async def hget(self, name: str, key: str) -> Optional[bytes]:
+        return self.hashes.get(name, {}).get(key)
+
+    async def hkeys(self, name: str) -> list[bytes]:
+        # NOTE: redis client does not default anything received from Redis by default,
+        # so we have to re-encode keys from a hash
+        return [key.encode("utf-8") for key in self.hashes.get(name, {}).keys()]
+
 
 class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     """Simple pipeline emulation that just stores parent redis emulation coroutines
@@ -211,6 +234,24 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def expire(self, name: str, time: timedelta) -> int:
         self._stack.append(self.redis_em.expire(name, time))
         return 0
+
+    async def hset(
+        self,
+        name: str,
+        key: Optional[str] = None,
+        value: Optional[bytes] = None,
+        mapping: Optional[Mapping[str, bytes]] = None,
+    ) -> int:
+        self._stack.append(self.redis_em.hset(name, key, value, mapping))
+        return 0
+
+    async def hget(self, name: str, key: str) -> Optional[bytes]:
+        self._stack.append(self.redis_em.hget(name, key))
+        return None
+
+    async def hkeys(self, name: str) -> list[bytes]:
+        self._stack.append(self.redis_em.hkeys(name))
+        return []
 
     async def execute(self, raise_on_error: bool = True) -> list[RedisCmdReturn]:
         results: list[RedisCmdReturn] = []
