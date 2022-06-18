@@ -78,7 +78,7 @@ class KeySetStore(GenericStore[ItemT]):
                 results = await pipe.execute()
                 return all(r == 1 for r in results)
             except Exception:
-                self.logger.exception("Unexpected error adding item")
+                self.logger.exception("Unexpected error adding item to the set")
                 return False
 
     async def remove(self, key: str_able, item: ItemT) -> bool:
@@ -104,8 +104,12 @@ class KeyListStore(GenericStore[ItemT]):
             await pipe.rpush(self._full_key(key), self.dumper(item).encode("utf-8"))
             if reset_ttl and self.expiration_time is not None:
                 await pipe.expire(self._full_key(key), self.expiration_time)
-            after_push_len, *_ = await pipe.execute()
-            return after_push_len
+            try:
+                after_push_len, *_ = await pipe.execute()
+                return after_push_len
+            except Exception:
+                self.logger.exception("Unexpected error pushing item to the list")
+                return False
 
     async def all(self, key: str_able) -> list[ItemT]:
         try:
@@ -198,3 +202,34 @@ class KeyFlagStore(GenericStore[bool]):
 
     async def is_flag_set(self, key: str_able) -> bool:
         return await self.exists(key)
+
+
+@dataclass
+class KeyDictStore(GenericStore):
+    async def set_subkey(self, key: str_able, subkey: str_able, value: ValueT, reset_ttl: bool) -> bool:
+        # NOTE: this method copy-pastes most of KeySetStore.add and KeyListStore.push
+        #       we need some way to abstract this logic
+        async with self.redis.pipeline() as pipe:
+            await pipe.hset(self._full_key(key), str(subkey), self.dumper(value))
+            if reset_ttl and self.expiration_time is not None:
+                await pipe.expire(self._full_key(key), self.expiration_time)
+            try:
+                after_push_len, *_ = await pipe.execute()
+                return bool(after_push_len)
+            except Exception:
+                self.logger.exception("Unexpected error adding subkey to hash")
+                return False
+
+    async def get_subkey(self, key: str_able, subkey: str_able) -> Optional[ValueT]:
+        try:
+            value_dump = await self.redis.hget(self._full_key(key), str(subkey))
+            if value_dump is None:
+                return None
+            return self.loader(value_dump.decode("utf-8"))
+        except Exception:
+            self.logger.exception("Unexpected error loading value")
+            return None
+
+    async def list_subkeys(self, key: str_able) -> list[str]:
+        subkeys = await self.redis.hkeys(key)
+        return [subkey.decode("utf-8") for subkey in subkeys]

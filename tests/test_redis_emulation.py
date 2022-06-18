@@ -150,3 +150,17 @@ def generate_key_value() -> tuple[str, bytes]:
 
 def generate_values(n: int) -> list[bytes]:
     return [uuid4().bytes for _ in range(n)]
+
+
+async def test_hash_operations(redis: RedisInterface):
+    assert await redis.hget("some-key", "some-subkey") is None
+    assert await redis.hkeys("some-key") == []
+
+    KEY = uuid4().hex
+    assert await redis.hset(KEY, "1", b"hello") == 1
+    assert await redis.hset(KEY, "2", b"world") == 1
+    assert await redis.hset(KEY, "3", b"foo") == 1
+    assert await redis.hset(KEY, "4", b"bar") == 1
+
+    assert await redis.hget(KEY, "3") == b"foo"
+    assert await redis.hkeys(KEY) == [b"1", b"2", b"3", b"4"]
