@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Optional
+from typing import Any, Optional, TypedDict
 from uuid import uuid4
 
 import pytest
@@ -8,6 +8,7 @@ from _pytest import fixtures
 
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import (
+    KeyDictStore,
     KeyFlagStore,
     KeyIntegerStore,
     KeyListStore,
@@ -226,3 +227,28 @@ async def test_cant_create_conflicting_stores(redis: RedisInterface):
             prefix=bot_prefix,
             redis=redis,
         )
+
+
+async def test_key_dict_store(redis: RedisInterface):
+    class UserData(TypedDict):
+        name: str
+        age: int
+
+    user_data_store = KeyDictStore[UserData](
+        name="smth",
+        prefix=generate_str(),
+        redis=redis,
+    )
+
+    await user_data_store.set_subkey("good", 1, UserData(name="alex", age=27))
+    await user_data_store.set_subkey("good", 2, UserData(name="maria", age=35))
+    await user_data_store.set_subkey("good", 9, UserData(name="sasha", age=21))
+
+    await user_data_store.set_subkey("bad", 1, UserData(name="vlad", age=69))
+    await user_data_store.set_subkey("bad", 9, UserData(name="mark", age=25))
+
+    assert await user_data_store.get_subkey("good", 1) == UserData(name="alex", age=27)
+    assert await user_data_store.get_subkey("bad", 1) == UserData(name="vlad", age=69)
+
+    assert set(await user_data_store.list_subkeys("good")) == {"1", "2", "9"}
+    assert set(await user_data_store.list_subkeys("bad")) == {"1", "9"}
