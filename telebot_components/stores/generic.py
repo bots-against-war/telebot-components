@@ -205,12 +205,12 @@ class KeyFlagStore(GenericStore[bool]):
 
 
 @dataclass
-class KeyDictStore(GenericStore):
-    async def set_subkey(self, key: str_able, subkey: str_able, value: ValueT, reset_ttl: bool) -> bool:
+class KeyDictStore(GenericStore[ValueT]):
+    async def set_subkey(self, key: str_able, subkey: str_able, value: ValueT, reset_ttl: bool = True) -> bool:
         # NOTE: this method copy-pastes most of KeySetStore.add and KeyListStore.push
         #       we need some way to abstract this logic
         async with self.redis.pipeline() as pipe:
-            await pipe.hset(self._full_key(key), str(subkey), self.dumper(value))
+            await pipe.hset(self._full_key(key), str(subkey), self.dumper(value).encode("utf-8"))
             if reset_ttl and self.expiration_time is not None:
                 await pipe.expire(self._full_key(key), self.expiration_time)
             try:
@@ -231,5 +231,5 @@ class KeyDictStore(GenericStore):
             return None
 
     async def list_subkeys(self, key: str_able) -> list[str]:
-        subkeys = await self.redis.hkeys(key)
+        subkeys = await self.redis.hkeys(self._full_key(key))
         return [subkey.decode("utf-8") for subkey in subkeys]
