@@ -1,33 +1,18 @@
 import datetime
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, fields
 from datetime import date, tzinfo
 from enum import Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    Optional,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-    final,
-)
+from typing import Callable, ClassVar, Dict, Generic, Optional, Type, TypeVar
 
 from telebot import types as tg
+from telebot.callback_data import CallbackData
 
-from telebot_components.stores.language import (
-    AnyText,
-    Language,
-    MaybeLanguage,
-    any_text_to_str,
-    validate_multilang_text,
-)
+from telebot_components.stores.language import AnyText, MaybeLanguage, any_text_to_str
+
+logger = logging.getLogger(__name__)
 
 FieldValueT = TypeVar("FieldValueT")
-
-ReplyKeyboard = Union[tg.ReplyKeyboardMarkup, tg.ReplyKeyboardRemove]
 
 
 class BadFieldValueError(Exception):
@@ -76,6 +61,12 @@ class NextFieldGetter:
 
 
 @dataclass
+class MessageProcessingResult(Generic[FieldValueT]):
+    response_to_user: Optional[str]
+    parsed_value: Optional[FieldValueT]
+
+
+@dataclass
 class FormField(Generic[FieldValueT]):
     name: str
     required: bool
@@ -83,15 +74,18 @@ class FormField(Generic[FieldValueT]):
     echo_result_template: Optional[AnyText]  # should contain 1 '{}' for field value
     next_field_getter: NextFieldGetter
 
-    @final
-    def process_message(
-        self, message: tg.Message, language: MaybeLanguage
-    ) -> Tuple[Optional[str], Optional[FieldValueT]]:
+    def process_message(self, message: tg.Message, language: MaybeLanguage) -> MessageProcessingResult[FieldValueT]:
         try:
             value = self.parse(message)
-            return self.get_result_message(value, language), value
+            return MessageProcessingResult(
+                response_to_user=self.get_result_message(value, language),
+                parsed_value=value,
+            )
         except BadFieldValueError as error:
-            return any_text_to_str(error.msg, language), None
+            return MessageProcessingResult(
+                response_to_user=any_text_to_str(error.msg, language),
+                parsed_value=None,
+            )
 
     async def get_query_message(self, user: tg.User) -> AnyText:
         return self.query_message
@@ -102,20 +96,28 @@ class FormField(Generic[FieldValueT]):
     def get_result_message(self, value: FieldValueT, language: MaybeLanguage) -> Optional[str]:
         if self.echo_result_template is None:
             return None
-        return any_text_to_str(self.echo_result_template, language).format(self.value_to_str(value, language))
+        else:
+            return any_text_to_str(self.echo_result_template, language).format(self.value_to_str(value, language))
 
-    def get_reply_markup(self, language: MaybeLanguage) -> ReplyKeyboard:
+    def get_reply_markup(self, language: MaybeLanguage, current_value: Optional[FieldValueT] = None) -> tg.ReplyMarkup:
         return tg.ReplyKeyboardRemove()
 
     # NOTE: not using abstractmethod here because of https://github.com/python/mypy/issues/5374
     def parse(self, message: tg.Message) -> FieldValueT:
-        raise NotImplementedError("FormField cannot be used directly, please use concrete suclasses")
+        raise NotImplementedError("FormField cannot be used directly, please use concrete subclasses")
 
     def texts(self) -> list[AnyText]:
-        """Used for build-time validation that all the fields in the form are properly localised"""
+        """Used for build-time validation that all the fields in the form are properly localised.
+
+        Automatically collects AnyText-typed fields using dataclass introspection. Anything else must be added
+        via custom_texts() hook.
+        """
         res = [self.query_message]
         if self.echo_result_template is not None:
             res.append(self.echo_result_template)
+        for field in fields(self):
+            if field.type == AnyText:
+                res.append(getattr(self, field.name))
         res.extend(self.custom_texts())
         return res
 
@@ -135,9 +137,6 @@ class PlainTextField(FormField[str]):
             raise BadFieldValueError(self.empty_text_error_msg)
         return text
 
-    def custom_texts(self) -> list[AnyText]:
-        return [self.empty_text_error_msg]
-
 
 @dataclass
 class IntegerField(FormField[int]):
@@ -149,9 +148,6 @@ class IntegerField(FormField[int]):
             return int(text)
         except Exception:
             raise BadFieldValueError(self.not_an_integer_error_msg)
-
-    def custom_texts(self) -> list[AnyText]:
-        return [self.not_an_integer_error_msg]
 
 
 @dataclass
@@ -180,35 +176,160 @@ class DateField(FormField[date]):
         return parsed_date
 
     def custom_texts(self) -> list[AnyText]:
-        res = [self.bad_date_format_error_msg]
         if self.cant_be_in_the_past_error_msg is not None:
-            res.append(self.cant_be_in_the_past_error_msg)
-        return res
+            return [self.cant_be_in_the_past_error_msg]
+        else:
+            return []
 
 
 @dataclass
-class EnumField(FormField[Enum]):
+class _EnumDefinedFieldMixin:
     EnumClass: Type[Enum]
+
+    def custom_texts(self) -> list[AnyText]:
+        return [option.value for option in self.EnumClass]
+
+    def parse_enum(self, text: str) -> Optional[Enum]:
+        for enum in self.EnumClass:
+            for _, lang_text in enum.value.items():
+                if lang_text == text:
+                    return enum
+        return None
+
+
+@dataclass
+class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
     invalid_enum_value_error_msg: AnyText
     menu_row_width: int = 2
 
     def value_to_str(self, value: Enum, language: MaybeLanguage) -> str:
         return any_text_to_str(value.value, language)
 
-    def get_reply_markup(self, language: MaybeLanguage) -> tg.ReplyKeyboardMarkup:
+    def get_reply_markup(
+        self, language: MaybeLanguage, current_value: Optional[FieldValueT] = None
+    ) -> tg.ReplyKeyboardMarkup:
         kbd = tg.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=self.menu_row_width)
         for option in self.EnumClass:
             kbd.add(tg.KeyboardButton(any_text_to_str(option.value, language)))
         return kbd
 
     def parse(self, message: tg.Message) -> Enum:
-        for enum in self.EnumClass:
-            for _, lang_text in enum.value.items():
-                if lang_text == message.text:
-                    return enum
-        raise BadFieldValueError(self.invalid_enum_value_error_msg)
+        parsed_enum = self.parse_enum(message.text_content)
+        if parsed_enum is None:
+            raise BadFieldValueError(self.invalid_enum_value_error_msg)
+        else:
+            return parsed_enum
 
-    def custom_texts(self) -> list[AnyText]:
-        res: list[AnyText] = [option.value for option in self.EnumClass]
-        res.append(self.invalid_enum_value_error_msg)
-        return res
+
+EnumField = SingleSelectField  # backward compatibility
+
+
+INLINE_FIELD_CALLBACK_DATA = CallbackData("fieldname", "payload", prefix="inline-form")
+
+
+@dataclass
+class CallbackProcessingResult(Generic[FieldValueT]):
+    response_to_user: Optional[str]
+    update_inline_markup: bool
+    complete_field: bool
+    new_field_value: FieldValueT
+
+
+@dataclass
+class InlineFormField(FormField[FieldValueT]):
+    def new_callback_data(self, payload: str) -> str:
+        return INLINE_FIELD_CALLBACK_DATA.new(fieldname=self.name, payload=payload)
+
+    def process_callback_query(
+        self, callback_payload: str, current_value: Optional[set[Enum]], language: MaybeLanguage
+    ) -> CallbackProcessingResult[FieldValueT]:
+        raise NotImplementedError("InlineFormField cannot be used directly, please use concrete subclasses")
+
+
+@dataclass
+class StrictlyInlineFormField(InlineFormField[FieldValueT]):
+    please_use_inline_menu: AnyText
+
+    def process_message(self, message: tg.Message, language: MaybeLanguage) -> MessageProcessingResult[FieldValueT]:
+        return MessageProcessingResult(any_text_to_str(self.please_use_inline_menu, language), None)
+
+
+@dataclass
+class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[Enum]]):
+    finish_field_button_caption: AnyText
+
+    OPTION_PAYLOAD_PREFIX: ClassVar[str] = "opt"
+    FINISH_FIELD_PAYLOAD: ClassVar[str] = "finish"
+
+    def value_to_str(self, value: set[Enum], language: MaybeLanguage) -> str:
+        return ", ".join([any_text_to_str(opt.value, language) for opt in value])
+
+    def process_callback_query(
+        self, callback_payload: str, current_value: Optional[set[Enum]], language: MaybeLanguage
+    ) -> CallbackProcessingResult[set[Enum]]:
+        if current_value is None:
+            current_value = set()
+        if callback_payload == self.FINISH_FIELD_PAYLOAD:
+            return CallbackProcessingResult(
+                response_to_user=self.get_result_message(current_value, language),
+                update_inline_markup=False,
+                complete_field=True,
+                new_field_value=current_value,
+            )
+        elif callback_payload.startswith(self.OPTION_PAYLOAD_PREFIX):
+            selected_option = self.parse_enum(callback_payload.removeprefix(self.OPTION_PAYLOAD_PREFIX))
+            if selected_option is None:
+                logger.error(
+                    f"Error parsing callback payload {callback_payload!r} as Enum value {list(self.EnumClass)}"
+                )
+                return CallbackProcessingResult(
+                    response_to_user="Something went wrong, we're on it!",
+                    update_inline_markup=True,
+                    complete_field=False,
+                    new_field_value=current_value,
+                )
+            new_value: set[Enum] = current_value.copy()
+            if selected_option in new_value:
+                new_value.remove(selected_option)
+            else:
+                new_value.add(selected_option)
+            return CallbackProcessingResult(
+                response_to_user=None,
+                update_inline_markup=True,
+                complete_field=False,
+                new_field_value=new_value,
+            )
+        else:
+            logger.error(f"Error parsing callback payload {callback_payload!r}, unknown prefix!")
+            return CallbackProcessingResult(
+                response_to_user="Something went wrong, we're on it!",
+                update_inline_markup=True,
+                complete_field=False,
+                new_field_value=current_value,
+            )
+
+    def get_reply_markup(
+        self, language: MaybeLanguage, current_value: Optional[set[Enum]] = None
+    ) -> tg.InlineKeyboardMarkup:
+        if current_value is None:
+            current_value = set()
+        keyboard = tg.InlineKeyboardMarkup(row_width=1)
+        for option in self.EnumClass:
+            button_text = any_text_to_str(option.value, language)
+            if option in current_value:
+                button_text_marked = "☑️ " + button_text
+            else:
+                button_text_marked = "⬜ " + button_text
+            keyboard.add(
+                tg.InlineKeyboardButton(
+                    text=button_text_marked,
+                    callback_data=self.new_callback_data(payload=self.OPTION_PAYLOAD_PREFIX + button_text),
+                )
+            )
+        keyboard.add(
+            tg.InlineKeyboardButton(
+                text=any_text_to_str(self.finish_field_button_caption, language),
+                callback_data=self.FINISH_FIELD_PAYLOAD,
+            )
+        )
+        return keyboard

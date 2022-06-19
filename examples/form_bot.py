@@ -9,10 +9,10 @@ from telebot import types as tg
 from telebot.runner import BotRunner
 
 from telebot_components.form.field import (
-    EnumField,
     IntegerField,
     NextFieldGetter,
     PlainTextField,
+    SingleSelectField,
 )
 from telebot_components.form.form import Form
 from telebot_components.form.handler import FormHandler, FormHandlerConfig
@@ -89,7 +89,7 @@ class SchoolSubject(Enum):
     }
 
 
-favorite_subject_field = EnumField(
+favorite_subject_field = SingleSelectField(
     name="favorite_subject",
     required=True,
     query_message={
@@ -111,7 +111,7 @@ class YesNo(Enum):
     NO = {Language.RU: "Нет", Language.EN: "No"}
 
 
-has_finished_school_field = EnumField(
+has_finished_school_field = SingleSelectField(
     name="has_finished_school",
     required=True,
     query_message={
