@@ -230,7 +230,7 @@ class FormState(Generic[FormResultT]):
         if callback_data["fieldname"] != self.current_field.name:
             return _FormStateUpdateEffect(_FormAction.DO_NOTHING)
         field_result = self.current_field.process_callback_query(
-            callback_payload=callback_data["fieldname"],
+            callback_payload=callback_data["payload"],
             current_value=self.result_so_far.get(self.current_field.name),
             language=language,
         )
@@ -356,7 +356,7 @@ class FormHandler(Generic[FormResultT]):
             await self.form_state_store.save(user_id, form_state)
             user_action = state_update_effect.user_action
             if user_action is not None:
-                if user_action.send_message_html is not None:
+                if user_action.send_message_html:
                     await bot.send_message(
                         user_id,
                         text=user_action.send_message_html,
@@ -397,11 +397,7 @@ class FormHandler(Generic[FormResultT]):
                 form_exit_context_constructor=form_exit_context_constructor,
             )
 
-        @bot.callback_query_handler(
-            func=currently_filling_form,  # type: ignore
-            chat_types=[constants.ChatType.private],
-            callback_data=INLINE_FIELD_CALLBACK_DATA,
-        )
+        @bot.callback_query_handler(callback_data=INLINE_FIELD_CALLBACK_DATA)
         async def form_inline_action_handler(call: tg.CallbackQuery):
             async def form_state_updater(form_state: FormState, language: MaybeLanguage):
                 return await form_state.update_with_callback_query(call, language, self.config)
@@ -409,12 +405,19 @@ class FormHandler(Generic[FormResultT]):
             def form_exit_context_constructor(bot: AsyncTeleBot, result: FormResultT):
                 return FormExitContext(bot, call, result)
 
-            await form_action_handler(
-                user=call.from_user,
-                last_message_id=call.message.id,
-                form_state_updater=form_state_updater,
-                form_exit_context_constructor=form_exit_context_constructor,
-            )
+            try:
+                if not await currently_filling_form(call):
+                    return
+                await form_action_handler(
+                    user=call.from_user,
+                    last_message_id=call.message.id,
+                    form_state_updater=form_state_updater,
+                    form_exit_context_constructor=form_exit_context_constructor,
+                )
+            except Exception:
+                logger.exception("Unexpected error processing form action")
+            finally:
+                await bot.answer_callback_query(call.id)
 
     async def start(
         self, bot: AsyncTeleBot, user: tg.User, initial_form_result: Optional[FormResultT] = None

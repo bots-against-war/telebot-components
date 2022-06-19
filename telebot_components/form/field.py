@@ -191,9 +191,13 @@ class _EnumDefinedFieldMixin:
 
     def parse_enum(self, text: str) -> Optional[Enum]:
         for enum in self.EnumClass:
-            for _, lang_text in enum.value.items():
-                if lang_text == text:
+            if isinstance(enum.value, str):
+                if text == enum.value:
                     return enum
+            elif isinstance(enum.value, dict):
+                for _, lang_text in enum.value.items():
+                    if lang_text == text:
+                        return enum
         return None
 
 
@@ -329,7 +333,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
         keyboard.add(
             tg.InlineKeyboardButton(
                 text=any_text_to_str(self.finish_field_button_caption, language),
-                callback_data=self.FINISH_FIELD_PAYLOAD,
+                callback_data=self.new_callback_data(payload=self.FINISH_FIELD_PAYLOAD),
             )
         )
         return keyboard
