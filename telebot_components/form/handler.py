@@ -171,6 +171,7 @@ class FormState(Generic[FormResultT]):
                 result = self.current_field.process_message(message, language)
                 field_ok = result.parsed_value is not None
                 result_msg = result.response_to_user
+                value = result.parsed_value
 
             if not field_ok:
                 if result_msg:

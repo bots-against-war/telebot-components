@@ -1,9 +1,10 @@
+import copy
 import datetime
 import logging
 from dataclasses import dataclass, fields
 from datetime import date, tzinfo
 from enum import Enum
-from typing import Callable, ClassVar, Dict, Generic, Optional, Type, TypeVar
+from typing import Callable, ClassVar, Dict, Generic, Optional, Type, TypedDict, TypeVar
 
 from telebot import types as tg
 from telebot.callback_data import CallbackData
@@ -228,7 +229,7 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
 EnumField = SingleSelectField  # backward compatibility
 
 
-INLINE_FIELD_CALLBACK_DATA = CallbackData("fieldname", "payload", prefix="inline-form")
+INLINE_FIELD_CALLBACK_DATA = CallbackData("fieldname", "payload", prefix="inline_field")
 
 
 @dataclass
@@ -245,7 +246,7 @@ class InlineFormField(FormField[FieldValueT]):
         return INLINE_FIELD_CALLBACK_DATA.new(fieldname=self.name, payload=payload)
 
     def process_callback_query(
-        self, callback_payload: str, current_value: Optional[set[Enum]], language: MaybeLanguage
+        self, callback_payload: str, current_value: Optional[FieldValueT], language: MaybeLanguage
     ) -> CallbackProcessingResult[FieldValueT]:
         raise NotImplementedError("InlineFormField cannot be used directly, please use concrete subclasses")
 
@@ -258,26 +259,68 @@ class StrictlyInlineFormField(InlineFormField[FieldValueT]):
         return MessageProcessingResult(any_text_to_str(self.please_use_inline_menu, language), None)
 
 
+class MultipleSelectState(TypedDict):
+    selected: set[Enum]
+    page: int
+
+
 @dataclass
-class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[Enum]]):
+class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[MultipleSelectState]):
     finish_field_button_caption: AnyText
+    inline_menu_row_width: int
+    options_per_page: int
 
     OPTION_PAYLOAD_PREFIX: ClassVar[str] = "opt"
     FINISH_FIELD_PAYLOAD: ClassVar[str] = "finish"
+    NEXT_PAGE_PAYLOAD: ClassVar[str] = "next"
+    PREV_PAGE_PAYLOAD: ClassVar[str] = "prev"
+    NOOP_PAYLOAD: ClassVar[str] = "noop"
 
-    def value_to_str(self, value: set[Enum], language: MaybeLanguage) -> str:
-        return ", ".join([any_text_to_str(opt.value, language) for opt in value])
+    def value_to_str(self, value: MultipleSelectState, language: MaybeLanguage) -> str:
+        selected = value["selected"]
+        selected_str = [any_text_to_str(opt.value, language) for opt in selected]
+        return ", ".join(sorted(selected_str))
+
+    @property
+    def total_pages(self) -> int:
+        return 1 + (len(self.EnumClass) // self.options_per_page)
+
+    def init_state(self) -> MultipleSelectState:
+        return MultipleSelectState(selected=set(), page=0)
 
     def process_callback_query(
-        self, callback_payload: str, current_value: Optional[set[Enum]], language: MaybeLanguage
-    ) -> CallbackProcessingResult[set[Enum]]:
+        self, callback_payload: str, current_value: Optional[MultipleSelectState], language: MaybeLanguage
+    ) -> CallbackProcessingResult[MultipleSelectState]:
         if current_value is None:
-            current_value = set()
+            current_value = self.init_state()
+        if callback_payload == self.NOOP_PAYLOAD:
+            return CallbackProcessingResult(
+                response_to_user=None,
+                update_inline_markup=False,
+                complete_field=False,
+                new_field_value=current_value,
+            )
         if callback_payload == self.FINISH_FIELD_PAYLOAD:
             return CallbackProcessingResult(
                 response_to_user=self.get_result_message(current_value, language),
                 update_inline_markup=False,
                 complete_field=True,
+                new_field_value=current_value,
+            )
+        elif callback_payload == self.NEXT_PAGE_PAYLOAD:
+            current_value["page"] = min(self.total_pages - 1, current_value["page"] + 1)
+            return CallbackProcessingResult(
+                response_to_user=None,
+                update_inline_markup=True,
+                complete_field=False,
+                new_field_value=current_value,
+            )
+        elif callback_payload == self.PREV_PAGE_PAYLOAD:
+            current_value["page"] = max(0, current_value["page"] - 1)
+            return CallbackProcessingResult(
+                response_to_user=None,
+                update_inline_markup=True,
+                complete_field=False,
                 new_field_value=current_value,
             )
         elif callback_payload.startswith(self.OPTION_PAYLOAD_PREFIX):
@@ -292,11 +335,11 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                     complete_field=False,
                     new_field_value=current_value,
                 )
-            new_value: set[Enum] = current_value.copy()
-            if selected_option in new_value:
-                new_value.remove(selected_option)
+            new_value = copy.deepcopy(current_value)
+            if selected_option in new_value["selected"]:
+                new_value["selected"].remove(selected_option)
             else:
-                new_value.add(selected_option)
+                new_value["selected"].add(selected_option)
             return CallbackProcessingResult(
                 response_to_user=None,
                 update_inline_markup=True,
@@ -313,24 +356,43 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
             )
 
     def get_reply_markup(
-        self, language: MaybeLanguage, current_value: Optional[set[Enum]] = None
+        self, language: MaybeLanguage, current_value: Optional[MultipleSelectState] = None
     ) -> tg.InlineKeyboardMarkup:
         if current_value is None:
-            current_value = set()
-        keyboard = tg.InlineKeyboardMarkup(row_width=1)
-        for option in self.EnumClass:
-            button_text = any_text_to_str(option.value, language)
-            if option in current_value:
-                button_text_marked = "☑️ " + button_text
+            current_value = self.init_state()
+        all_options = list(self.EnumClass)
+        page_start_idx = current_value["page"] * self.options_per_page
+        page_end_idx = (current_value["page"] + 1) * self.options_per_page
+        option_buttons: list[tg.InlineKeyboardButton] = []
+        for option in all_options[page_start_idx:page_end_idx]:
+            option_text = any_text_to_str(option.value, language)
+            if option in current_value["selected"]:
+                button_text = "✅ " + option_text
             else:
-                button_text_marked = "⬜ " + button_text
-            keyboard.add(
+                button_text = "⬜ " + option_text
+            option_buttons.append(
                 tg.InlineKeyboardButton(
-                    text=button_text_marked,
-                    callback_data=self.new_callback_data(payload=self.OPTION_PAYLOAD_PREFIX + button_text),
+                    text=button_text,
+                    callback_data=self.new_callback_data(payload=self.OPTION_PAYLOAD_PREFIX + option_text),
                 )
             )
-        keyboard.add(
+        keyboard = tg.InlineKeyboardMarkup()
+        keyboard.add(*option_buttons, row_width=self.inline_menu_row_width)
+        if self.total_pages > 1:
+            noop_button = tg.InlineKeyboardButton(
+                text=" ", callback_data=self.new_callback_data(payload=self.NOOP_PAYLOAD)
+            )
+            prev_page_button = tg.InlineKeyboardButton(
+                text="⬅️", callback_data=self.new_callback_data(payload=self.PREV_PAGE_PAYLOAD)
+            )
+            next_page_button = tg.InlineKeyboardButton(
+                text="➡️", callback_data=self.new_callback_data(payload=self.NEXT_PAGE_PAYLOAD)
+            )
+            keyboard.row(
+                prev_page_button if current_value["page"] > 0 else noop_button,
+                next_page_button if current_value["page"] < self.total_pages - 1 else noop_button,
+            )
+        keyboard.row(
             tg.InlineKeyboardButton(
                 text=any_text_to_str(self.finish_field_button_caption, language),
                 callback_data=self.new_callback_data(payload=self.FINISH_FIELD_PAYLOAD),

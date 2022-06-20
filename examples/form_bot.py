@@ -10,12 +10,17 @@ from telebot.runner import BotRunner
 
 from telebot_components.form.field import (
     IntegerField,
+    MultipleSelectField,
     NextFieldGetter,
     PlainTextField,
     SingleSelectField,
 )
 from telebot_components.form.form import Form
-from telebot_components.form.handler import FormHandler, FormHandlerConfig
+from telebot_components.form.handler import (
+    FormExitContext,
+    FormHandler,
+    FormHandlerConfig,
+)
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.language import Language, LanguageStore
 
@@ -83,25 +88,43 @@ class SchoolSubject(Enum):
         Language.RU: "Языки",
         Language.EN: "Language",
     }
+    BIOLOGY = {
+        Language.RU: "Биология",
+        Language.EN: "Biology",
+    }
+    LAW = {
+        Language.RU: "Право",
+        Language.EN: "Law",
+    }
+    PE = {
+        Language.RU: "Физкультура",
+        Language.EN: "Physical Education",
+    }
     OTHER = {
         Language.RU: "Другое",
         Language.EN: "Other",
     }
 
 
-favorite_subject_field = SingleSelectField(
+favorite_subject_field = MultipleSelectField(
     name="favorite_subject",
     required=True,
     query_message={
-        Language.RU: "Выберите ваш любимый предмет в школе.",
-        Language.EN: "Choose your favorite school subject.",
+        Language.RU: "Выберите ваши любимые предметы в школе.",
+        Language.EN: "Choose your favorite school subjects.",
     },
     echo_result_template=None,
     EnumClass=SchoolSubject,
-    invalid_enum_value_error_msg={
-        Language.RU: "Пожалуйста, используйте меню.",
-        Language.EN: "Please use menu.",
+    please_use_inline_menu={
+        Language.RU: "Пожалуйста, используйте меню под сообщением.",
+        Language.EN: "Please use inline menu.",
     },
+    finish_field_button_caption={
+        Language.RU: "Завершить выбор",
+        Language.EN: "Finish selection",
+    },
+    inline_menu_row_width=2,
+    options_per_page=6,
     next_field_getter=NextFieldGetter.form_end(),
 )
 
@@ -252,7 +275,8 @@ def create_form_bot(redis: RedisInterface, token: str):
     async def default_handler(message: tg.Message):
         await form_handler.start(bot, message.from_user)
 
-    async def on_form_cancelled(bot: AsyncTeleBot, last_message: tg.Message, user: tg.User, result: dict):
+    async def on_form_cancelled(context: FormExitContext):
+        user = context.last_update.from_user
         language = await language_store.get_user_language(user)
         await bot.send_message(
             user.id,
@@ -261,10 +285,10 @@ def create_form_bot(redis: RedisInterface, token: str):
             ],
         )
 
-    async def on_form_completed(bot: AsyncTeleBot, last_message: tg.Message, user: tg.User, result: dict):
-        form_result_dump = pformat(result, indent=2, width=70, sort_dicts=False)
+    async def on_form_completed(context: FormExitContext):
+        form_result_dump = pformat(context.result, indent=2, width=70, sort_dicts=False)
         await bot.send_message(
-            user.id,
+            context.last_update.from_user.id,
             f"<pre>{html.escape(form_result_dump, quote=False)}</pre>",
             parse_mode="HTML",
         )
