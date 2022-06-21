@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass, fields
 from datetime import timedelta
 from itertools import chain
-from typing import Callable, Coroutine, Optional, Protocol, TypedDict, cast
+from typing import Any, Callable, Coroutine, Optional, Protocol, TypedDict, cast
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -236,8 +236,8 @@ class FeedbackHandler:
         if self.banned_users_store is not None:
             await self.banned_users_store.ban_user(origin_chat_id)
 
-    async def save_message_from_user(self, origin_message: tg.Message, forwarded_message: tg.Message):
-        origin_chat_id = origin_message.chat.id
+    async def save_message_from_user(self, author: tg.User, forwarded_message: tg.Message):
+        origin_chat_id = author.id
         await self.origin_chat_id_store.save(forwarded_message.id, origin_chat_id)
         await self.user_related_messages_store.add(origin_chat_id, forwarded_message.id, reset_ttl=True)
         await self.message_log_store.push(origin_chat_id, forwarded_message.id, reset_ttl=True)
@@ -332,6 +332,137 @@ class FeedbackHandler:
     def _admin_chat_message_filter(self, message: tg.Message) -> bool:
         return message.chat.id == self.admin_chat_id and message.reply_to_message is not None
 
+    async def _handle_user_message(
+        self,
+        bot: AsyncTeleBot,
+        user: tg.User,
+        message_forwarder: Callable[[], Coroutine[None, None, tg.Message]],
+        user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
+        origin_message_to_export: Optional[tg.Message],
+    ):
+        if self.banned_users_store is not None and await self.banned_users_store.is_banned(user.id):
+            return
+        anti_spam_status = await self.anti_spam.status(user)
+        if anti_spam_status is AntiSpamStatus.SOFT_BAN:
+            return
+
+        if self.language_store is not None:
+            language = await self.language_store.get_user_language(user)
+        else:
+            language = None
+        if anti_spam_status is AntiSpamStatus.THROTTLING:
+            anti_spam = cast(AntiSpam, self.anti_spam)  # only real AntiSpam can return this status
+            await user_replier(self.service_messages.throttling(anti_spam.config, language), None)
+            return
+
+        if self.config.hashtags_in_admin_chat:
+            category_hashtag = None  # sentinel
+            if self.category_store is not None:
+                category = await self.category_store.get_user_category(user)
+                if category is None:
+                    if self.config.force_category_selection:
+                        # see validate_service_messages
+                        you_must_select_category = cast(AnyText, self.service_messages.you_must_select_category)
+                        await user_replier(
+                            any_text_to_str(you_must_select_category, language),
+                            await self.category_store.markup_for_user(user),
+                        )
+                        return
+                else:
+                    category_hashtag = category.hashtag
+
+            # see runtime check for the hashtags_in_admin_chat flag and creation of the store
+            hashtag_msg_data = await self.recent_hashtag_message_for_user_store.load(user.id)  # type: ignore
+            if hashtag_msg_data is None or (
+                category_hashtag is not None and category_hashtag not in hashtag_msg_data["hashtags"]
+            ):
+                # sending a new hashtag message
+                if self.config.unanswered_hashtag is not None:
+                    hashtags = [self.config.unanswered_hashtag]
+                else:
+                    hashtags = []
+                if category_hashtag is not None:
+                    hashtags.append(category_hashtag)
+                # TODO: multiple categories per user support
+                hashtag_msg = await bot.send_message(self.admin_chat_id, _join_hashtags(hashtags))
+                await self.user_related_messages_store.add(user.id, hashtag_msg.id, reset_ttl=False)
+                hashtag_msg_data = HashtagMessageData(message_id=hashtag_msg.id, hashtags=hashtags)
+                await self.recent_hashtag_message_for_user_store.save(user.id, hashtag_msg_data)  # type: ignore
+
+        preforwarded_msg = None
+        if self.config.before_forwarding is not None:
+            preforwarded_msg = await self.config.before_forwarding(user)
+            if isinstance(preforwarded_msg, tg.Message):
+                await self.save_message_from_user(user, preforwarded_msg)
+
+        forwarded_msg = await message_forwarder()
+        await self.save_message_from_user(user, forwarded_msg)
+        postforwarded_msg = None
+        if self.config.after_forwarding is not None:
+            postforwarded_msg = await self.config.after_forwarding(user)
+            if isinstance(postforwarded_msg, tg.Message):
+                await self.save_message_from_user(user, postforwarded_msg)
+
+        if self.config.hashtags_in_admin_chat:
+            await self.hashtag_message_for_forwarded_message_store.save(forwarded_msg.id, hashtag_msg_data)  # type: ignore
+
+        if self.service_messages.forwarded_to_admin_ok is not None:
+            if self.recently_sent_confirmation_flag_store is not None:
+                confirmation_recently_sent = await self.recently_sent_confirmation_flag_store.is_flag_set(user.id)
+            else:
+                confirmation_recently_sent = False
+            if not confirmation_recently_sent:
+                await user_replier(
+                    any_text_to_str(self.service_messages.forwarded_to_admin_ok, language),
+                    None,
+                )
+                if self.recently_sent_confirmation_flag_store is not None:
+                    await self.recently_sent_confirmation_flag_store.set_flag(user.id)
+
+        if self.trello_integration is not None:
+            if origin_message_to_export is None:
+                self.logger.warning(
+                    "Trello integration is set up, but user message handler "
+                    + "was not supplied with original message to export to Trello"
+                )
+                return
+            category = await self.category_store.get_user_category(user) if self.category_store else None
+
+            def postprocess_card_description(descr: str) -> str:
+                # HACK: we're pretending pre- and postforwarded messages are actually part of user's message
+                if preforwarded_msg is not None:
+                    descr = "[pre]: " + preforwarded_msg.text_content + "\n\n" + descr
+                if postforwarded_msg is not None:
+                    descr = descr + "\n\n" + "[post]:" + postforwarded_msg.text_content
+                return descr
+
+            await self.trello_integration.export_message(
+                origin_message_to_export,
+                forwarded_msg,
+                category,
+                postprocess_card_description=postprocess_card_description,
+            )
+
+    async def emulate_user_message(self, bot: AsyncTeleBot, user: tg.User, text: str):
+        """Sometimes we want FeedbackHandler to act like the user has sent us a message, but without actually
+        a message there (they might have pressed a button or interacted with the bot in some other way). This
+        message can be used in such cases.
+        """
+
+        async def message_forwarder() -> tg.Message:
+            return await bot.send_message(self.admin_chat_id, text=text)
+
+        async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> tg.Message:
+            return await bot.send_message(user.id, text=text, reply_markup=reply_markup)
+
+        await self._handle_user_message(
+            bot=bot,
+            user=user,
+            message_forwarder=message_forwarder,
+            user_replier=user_replier,
+            origin_message_to_export=None,
+        )
+
     def setup(self, bot: AsyncTeleBot):
         @bot.message_handler(
             func=cast(FilterFunc, self._user_message_filter),
@@ -340,94 +471,21 @@ class FeedbackHandler:
             priority=-100,  # lower priority to process the rest of the handlers first
         )
         async def user_to_bot(message: tg.Message):
-            user = message.from_user
-            if self.banned_users_store is not None and await self.banned_users_store.is_banned(user.id):
-                return
-            anti_spam_status = await self.anti_spam.status(user)
-            if anti_spam_status is AntiSpamStatus.SOFT_BAN:
-                return
+            async def message_forwarder() -> tg.Message:
+                return await bot.forward_message(
+                    self.admin_chat_id, from_chat_id=message.chat.id, message_id=message.id
+                )
 
-            if self.language_store is not None:
-                language = await self.language_store.get_user_language(user)
-            else:
-                language = None
-            if anti_spam_status is AntiSpamStatus.THROTTLING:
-                anti_spam = cast(AntiSpam, self.anti_spam)  # only real AntiSpam can return this status
-                await bot.reply_to(message, self.service_messages.throttling(anti_spam.config, language))
-                return
+            async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> tg.Message:
+                return await bot.reply_to(message, text, reply_markup=reply_markup)
 
-            if self.config.hashtags_in_admin_chat:
-                category_hashtag = None  # sentinel
-                if self.category_store is not None:
-                    category = await self.category_store.get_user_category(user)
-                    if category is None:
-                        if self.config.force_category_selection:
-                            # see validate_service_messages
-                            you_must_select_category = cast(AnyText, self.service_messages.you_must_select_category)
-                            await bot.reply_to(
-                                message,
-                                any_text_to_str(you_must_select_category, language),
-                                reply_markup=(await self.category_store.markup_for_user(user)),
-                            )
-                            return
-                    else:
-                        category_hashtag = category.hashtag
-
-                # see runtime check for the hashtags_in_admin_chat flag and creation of the store
-                hashtag_msg_data = await self.recent_hashtag_message_for_user_store.load(user.id)  # type: ignore
-                if hashtag_msg_data is None or (
-                    category_hashtag is not None and category_hashtag not in hashtag_msg_data["hashtags"]
-                ):
-                    # sending a new hashtag message
-                    if self.config.unanswered_hashtag is not None:
-                        hashtags = [self.config.unanswered_hashtag]
-                    else:
-                        hashtags = []
-                    if category_hashtag is not None:
-                        hashtags.append(category_hashtag)
-                    # TODO: multiple categories per user support
-                    hashtag_msg = await bot.send_message(self.admin_chat_id, _join_hashtags(hashtags))
-                    await self.user_related_messages_store.add(user.id, hashtag_msg.id, reset_ttl=False)
-                    hashtag_msg_data = HashtagMessageData(message_id=hashtag_msg.id, hashtags=hashtags)
-                    await self.recent_hashtag_message_for_user_store.save(user.id, hashtag_msg_data)  # type: ignore
-
-            preforwarded_msg = None
-            if self.config.before_forwarding is not None:
-                preforwarded_msg = await self.config.before_forwarding(user)
-                if isinstance(preforwarded_msg, tg.Message):
-                    await self.save_message_from_user(message, preforwarded_msg)
-            forwarded_msg = await bot.forward_message(
-                chat_id=self.admin_chat_id, from_chat_id=message.chat.id, message_id=message.id
+            await self._handle_user_message(
+                bot=bot,
+                user=message.from_user,
+                message_forwarder=message_forwarder,
+                user_replier=user_replier,
+                origin_message_to_export=message,
             )
-            await self.save_message_from_user(message, forwarded_msg)
-            postforwarded_msg = None
-            if self.config.after_forwarding is not None:
-                postforwarded_msg = await self.config.after_forwarding(user)
-                if isinstance(postforwarded_msg, tg.Message):
-                    await self.save_message_from_user(message, postforwarded_msg)
-
-            if self.config.hashtags_in_admin_chat:
-                await self.hashtag_message_for_forwarded_message_store.save(forwarded_msg.id, hashtag_msg_data)  # type: ignore
-
-            if self.service_messages.forwarded_to_admin_ok is not None:
-                if self.recently_sent_confirmation_flag_store is not None:
-                    confirmation_recently_sent = await self.recently_sent_confirmation_flag_store.is_flag_set(user.id)
-                else:
-                    confirmation_recently_sent = False
-                if not confirmation_recently_sent:
-                    await bot.reply_to(message, any_text_to_str(self.service_messages.forwarded_to_admin_ok, language))
-                    if self.recently_sent_confirmation_flag_store is not None:
-                        await self.recently_sent_confirmation_flag_store.set_flag(user.id)
-
-            if self.trello_integration is not None:
-                category = await self.category_store.get_user_category(user) if self.category_store else None
-                # HACK: we're pretending pre- and postforwarded messages are actually part of user's message, that's not good
-                card_text = message.text_content
-                if preforwarded_msg is not None:
-                    card_text = "[pre]: " + preforwarded_msg.text_content + "\n\n" + card_text
-                if postforwarded_msg is not None:
-                    card_text = card_text + "\n\n" + "[post]:" + postforwarded_msg.text_content
-                await self.trello_integration.export_message(message, forwarded_msg, category)
 
         @bot.message_handler(chat_id=[self.admin_chat_id], commands=["help"])
         async def admin_chat_help(message: tg.Message):
@@ -464,7 +522,8 @@ class FeedbackHandler:
                 # telegram API returns and error if there's nothing to change
                 self.logger.info(f"Error updating hashtag message: {e}")
                 pass
-            await self.hashtag_message_for_forwarded_message_store.save(message_id, hashtag_message_data)
+            finally:
+                await self.hashtag_message_for_forwarded_message_store.save(message_id, hashtag_message_data)
 
         @bot.message_handler(
             chat_id=[self.admin_chat_id],

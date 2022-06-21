@@ -134,7 +134,11 @@ class TrelloIntegration:
             self.lists_by_category_name[category.name] = list_
 
     async def export_message(
-        self, origin_message: tg.Message, forwarded_message: tg.Message, category: Optional[Category] = None
+        self,
+        origin_message: tg.Message,
+        forwarded_message: tg.Message,
+        category: Optional[Category] = None,
+        postprocess_card_description: Callable[[str], str] = lambda s: s,
     ):
         if category is None:
             category = self.categories[0]  # guaranteed to exist
@@ -167,6 +171,9 @@ class TrelloIntegration:
                     + f"📎 `{origin_message.content_type}` "
                     + "(тип медиа не поддерживается, см. оригинал сообщения)"
                 )
+
+        card_description = postprocess_card_description(card_description)
+
         if str(self.admin_chat_id).startswith("-100"):  # i.e. this is a Telegram supergroup and allows direct msg links
             card_description += f"\n[💬]({telegram_message_url(self.admin_chat_id, forwarded_message.id)})"
 
@@ -282,6 +289,8 @@ class TrelloIntegration:
 
 def safe_markdownify(html_text: str, fallback_text: str) -> str:
     try:
-        return markdownify(html_text)
+        md: str = markdownify(html_text)
+        md = md.replace("#", "\#")
+        return md
     except Exception:
         return fallback_text + "\n⚠️ Не удалось отобразить часть текста, оригинал сообщения по ссылке."

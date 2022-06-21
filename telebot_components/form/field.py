@@ -360,7 +360,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[Multip
     ) -> tg.InlineKeyboardMarkup:
         if current_value is None:
             current_value = self.init_state()
-        all_options = list(self.EnumClass)
+        all_options: list[Enum] = list(self.EnumClass)
         page_start_idx = current_value["page"] * self.options_per_page
         page_end_idx = (current_value["page"] + 1) * self.options_per_page
         option_buttons: list[tg.InlineKeyboardButton] = []
