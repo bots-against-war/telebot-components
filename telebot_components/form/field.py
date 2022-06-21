@@ -4,12 +4,18 @@ import logging
 from dataclasses import dataclass, fields
 from datetime import date, tzinfo
 from enum import Enum
+from hashlib import md5
 from typing import Callable, ClassVar, Dict, Generic, Optional, Type, TypedDict, TypeVar
 
 from telebot import types as tg
 from telebot.callback_data import CallbackData
 
-from telebot_components.stores.language import AnyText, MaybeLanguage, any_text_to_str
+from telebot_components.stores.language import (
+    AnyText,
+    Language,
+    MaybeLanguage,
+    any_text_to_str,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +196,15 @@ class _EnumDefinedFieldMixin:
     def custom_texts(self) -> list[AnyText]:
         return [option.value for option in self.EnumClass]
 
+
+@dataclass
+class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
+    invalid_enum_value_error_msg: AnyText
+    menu_row_width: int = 2
+
+    def value_to_str(self, value: Enum, language: MaybeLanguage) -> str:
+        return any_text_to_str(value.value, language)
+
     def parse_enum(self, text: str) -> Optional[Enum]:
         for enum in self.EnumClass:
             if isinstance(enum.value, str):
@@ -200,15 +215,6 @@ class _EnumDefinedFieldMixin:
                     if lang_text == text:
                         return enum
         return None
-
-
-@dataclass
-class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
-    invalid_enum_value_error_msg: AnyText
-    menu_row_width: int = 2
-
-    def value_to_str(self, value: Enum, language: MaybeLanguage) -> str:
-        return any_text_to_str(value.value, language)
 
     def get_reply_markup(
         self, language: MaybeLanguage, current_value: Optional[FieldValueT] = None
@@ -276,6 +282,18 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[Multip
     PREV_PAGE_PAYLOAD: ClassVar[str] = "prev"
     NOOP_PAYLOAD: ClassVar[str] = "noop"
 
+    def __post_init__(self) -> None:
+        self._option_by_hash = {self.option_hash(o): o for o in self.EnumClass}
+
+    def option_hash(self, option: Enum) -> str:
+        if isinstance(option.value, str):
+            return md5(option.value.encode("utf-8")).hexdigest()[:8]
+        elif isinstance(option.value, dict):
+            for lang in Language:
+                if lang in option.value and isinstance(option.value[lang], str):
+                    return md5(option.value[lang].encode("utf-8")).hexdigest()[:8]
+        raise ValueError("Every Enum option must either string or Language -> str dict")
+
     def value_to_str(self, value: MultipleSelectState, language: MaybeLanguage) -> str:
         selected = value["selected"]
         selected_str = [any_text_to_str(opt.value, language) for opt in selected]
@@ -324,7 +342,8 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[Multip
                 new_field_value=current_value,
             )
         elif callback_payload.startswith(self.OPTION_PAYLOAD_PREFIX):
-            selected_option = self.parse_enum(callback_payload.removeprefix(self.OPTION_PAYLOAD_PREFIX))
+            option_hash = callback_payload.removeprefix(self.OPTION_PAYLOAD_PREFIX)
+            selected_option = self._option_by_hash.get(option_hash)
             if selected_option is None:
                 logger.error(
                     f"Error parsing callback payload {callback_payload!r} as Enum value {list(self.EnumClass)}"
@@ -373,7 +392,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[Multip
             option_buttons.append(
                 tg.InlineKeyboardButton(
                     text=button_text,
-                    callback_data=self.new_callback_data(payload=self.OPTION_PAYLOAD_PREFIX + option_text),
+                    callback_data=self.new_callback_data(payload=self.OPTION_PAYLOAD_PREFIX + self.option_hash(option)),
                 )
             )
         keyboard = tg.InlineKeyboardMarkup()
