@@ -394,7 +394,7 @@ class FormHandler(Generic[FormResultT]):
                 form_exit_context_constructor=form_exit_context_constructor,
             )
 
-        @bot.callback_query_handler(callback_data=INLINE_FIELD_CALLBACK_DATA)
+        @bot.callback_query_handler(func=currently_filling_form, callback_data=INLINE_FIELD_CALLBACK_DATA)
         async def form_inline_action_handler(call: tg.CallbackQuery):
             async def form_state_updater(form_state: FormState, language: MaybeLanguage):
                 return await form_state.update_with_callback_query(call, language, self.config)
@@ -403,8 +403,6 @@ class FormHandler(Generic[FormResultT]):
                 return FormExitContext(bot, call, result)
 
             try:
-                if not await currently_filling_form(call):
-                    return
                 await form_action_handler(
                     user=call.from_user,
                     last_message_id=call.message.id,
