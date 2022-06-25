@@ -247,6 +247,7 @@ def create_form_bot(redis: RedisInterface, token: str):
     form_handler = FormHandler[dict](
         redis=redis,
         bot_prefix=bot_prefix,
+        name="example",
         form=form,
         config=FormHandlerConfig(
             echo_filled_field=True,
