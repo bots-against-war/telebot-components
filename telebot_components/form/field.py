@@ -272,6 +272,8 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
     finish_field_button_caption: AnyText
     next_page_button_caption: AnyText
     prev_page_button_caption: AnyText
+    min_selected_to_finish: Optional[int] = None
+    max_selected_to_finish: Optional[int] = None
 
     OPTION_PAYLOAD_PREFIX: ClassVar[str] = "opt"
     FINISH_FIELD_PAYLOAD: ClassVar[str] = "finish"
@@ -338,7 +340,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                     new_value.remove(selected_option)
                 else:
                     new_value.add(selected_option)
-                selected_option_page = list(self.EnumClass).index(selected_option) // self.options_per_page
+                selected_option_page = list(self.EnumClass).index(selected_option) // self.options_per_page  # type: ignore
                 return CallbackProcessingResult(
                     response_to_user=None,
                     updated_inline_markup=self.get_reply_markup(language, new_value, selected_option_page),
@@ -398,10 +400,14 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                 prev_page_button if page > 0 else noop_button,
                 next_page_button if page < self.total_pages - 1 else noop_button,
             )
-        keyboard.row(
-            tg.InlineKeyboardButton(
-                text=any_text_to_str(self.finish_field_button_caption, language),
-                callback_data=self.new_callback_data(payload=self.FINISH_FIELD_PAYLOAD),
+        n_selected = len(current_value)
+        if (self.min_selected_to_finish is None or n_selected >= self.min_selected_to_finish) and (
+            self.max_selected_to_finish is None or n_selected <= self.max_selected_to_finish
+        ):
+            keyboard.row(
+                tg.InlineKeyboardButton(
+                    text=any_text_to_str(self.finish_field_button_caption, language),
+                    callback_data=self.new_callback_data(payload=self.FINISH_FIELD_PAYLOAD),
+                )
             )
-        )
         return keyboard

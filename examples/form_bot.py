@@ -134,6 +134,8 @@ favorite_subject_field = MultipleSelectField(
     inline_menu_row_width=2,
     options_per_page=6,
     next_field_getter=NextFieldGetter.form_end(),
+    min_selected_to_finish=2,
+    max_selected_to_finish=5,
 )
 
 
