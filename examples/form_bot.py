@@ -65,8 +65,8 @@ age_field = IntegerField(
         Language.EN: "You age: {}.",
     },
     not_an_integer_error_msg={
-        Language.RU: "Пожалуйста, введите ваш возраст одним числом.",
-        Language.EN: "Please enter your age as a single number.",
+        Language.RU: "Возраст должен быть указан одним числом.",
+        Language.EN: "Age must be specified as a single number.",
     },
     next_field_getter=NextFieldGetter(
         next_field_name_getter=after_age_field,
@@ -122,6 +122,14 @@ favorite_subject_field = MultipleSelectField(
     finish_field_button_caption={
         Language.RU: "Завершить выбор",
         Language.EN: "Finish selection",
+    },
+    next_page_button_caption={
+        Language.RU: "след.",
+        Language.EN: "next",
+    },
+    prev_page_button_caption={
+        Language.RU: "пред.",
+        Language.EN: "prev",
     },
     inline_menu_row_width=2,
     options_per_page=6,

@@ -90,7 +90,7 @@ class _FormAction(Enum):
 class _UserAction:
     send_message_html: Optional[str]
     send_reply_keyboard: tg.ReplyMarkup = tg.ReplyKeyboardRemove()
-    updated_inline_markup: Optional[tg.ReplyMarkup] = None
+    update_inline_markup: Optional[tg.ReplyMarkup] = None
 
 
 @dataclass
@@ -240,11 +240,6 @@ class FormState(Generic[FormResultT]):
         if field_result.response_to_user:
             paragraphs.append(field_result.response_to_user)
 
-        updated_inline_markup = (
-            self.current_field.get_reply_markup(language, field_result.new_field_value)
-            if field_result.update_inline_markup
-            else None
-        )
         send_reply_keyboard: tg.ReplyMarkup = tg.ReplyKeyboardRemove()
         form_action = _FormAction.KEEP_GOING
         if field_result.complete_field:
@@ -265,7 +260,7 @@ class FormState(Generic[FormResultT]):
             user_action=_UserAction(
                 send_message_html=join_paragraphs(paragraphs),
                 send_reply_keyboard=send_reply_keyboard,
-                updated_inline_markup=updated_inline_markup,
+                update_inline_markup=field_result.updated_inline_markup,
             ),
         )
 
@@ -364,12 +359,12 @@ class FormHandler(Generic[FormResultT]):
                         parse_mode="HTML",
                         reply_markup=user_action.send_reply_keyboard,
                     )
-                if user_action.updated_inline_markup is not None:
+                if user_action.update_inline_markup is not None:
                     try:
                         await bot.edit_message_reply_markup(
                             chat_id=user.id,
                             message_id=last_message_id,
-                            reply_markup=user_action.updated_inline_markup,
+                            reply_markup=user_action.update_inline_markup,
                         )
                     except Exception:
                         pass
