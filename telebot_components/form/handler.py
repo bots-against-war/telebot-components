@@ -280,6 +280,7 @@ class FormHandler(Generic[FormResultT]):
         self,
         redis: RedisInterface,
         bot_prefix: str,
+        name: str,
         form: Form,
         config: FormHandlerConfig,
         language_store: Optional[LanguageStore] = None,
@@ -288,10 +289,10 @@ class FormHandler(Generic[FormResultT]):
         self.form = form
 
         self.form_state_store = KeyValueStore[Optional[FormState]](
-            name="form-state-for",
+            name=f"form-state-for-{name}",
             prefix=bot_prefix,
             redis=redis,
-            expiration_time=times.HOUR,
+            expiration_time=3 * times.HOUR,
             dumper=lambda fs: fs.to_store() if fs is not None else "",
             loader=lambda dump: FormState.from_store(dump, form.fields),
         )
