@@ -308,7 +308,7 @@ def create_form_bot(redis: RedisInterface, token: str):
     language_store.setup(bot)
 
     return BotRunner(
-        name="example-form-bot",
+        bot_prefix="example-form-bot",
         bot=bot,
     )
 
