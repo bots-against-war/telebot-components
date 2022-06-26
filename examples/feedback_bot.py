@@ -159,7 +159,7 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
     feedback_handler.setup(bot)
 
     return BotRunner(
-        name=bot_prefix,
+        bot_prefix=bot_prefix,
         bot=bot,
     )
 

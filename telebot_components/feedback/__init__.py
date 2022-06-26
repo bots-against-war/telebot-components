@@ -1,7 +1,6 @@
 import logging
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from datetime import timedelta
-from itertools import chain
 from typing import Any, Callable, Coroutine, Optional, Protocol, TypedDict, cast
 
 from telebot import AsyncTeleBot
@@ -16,7 +15,10 @@ from telebot_components.feedback.anti_spam import (
     AntiSpamInterface,
     AntiSpamStatus,
 )
-from telebot_components.feedback.trello_integration import TrelloIntegration
+from telebot_components.feedback.trello_integration import (
+    MessageRepliedFromTrelloContext,
+    TrelloIntegration,
+)
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
 from telebot_components.stores.category import CategoryStore
@@ -274,7 +276,7 @@ class FeedbackHandler:
             help_msg += (
                 "· Бот автоматически ограничивает число сообщений, прислыаемых ему в единицу времени. "
                 + f"Конфигруация на данный момент: не больше {self.anti_spam.config.throttle_after_messages} сообщений за "
-                + f"{self.anti_spam.config.throttle_duration}; при необходимости её можно изменять.\n"
+                + f"{self.anti_spam.config.throttle_duration}. При необходимости её можно изменять.\n"
             )
         if self.banned_users_store is not None:
             help_msg += (
@@ -297,30 +299,24 @@ class FeedbackHandler:
         if self.trello_integration is not None:
             help_msg += "\n\n🗂️ <i>Интеграция с Trello</i>\n"
             help_msg += (
-                f"· Помимо чата сообщения выгружаются на <a href={self.trello_integration.board.url}>доску</a> Trello"
+                f"· Помимо чата сообщения выгружаются на <a href={self.trello_integration.board.url}>доску</a> Trello "
+                + f"в списки: "
+                + ", ".join(f"<b>{l.name}</b>" for l in self.trello_integration.lists_by_category_name.values())
+                + "\n"
+                "· В карточки переносятся присланные в бот фотографии и документы. Для каждого сообщения доступна "
+                + "обратная ссылка на этот чат."
             )
-            if self.trello_integration.categories is not None:
-                help_msg += "в несколько списков по категориям (хештегам): "
-                help_msg += ", ".join(
-                    f"<b>{l.name}</b>" for l in self.trello_integration.lists_by_category_name.values()
+            if self.trello_integration.reply_with_card_comments:
+                help_msg += (
+                    "\n"
+                    + "· Через комментарии к карточке можно ответить на сообщение в боте: "
+                    + "комментарий «/reply текст ответа» значит, что бот отправит «текст ответа» в чат с "
+                    + "пользовател_ьницей, а также напишет уведомление сюда."
                 )
-            else:
-                help_msg += f"в список <b>{self.trello_integration.bot_prefix}</b>"
-            help_msg += (
-                ". "
-                + "В карточки переносятся присланные в бот фотографии и документы; для каждого сообщения доступна "
-                + "обратная ссылка на этот чат.\n"
-                # + "· В тестовом режиме работает ответ через Trello: если прокоментировать карточку сообщением в "
-                # + "формате «/reply текст ответа», бот отправит «текст ответа» в чат с пользовател_ьницей, а также "
-                # + "напишет уведомление сюда."
-            )
 
         if self.config.admin_chat_help_extra:
             help_msg += "\n\n🪄 <i>Другое</i>\n"
             help_msg += self.config.admin_chat_help_extra
-
-        # TODO: add bot support hotline link :)
-
         return help_msg
 
     async def _user_message_filter(self, message: tg.Message) -> bool:
@@ -338,7 +334,6 @@ class FeedbackHandler:
         user: tg.User,
         message_forwarder: Callable[[], Coroutine[None, None, tg.Message]],
         user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
-        origin_message_to_export: Optional[tg.Message],
     ):
         if self.banned_users_store is not None and await self.banned_users_store.is_banned(user.id):
             return
@@ -420,12 +415,6 @@ class FeedbackHandler:
                     await self.recently_sent_confirmation_flag_store.set_flag(user.id)
 
         if self.trello_integration is not None:
-            if origin_message_to_export is None:
-                self.logger.warning(
-                    "Trello integration is set up, but user message handler "
-                    + "was not supplied with original message to export to Trello"
-                )
-                return
             category = await self.category_store.get_user_category(user) if self.category_store else None
 
             def postprocess_card_description(descr: str) -> str:
@@ -436,17 +425,17 @@ class FeedbackHandler:
                     descr = descr + "\n\n" + "[post]:" + postforwarded_msg.text_content
                 return descr
 
-            await self.trello_integration.export_message(
-                origin_message_to_export,
-                forwarded_msg,
-                category,
+            await self.trello_integration.export_user_message(
+                user=user,
+                forwarded_message=forwarded_msg,
+                category=category,
                 postprocess_card_description=postprocess_card_description,
             )
 
     async def emulate_user_message(self, bot: AsyncTeleBot, user: tg.User, text: str, **send_message_kwargs):
         """Sometimes we want FeedbackHandler to act like the user has sent us a message, but without actually
         a message there (they might have pressed a button or interacted with the bot in some other way). This
-        message can be used in such cases.
+        method can be used in such cases.
         """
 
         async def message_forwarder() -> tg.Message:
@@ -460,7 +449,6 @@ class FeedbackHandler:
             user=user,
             message_forwarder=message_forwarder,
             user_replier=user_replier,
-            origin_message_to_export=None,
         )
 
     def setup(self, bot: AsyncTeleBot):
@@ -484,7 +472,6 @@ class FeedbackHandler:
                 user=message.from_user,
                 message_forwarder=message_forwarder,
                 user_replier=user_replier,
-                origin_message_to_export=message,
             )
 
         @bot.message_handler(chat_id=[self.admin_chat_id], commands=["help"])
@@ -524,6 +511,14 @@ class FeedbackHandler:
                 pass
             finally:
                 await self.hashtag_message_for_forwarded_message_store.save(message_id, hashtag_message_data)
+
+        async def on_message_replied_from_trello(context: MessageRepliedFromTrelloContext):
+            await self.message_log_store.push(context.origin_chat_id, context.reply_message_id)
+            if self.config.hashtags_in_admin_chat:
+                await _remove_unanswered_hashtag(context.forwarded_user_message_id)
+
+        if self.trello_integration is not None:
+            self.trello_integration.set_on_message_replied_from_trello(on_message_replied_from_trello)
 
         @bot.message_handler(
             chat_id=[self.admin_chat_id],
@@ -585,7 +580,7 @@ class FeedbackHandler:
                             + ", ".join(available_commands),
                         )
                 else:
-                    # actual response to user
+                    # actual response to the user
                     await bot.copy_message(
                         chat_id=origin_chat_id, from_chat_id=self.admin_chat_id, message_id=message.id
                     )
@@ -595,6 +590,8 @@ class FeedbackHandler:
                         await bot.reply_to(message, self.service_messages.copied_to_user_ok)
                     if self.config.hashtags_in_admin_chat:
                         await _remove_unanswered_hashtag(forwarded_msg.id)
+                    if self.trello_integration is not None:
+                        await self.trello_integration.export_admin_message(message, to_user_id=origin_chat_id)
             except Exception as e:
                 await bot.reply_to(message, f"Something went wrong: {e}")
                 self.logger.exception(f"Unexpected error while replying to forwarded msg")

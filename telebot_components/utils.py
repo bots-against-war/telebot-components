@@ -63,3 +63,8 @@ def to_yaml_unsafe(obj: Any) -> str:
 
 def from_yaml_unsafe(dump: str) -> Any:
     return yaml.load(dump)
+
+
+def telegram_html_escape(string: str) -> str:
+    """See https://core.telegram.org/bots/api#html-style"""
+    return string.replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
