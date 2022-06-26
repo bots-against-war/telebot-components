@@ -432,7 +432,9 @@ class FeedbackHandler:
                 postprocess_card_description=postprocess_card_description,
             )
 
-    async def emulate_user_message(self, bot: AsyncTeleBot, user: tg.User, text: str, **send_message_kwargs):
+    async def emulate_user_message(
+        self, bot: AsyncTeleBot, user: tg.User, text: str, no_response: bool = False, **send_message_kwargs
+    ):
         """Sometimes we want FeedbackHandler to act like the user has sent us a message, but without actually
         a message there (they might have pressed a button or interacted with the bot in some other way). This
         method can be used in such cases.
@@ -441,8 +443,11 @@ class FeedbackHandler:
         async def message_forwarder() -> tg.Message:
             return await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
 
-        async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> tg.Message:
-            return await bot.send_message(user.id, text=text, reply_markup=reply_markup)
+        async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> Optional[tg.Message]:
+            if no_response:
+                return None
+            else:
+                return await bot.send_message(user.id, text=text, reply_markup=reply_markup)
 
         await self._handle_user_message(
             bot=bot,

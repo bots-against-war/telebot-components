@@ -85,12 +85,6 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
         await welcome(message.from_user)
 
     @bot.message_handler(
-        commands=["auto"], chat_types=[tg_constants.ChatType.private], func=banned_store.not_from_banned_user
-    )
-    async def auto_cmd_handler(message: tg.Message):
-        await feedback_handler.emulate_user_message(bot, user=message.from_user, text="HELLO WORLD")
-
-    @bot.message_handler(
         commands=["language"], chat_types=[tg_constants.ChatType.private], func=banned_store.not_from_banned_user
     )
     async def select_language_cmd_handler(message: tg.Message):
