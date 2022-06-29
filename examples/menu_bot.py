@@ -1,44 +1,77 @@
 import logging
 
+
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.runner import BotRunner
-from telebot_components.menu.menu import MenuHandler, Menu, MenuItem
-from telebot_components.redis_utils.interface import RedisInterface
+from telebot_components.menu.menu import MenuHandler, Menu, MenuItem, Terminators
 
 
-def create_menu_bot(redis: RedisInterface, token: str):
+def create_menu_bot(token: str):
     bot_prefix = "example-feedback-bot"
     bot = AsyncTeleBot(token)
     logging.basicConfig(level=logging.DEBUG)
 
     menu_tree = Menu(
-        "main_menu",
         "✊ Главное меню ✊\n\nВыберите тип вашего запроса или сообщения:",
         [
             MenuItem(
-                "прислать отчет об акции или открытом письме",
-                Menu(
-                    "report_menu",
+                label="прислать отчет об акции или открытом письме",
+                submenu=Menu(
                     "Выберите тип вашего отчета или акции:",
                     [
-                        MenuItem("расклейка/агитация"),
-                        MenuItem("открытое письмо против войны"),
-                        MenuItem("образовательная забастовка 'книги вместо бомб'"),
-                        MenuItem("акция 'ректор, отзови подпись'"),
-                        MenuItem("другое/творчество"),
+                        MenuItem(
+                            label="расклейка/агитация",
+                            terminator=Terminators.Agitation,
+                        ),
+                        MenuItem(
+                            label="открытое письмо против войны",
+                            terminator=Terminators.Letter,
+                        ),
+                        MenuItem(
+                            label="образовательная забастовка 'книги вместо бомб'",
+                            terminator=Terminators.Strike,
+                        ),
                     ],
                 ),
             ),
             MenuItem(
-                "присоединиться к антивоенному сопротивлению",
-                Menu(
-                    "join_menu",
+                label="прислать отчет об акции или открытом письме",
+                submenu=Menu(
+                    "Выберите тип вашего отчета или акции:",
+                    [
+                        MenuItem(
+                            label="расклейка/агитация",
+                            terminator=Terminators.Agitation,
+                        ),
+                        MenuItem(
+                            label="открытое письмо против войны",
+                            terminator=Terminators.Letter,
+                        ),
+                        MenuItem(
+                            label="образовательная забастовка 'книги вместо бомб'",
+                            terminator=Terminators.Strike,
+                        ),
+                    ],
+                ),
+            ),
+            MenuItem(
+                label="присоединиться к антивоенному сопротивлению",
+                submenu=Menu(
                     "Найти единомышлен_ниц внутри вуза и создать инициативную группу:",
                     [
-                        MenuItem("Мы уже создали инициативную группу в своем вузе"),
-                        MenuItem("Я ищу единомышлен_ниц в своем вузе"),
-                        MenuItem("Читать наши материалы по самоорганизации"),
+                        MenuItem(
+                            label="Мы уже создали инициативную группу в своем вузе",
+                            terminator=Terminators.Have_initiative,
+                        ),
+                        MenuItem(
+                            label="Я ищу единомышлен_ниц в своем вузе",
+                            terminator=Terminators.Search_initiative,
+                        ),
+                        MenuItem(
+                            label="Читать наши материалы по самоорганизации",
+                            terminator=Terminators.Read_info,
+                        ),
                     ],
                 ),
             ),
@@ -55,7 +88,6 @@ def create_menu_bot(redis: RedisInterface, token: str):
             message.from_user.id,
             main_menu.text,
             reply_markup=(main_menu.get_keyboard_markup()),
-            parse_mode="Markdown",
         )
 
     return BotRunner(
@@ -68,14 +100,7 @@ if __name__ == "__main__":
     import asyncio
     import os
 
-    from redis.asyncio import Redis  # type: ignore
-
-    from telebot_components.redis_utils.emulation import RedisEmulation
-
-    redis = RedisEmulation()
-    # redis = Redis.from_url(os.environ["REDIS_URL"])
     bot_runner = create_menu_bot(
-        redis=redis,
         token=os.environ["TOKEN"],
     )
 
