@@ -141,6 +141,7 @@ class MenuHandler:
             for menu_item in current_menu.menu_items:
                 if str(menu_item.terminator) == terminator:
                     menu_item.label = "✅ " + menu_item.label
+                    break
 
             await bot.answer_callback_query(call.id)
             await bot.edit_message_text(
