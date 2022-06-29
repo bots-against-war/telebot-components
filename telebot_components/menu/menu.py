@@ -85,8 +85,8 @@ class MenuHandler:
     ):
         self.menu_list = menu_tree.descendants()
         menu_tree.name = "main_menu"
-
         self.menu_list.append(menu_tree)
+
         self.init_back_buttons_and_housing_menu()
         self.init_menu_ids()
         self.logger = logging.getLogger(f"{__name__}.{bot_prefix}")
