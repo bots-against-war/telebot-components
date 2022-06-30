@@ -20,6 +20,7 @@ class Terminators(enum.Enum):
 
 ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
 TERMINATE_MENU_CALLBACK_DATA = CallbackData("terminator", "housing_menu_name", prefix="terminator")
+INACTIVE_BUTTON_CALLBACK_DATA = CallbackData(prefix="inactive_button")
 
 
 @dataclass
@@ -44,7 +45,7 @@ class MenuItem:
     def get_blocked_inline_button(self):
         return tg.InlineKeyboardButton(
             text=self.label,
-            callback_data=ROUTE_MENU_CALLBACK_DATA.new("the_end"),
+            callback_data=INACTIVE_BUTTON_CALLBACK_DATA.new(),
         )
 
 
@@ -119,8 +120,6 @@ class MenuHandler:
             route_to = data["route_to"]
 
             await bot.answer_callback_query(call.id)
-            if route_to == "the_end":
-                return
 
             menu = self.get_menu_by_name(route_to)
             await bot.edit_message_text(
@@ -129,6 +128,10 @@ class MenuHandler:
                 message_id=call.message.id,
                 reply_markup=menu.get_keyboard_markup(),
             )
+
+        @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA)
+        async def route_menu(call: tg.CallbackQuery):
+            await bot.answer_callback_query(call.id)
 
         @bot.callback_query_handler(callback_data=TERMINATE_MENU_CALLBACK_DATA)
         async def route_terminator(call: tg.CallbackQuery):
