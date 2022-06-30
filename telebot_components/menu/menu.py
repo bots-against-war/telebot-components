@@ -34,12 +34,12 @@ class MenuItem:
         if self.submenu is not None:
             return tg.InlineKeyboardButton(
                 text=self.label,
-                callback_data=ROUTE_MENU_CALLBACK_DATA.new(self.submenu.name),
+                callback_data=ROUTE_MENU_CALLBACK_DATA.new(self.submenu.id),
             )
         else:
             return tg.InlineKeyboardButton(
                 text=self.label,
-                callback_data=TERMINATE_MENU_CALLBACK_DATA.new(self.terminator, self.menu_that_houses_me.name),
+                callback_data=TERMINATE_MENU_CALLBACK_DATA.new(self.terminator, self.menu_that_houses_me.id),
             )
 
     def get_blocked_inline_button(self):
@@ -49,16 +49,15 @@ class MenuItem:
         )
 
 
-@dataclass
 class Menu:
-    name: Optional[str]
+    id: Optional[str]
 
     def __init__(
         self,
         text: str,
         menu_items: list[MenuItem],
     ):
-        self.name = None
+        self.id = None
         self.text = text
         self.menu_items = menu_items
 
@@ -72,7 +71,7 @@ class Menu:
     def get_keyboard_markup(self):
         return tg.InlineKeyboardMarkup(keyboard=[[menu_item.get_inline_button()] for menu_item in self.menu_items])
 
-    def get_blocked_keyboard_markup(self):
+    def get_inactive_keyboard_markup(self):
         return tg.InlineKeyboardMarkup(
             keyboard=[[menu_item.get_blocked_inline_button()] for menu_item in self.menu_items]
         )
@@ -84,32 +83,31 @@ class MenuHandler:
         bot_prefix: str,
         menu_tree: Menu,
     ):
-        self.menu_list = menu_tree.descendants()
-        menu_tree.name = "main_menu"
-        self.menu_list.append(menu_tree)
+        self.menu_list: list[Menu] = [menu_tree]
+        self.menu_list.extend(menu_tree.descendants())
 
-        self.init_back_buttons_and_housing_menu()
         self.init_menu_ids()
+        self.init_back_buttons_and_parent_menu()
         self.logger = logging.getLogger(f"{__name__}.{bot_prefix}")
 
     def init_menu_ids(self):
-        id = 0
-        for menu in self.menu_list:
-            if menu.name is None:
-                menu.name = str(id)
-                id = id + 1
+        for i, menu in enumerate(self.menu_list):
+            menu.id = str(i)
 
-    def init_back_buttons_and_housing_menu(self):
+    def init_back_buttons_and_parent_menu(self):
         for menu in self.menu_list:
             for menu_item in menu.menu_items:
                 menu_item.menu_that_houses_me = menu
-                if menu_item.submenu is not None:
+                if menu_item.submenu is not None and menu_item.submenu.id != "0":
                     menu_item.submenu.menu_items.append(MenuItem(label="Вернуться назад", submenu=menu))
 
+    def get_main_menu(self):
+        return self.menu_list[0]
+
     # TODO throw error on name duplication
-    def get_menu_by_name(self, name: str) -> Menu:
+    def get_menu_by_id(self, id: str) -> Menu:
         for menu in self.menu_list:
-            if menu.name == name:
+            if menu.id == id:
                 return menu
 
     def setup(self, bot: AsyncTeleBot):
@@ -121,7 +119,7 @@ class MenuHandler:
 
             await bot.answer_callback_query(call.id)
 
-            menu = self.get_menu_by_name(route_to)
+            menu = self.get_menu_by_id(route_to)
             await bot.edit_message_text(
                 text=menu.text,
                 chat_id=user.id,
@@ -140,7 +138,7 @@ class MenuHandler:
             terminator = data["terminator"]
             housing_menu_name = data["housing_menu_name"]
 
-            current_menu: Menu = copy.deepcopy(self.get_menu_by_name(housing_menu_name))
+            current_menu: Menu = copy.deepcopy(self.get_menu_by_id(housing_menu_name))
             for menu_item in current_menu.menu_items:
                 if str(menu_item.terminator) == terminator:
                     menu_item.label = "✅ " + menu_item.label
@@ -151,7 +149,7 @@ class MenuHandler:
                 text=current_menu.text,
                 chat_id=user.id,
                 message_id=call.message.id,
-                reply_markup=current_menu.get_blocked_keyboard_markup(),
+                reply_markup=current_menu.get_inactive_keyboard_markup(),
             )
 
             # TODO replace message sending with exact flow initiation

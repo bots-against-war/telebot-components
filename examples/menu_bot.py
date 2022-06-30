@@ -83,7 +83,7 @@ def create_menu_bot(token: str):
 
     @bot.message_handler(commands=["start", "help"])
     async def start_cmd_handler(message: tg.Message):
-        main_menu = menu_handler.get_menu_by_name("main_menu")
+        main_menu = menu_handler.get_main_menu()
         await bot.send_message(
             message.from_user.id,
             main_menu.text,
