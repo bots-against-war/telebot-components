@@ -19,16 +19,18 @@ class Terminators(enum.Enum):
 
 
 ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
-TERMINATE_MENU_CALLBACK_DATA = CallbackData("terminator", "housing_menu_name", prefix="terminator")
+TERMINATE_MENU_CALLBACK_DATA = CallbackData("id", prefix="terminator")
 INACTIVE_BUTTON_CALLBACK_DATA = CallbackData(prefix="inactive_button")
 
 
-@dataclass
 class MenuItem:
-    label: str
-    submenu: Optional["Menu"] = None
-    terminator: Optional[Terminators] = None
-    menu_that_houses_me: Optional["Menu"] = None
+    id: Optional[str]
+    parent_menu: Optional["Menu"]
+
+    def __init__(self, label: str, submenu: Optional["Menu"] = None, terminator: Optional[Terminators] = None):
+        self.label = label
+        self.submenu = submenu
+        self.terminator = terminator
 
     def get_inline_button(self):
         if self.submenu is not None:
@@ -39,10 +41,12 @@ class MenuItem:
         else:
             return tg.InlineKeyboardButton(
                 text=self.label,
-                callback_data=TERMINATE_MENU_CALLBACK_DATA.new(self.terminator, self.menu_that_houses_me.id),
+                callback_data=TERMINATE_MENU_CALLBACK_DATA.new(self.id),
             )
 
-    def get_blocked_inline_button(self):
+    def get_blocked_inline_button(self, selected_item_id: str):
+        if self.id == selected_item_id:
+            self.label = "✅ " + self.label
         return tg.InlineKeyboardButton(
             text=self.label,
             callback_data=INACTIVE_BUTTON_CALLBACK_DATA.new(),
@@ -71,9 +75,9 @@ class Menu:
     def get_keyboard_markup(self):
         return tg.InlineKeyboardMarkup(keyboard=[[menu_item.get_inline_button()] for menu_item in self.menu_items])
 
-    def get_inactive_keyboard_markup(self):
+    def get_inactive_keyboard_markup(self, selected_item_id: str):
         return tg.InlineKeyboardMarkup(
-            keyboard=[[menu_item.get_blocked_inline_button()] for menu_item in self.menu_items]
+            keyboard=[[menu_item.get_blocked_inline_button(selected_item_id)] for menu_item in self.menu_items]
         )
 
 
@@ -88,7 +92,21 @@ class MenuHandler:
 
         self.init_menu_ids()
         self.init_back_buttons_and_parent_menu()
+
+        self.menu_items_list = self.init_item_ids_and_get_item_list()
+
         self.logger = logging.getLogger(f"{__name__}.{bot_prefix}")
+
+    def init_item_ids_and_get_item_list(self) -> list[MenuItem]:
+        item_list: list[MenuItem] = []
+        for menu in self.menu_list:
+            for menu_item in menu.menu_items:
+                item_list.append(menu_item)
+
+        for i, menu_item in enumerate(item_list):
+            menu_item.id = str(i)
+
+        return item_list
 
     def init_menu_ids(self):
         for i, menu in enumerate(self.menu_list):
@@ -97,18 +115,23 @@ class MenuHandler:
     def init_back_buttons_and_parent_menu(self):
         for menu in self.menu_list:
             for menu_item in menu.menu_items:
-                menu_item.menu_that_houses_me = menu
+                menu_item.parent_menu = menu
                 if menu_item.submenu is not None and menu_item.submenu.id != "0":
                     menu_item.submenu.menu_items.append(MenuItem(label="Вернуться назад", submenu=menu))
-
-    def get_main_menu(self):
-        return self.menu_list[0]
 
     # TODO throw error on name duplication
     def get_menu_by_id(self, id: str) -> Menu:
         for menu in self.menu_list:
             if menu.id == id:
                 return menu
+
+    def get_menu_item_by_id(self, id: str) -> MenuItem:
+        for menu_item in self.menu_items_list:
+            if menu_item.id == id:
+                return menu_item
+
+    def get_main_menu(self):
+        return self.get_menu_by_id("0")
 
     def setup(self, bot: AsyncTeleBot):
         @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA)
@@ -135,44 +158,41 @@ class MenuHandler:
         async def route_terminator(call: tg.CallbackQuery):
             user = call.from_user
             data = TERMINATE_MENU_CALLBACK_DATA.parse(call.data)
-            terminator = data["terminator"]
-            housing_menu_name = data["housing_menu_name"]
+            selected_menu_item_id = data["id"]
 
-            current_menu: Menu = copy.deepcopy(self.get_menu_by_id(housing_menu_name))
-            for menu_item in current_menu.menu_items:
-                if str(menu_item.terminator) == terminator:
-                    menu_item.label = "✅ " + menu_item.label
-                    break
+            selected_menu_item = self.get_menu_item_by_id(selected_menu_item_id)
+            terminator = selected_menu_item.terminator
+            current_menu = self.get_menu_by_id(selected_menu_item.parent_menu.id)
 
             await bot.answer_callback_query(call.id)
             await bot.edit_message_text(
                 text=current_menu.text,
                 chat_id=user.id,
                 message_id=call.message.id,
-                reply_markup=current_menu.get_inactive_keyboard_markup(),
+                reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
             )
 
             # TODO replace message sending with exact flow initiation
             if (
-                terminator == str(Terminators.Agitation)
-                or terminator == str(Terminators.Letter)
-                or terminator == str(Terminators.Strike)
+                terminator == Terminators.Agitation
+                or terminator == Terminators.Letter
+                or terminator == Terminators.Strike
             ):
                 await bot.send_message(
                     user.id,
                     "Сейчас мы инициируем составку и отправку Вашего отчета",
                 )
-            elif terminator == str(Terminators.Have_initiative):
+            elif terminator == Terminators.Have_initiative:
                 await bot.send_message(
                     user.id,
                     "Начинаем флоу добавки Вашей инициативы в нашу внутреннюю АИС",
                 )
-            elif terminator == str(Terminators.Search_initiative):
+            elif terminator == Terminators.Search_initiative:
                 await bot.send_message(
                     user.id,
                     "Мы попробуем найти Вам соратников, потому что заниматься антивоенным активизмом веселее с друзьями",
                 )
-            elif terminator == str(Terminators.Read_info):
+            elif terminator == Terminators.Read_info:
                 await bot.send_message(
                     user.id,
                     "ИНФО",
