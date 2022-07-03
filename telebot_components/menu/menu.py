@@ -45,16 +45,18 @@ class MenuItem:
             )
 
     def get_blocked_inline_button(self, selected_item_id: str):
+        button_text = self.label
         if self.id == selected_item_id:
-            self.label = "✅ " + self.label
+            button_text = "✅ " + button_text
         return tg.InlineKeyboardButton(
-            text=self.label,
+            text=button_text,
             callback_data=INACTIVE_BUTTON_CALLBACK_DATA.new(),
         )
 
 
 class Menu:
     id: Optional[str]
+    parent_menu: Optional["Menu"]
 
     def __init__(
         self,
@@ -62,6 +64,7 @@ class Menu:
         menu_items: list[MenuItem],
     ):
         self.id = None
+        self.parent_menu = None
         self.text = text
         self.menu_items = menu_items
 
@@ -73,7 +76,10 @@ class Menu:
         return children + grandchildren
 
     def get_keyboard_markup(self):
-        return tg.InlineKeyboardMarkup(keyboard=[[menu_item.get_inline_button()] for menu_item in self.menu_items])
+        keyboard = [[menu_item.get_inline_button()] for menu_item in self.menu_items]
+        if self.parent_menu is not None:
+            keyboard.append([MenuItem(label="Вернуться назад", submenu=self.parent_menu).get_inline_button()])
+        return tg.InlineKeyboardMarkup(keyboard=keyboard)
 
     def get_inactive_keyboard_markup(self, selected_item_id: str):
         return tg.InlineKeyboardMarkup(
@@ -91,7 +97,7 @@ class MenuHandler:
         self.menu_list.extend(menu_tree.descendants())
 
         self.init_menu_ids()
-        self.init_back_buttons_and_parent_menu()
+        self.init_parent_menu()
 
         self.menu_items_list = self.init_item_ids_and_get_item_list()
 
@@ -112,12 +118,12 @@ class MenuHandler:
         for i, menu in enumerate(self.menu_list):
             menu.id = str(i)
 
-    def init_back_buttons_and_parent_menu(self):
+    def init_parent_menu(self):
         for menu in self.menu_list:
             for menu_item in menu.menu_items:
                 menu_item.parent_menu = menu
-                if menu_item.submenu is not None and menu_item.submenu.id != "0":
-                    menu_item.submenu.menu_items.append(MenuItem(label="Вернуться назад", submenu=menu))
+                if menu_item.submenu is not None:
+                    menu_item.submenu.parent_menu = menu
 
     # TODO throw error on name duplication
     def get_menu_by_id(self, id: str) -> Menu:
