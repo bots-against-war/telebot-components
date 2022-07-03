@@ -28,7 +28,7 @@ class BadFieldValueError(Exception):
 
 
 @dataclass
-class NextFieldGetter:
+class NextFieldGetter(Generic[FieldValueT]):
     """Service class to forward-reference the next field in a form"""
 
     next_field_name_getter: Callable[[tg.User, Optional[FieldValueT]], Optional[str]]
@@ -79,7 +79,7 @@ class FormField(Generic[FieldValueT]):
     required: bool
     query_message: AnyText
     echo_result_template: Optional[AnyText]  # should contain 1 '{}' for field value
-    next_field_getter: NextFieldGetter
+    next_field_getter: NextFieldGetter[FieldValueT]
 
     def process_message(self, message: tg.Message, language: MaybeLanguage) -> MessageProcessingResult[FieldValueT]:
         try:
