@@ -4,7 +4,11 @@ import logging
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.runner import BotRunner
-from telebot_components.menu.menu import MenuHandler, Menu, MenuItem, Terminators
+from telebot_components.menu.menu import MenuHandler, Menu, MenuItem
+
+FIRST_TERMINATOR = "first"
+SECOND_TERMINATOR = "second"
+THIRD_TERMINATOR = "third"
 
 
 def create_menu_bot(token: str):
@@ -22,15 +26,15 @@ def create_menu_bot(token: str):
                     [
                         MenuItem(
                             label="option 1",
-                            terminator=Terminators.Agitation,
+                            terminator=FIRST_TERMINATOR,
                         ),
                         MenuItem(
                             label="option 2",
-                            terminator=Terminators.Letter,
+                            terminator=FIRST_TERMINATOR,
                         ),
                         MenuItem(
                             label="option 3",
-                            terminator=Terminators.Strike,
+                            terminator=FIRST_TERMINATOR,
                         ),
                     ],
                 ),
@@ -42,15 +46,15 @@ def create_menu_bot(token: str):
                     [
                         MenuItem(
                             label="option 1",
-                            terminator=Terminators.Have_initiative,
+                            terminator=SECOND_TERMINATOR,
                         ),
                         MenuItem(
                             label="option 2",
-                            terminator=Terminators.Search_initiative,
+                            terminator=SECOND_TERMINATOR,
                         ),
                         MenuItem(
                             label="option 3",
-                            terminator=Terminators.Read_info,
+                            terminator=THIRD_TERMINATOR,
                         ),
                     ],
                 ),
@@ -58,8 +62,27 @@ def create_menu_bot(token: str):
         ],
     )
 
+    async def on_terminal_menu_option_selected(
+        bot: AsyncTeleBot, user: tg.User, menu_message: tg.Message, terminator: str
+    ):
+        if terminator == FIRST_TERMINATOR:
+            await bot.send_message(
+                user.id,
+                "do what you need to do with this terminator " + FIRST_TERMINATOR,
+            )
+        elif terminator == SECOND_TERMINATOR:
+            await bot.send_message(
+                user.id,
+                "do what you need to do with this terminator " + SECOND_TERMINATOR,
+            )
+        elif terminator == THIRD_TERMINATOR:
+            await bot.send_message(
+                user.id,
+                "do what you need to do with this terminator " + THIRD_TERMINATOR,
+            )
+
     menu_handler = MenuHandler(bot_prefix, menu_tree)
-    menu_handler.setup(bot)
+    menu_handler.setup(bot, on_terminal_menu_option_selected)
 
     @bot.message_handler(commands=["start", "help"])
     async def start_cmd_handler(message: tg.Message):

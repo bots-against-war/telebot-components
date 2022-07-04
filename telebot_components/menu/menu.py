@@ -1,21 +1,9 @@
-import copy
 import logging
-from dataclasses import dataclass
 from typing import Optional
-import enum
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.callback_data import CallbackData
-
-
-class Terminators(enum.Enum):
-    Agitation = 1
-    Letter = 2
-    Strike = 3
-    Have_initiative = 4
-    Search_initiative = 5
-    Read_info = 6
 
 
 ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
@@ -27,7 +15,7 @@ class MenuItem:
     id: Optional[str]
     parent_menu: Optional["Menu"]
 
-    def __init__(self, label: str, submenu: Optional["Menu"] = None, terminator: Optional[Terminators] = None):
+    def __init__(self, label: str, submenu: Optional["Menu"] = None, terminator: Optional[str] = None):
         self.label = label
         self.submenu = submenu
         self.terminator = terminator
@@ -139,7 +127,7 @@ class MenuHandler:
     def get_main_menu(self):
         return self.get_menu_by_id("0")
 
-    def setup(self, bot: AsyncTeleBot):
+    def setup(self, bot: AsyncTeleBot, on_terminal_menu_option_selected):
         @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA)
         async def route_menu(call: tg.CallbackQuery):
             user = call.from_user
@@ -178,28 +166,4 @@ class MenuHandler:
                 reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
             )
 
-            # TODO replace message sending with exact flow initiation
-            if (
-                terminator == Terminators.Agitation
-                or terminator == Terminators.Letter
-                or terminator == Terminators.Strike
-            ):
-                await bot.send_message(
-                    user.id,
-                    "Сейчас мы инициируем составку и отправку Вашего отчета",
-                )
-            elif terminator == Terminators.Have_initiative:
-                await bot.send_message(
-                    user.id,
-                    "Начинаем флоу добавки Вашей инициативы в нашу внутреннюю АИС",
-                )
-            elif terminator == Terminators.Search_initiative:
-                await bot.send_message(
-                    user.id,
-                    "Мы попробуем найти Вам соратников, потому что заниматься антивоенным активизмом веселее с друзьями",
-                )
-            elif terminator == Terminators.Read_info:
-                await bot.send_message(
-                    user.id,
-                    "ИНФО",
-                )
+            await on_terminal_menu_option_selected(bot, user, call.message, terminator)
