@@ -1,10 +1,10 @@
 import logging
 
-
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.runner import BotRunner
-from telebot_components.menu.menu import MenuHandler, Menu, MenuItem
+
+from telebot_components.menu.menu import Menu, MenuHandler, MenuItem, TerminatorContext
 
 FIRST_TERMINATOR = "first"
 SECOND_TERMINATOR = "second"
@@ -62,22 +62,20 @@ def create_menu_bot(token: str):
         ],
     )
 
-    async def on_terminal_menu_option_selected(
-        bot: AsyncTeleBot, user: tg.User, menu_message: tg.Message, terminator: str
-    ):
-        if terminator == FIRST_TERMINATOR:
+    async def on_terminal_menu_option_selected(terminator_context: TerminatorContext) -> None:
+        if terminator_context.terminator == FIRST_TERMINATOR:
             await bot.send_message(
-                user.id,
+                terminator_context.user.id,
                 "do what you need to do with this terminator " + FIRST_TERMINATOR,
             )
-        elif terminator == SECOND_TERMINATOR:
+        elif terminator_context.terminator == SECOND_TERMINATOR:
             await bot.send_message(
-                user.id,
+                terminator_context.user.id,
                 "do what you need to do with this terminator " + SECOND_TERMINATOR,
             )
-        elif terminator == THIRD_TERMINATOR:
+        elif terminator_context.terminator == THIRD_TERMINATOR:
             await bot.send_message(
-                user.id,
+                terminator_context.user.id,
                 "do what you need to do with this terminator " + THIRD_TERMINATOR,
             )
 

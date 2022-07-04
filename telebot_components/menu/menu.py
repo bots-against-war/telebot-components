@@ -1,10 +1,10 @@
 import logging
-from typing import Optional
+from dataclasses import dataclass
+from typing import Callable, Coroutine, Optional
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.callback_data import CallbackData
-
 
 ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
 TERMINATE_MENU_CALLBACK_DATA = CallbackData("id", prefix="terminator")
@@ -12,16 +12,42 @@ INACTIVE_BUTTON_CALLBACK_DATA = CallbackData(prefix="inactive_button")
 
 
 class MenuItem:
-    id: Optional[str]
-    parent_menu: Optional["Menu"]
-
     def __init__(self, label: str, submenu: Optional["Menu"] = None, terminator: Optional[str] = None):
         self.label = label
         self.submenu = submenu
         self.terminator = terminator
 
+        if (self.terminator is not None and self.submenu is not None) and (
+            self.terminator is None and self.submenu is None
+        ):
+            raise RuntimeError("MenuItem is not configured correctly.")
+
+        self._id: Optional[str] = None
+        self._parent_menu: Optional["Menu"] = None
+
+    @property
+    def id(self) -> str:
+        if self._id is None:
+            raise RuntimeError("MenuItem object was not properly initialized.")
+        return self._id
+
+    @id.setter
+    def id(self, id: str):
+        self._id = id
+
+    @property
+    def parent_menu(self) -> "Menu":
+        if self._parent_menu is None:
+            raise RuntimeError("MenuItem object was not properly initialized.")
+        return self._parent_menu
+
+    @parent_menu.setter
+    def parent_menu(self, parent_menu: "Menu"):
+        self._parent_menu = parent_menu
+
     def get_inline_button(self):
         if self.submenu is not None:
+
             return tg.InlineKeyboardButton(
                 text=self.label,
                 callback_data=ROUTE_MENU_CALLBACK_DATA.new(self.submenu.id),
@@ -43,18 +69,25 @@ class MenuItem:
 
 
 class Menu:
-    id: Optional[str]
-    parent_menu: Optional["Menu"]
-
     def __init__(
         self,
         text: str,
         menu_items: list[MenuItem],
     ):
-        self.id = None
-        self.parent_menu = None
+        self._id: Optional[str] = None
+        self.parent_menu: Optional["Menu"] = None
         self.text = text
         self.menu_items = menu_items
+
+    @property
+    def id(self) -> str:
+        if self._id is None:
+            raise RuntimeError("Menu object was not properly initialized.")
+        return self._id
+
+    @id.setter
+    def id(self, id: str):
+        self._id = id
 
     def descendants(self) -> list["Menu"]:
         children = [mi.submenu for mi in self.menu_items if mi.submenu is not None]
@@ -75,59 +108,61 @@ class Menu:
         )
 
 
+@dataclass
+class TerminatorContext:
+    bot: AsyncTeleBot
+    user: tg.User
+    menu_message: tg.Message
+    terminator: str
+
+
 class MenuHandler:
     def __init__(
         self,
         bot_prefix: str,
         menu_tree: Menu,
     ):
-        self.menu_list: list[Menu] = [menu_tree]
-        self.menu_list.extend(menu_tree.descendants())
+        self.menus_list: list[Menu] = [menu_tree]
+        self.menus_list.extend(menu_tree.descendants())
 
         self.init_menu_ids()
         self.init_parent_menu()
 
+        self.menu_by_id: dict[str, Menu] = {m.id: m for m in self.menus_list}
+
         self.menu_items_list = self.init_item_ids_and_get_item_list()
+        self.menu_item_by_id: dict[str, MenuItem] = {mi.id: mi for mi in self.menu_items_list}
 
         self.logger = logging.getLogger(f"{__name__}.{bot_prefix}")
 
     def init_item_ids_and_get_item_list(self) -> list[MenuItem]:
         item_list: list[MenuItem] = []
-        for menu in self.menu_list:
+        for menu in self.menus_list:
             for menu_item in menu.menu_items:
                 item_list.append(menu_item)
-
         for i, menu_item in enumerate(item_list):
             menu_item.id = str(i)
-
         return item_list
 
     def init_menu_ids(self):
-        for i, menu in enumerate(self.menu_list):
+        for i, menu in enumerate(self.menus_list):
             menu.id = str(i)
 
     def init_parent_menu(self):
-        for menu in self.menu_list:
+        for menu in self.menus_list:
             for menu_item in menu.menu_items:
                 menu_item.parent_menu = menu
                 if menu_item.submenu is not None:
                     menu_item.submenu.parent_menu = menu
 
-    # TODO throw error on name duplication
-    def get_menu_by_id(self, id: str) -> Menu:
-        for menu in self.menu_list:
-            if menu.id == id:
-                return menu
-
-    def get_menu_item_by_id(self, id: str) -> MenuItem:
-        for menu_item in self.menu_items_list:
-            if menu_item.id == id:
-                return menu_item
-
     def get_main_menu(self):
-        return self.get_menu_by_id("0")
+        return self.menu_by_id["0"]
 
-    def setup(self, bot: AsyncTeleBot, on_terminal_menu_option_selected):
+    def setup(
+        self,
+        bot: AsyncTeleBot,
+        on_terminal_menu_option_selected: Callable[[TerminatorContext], Coroutine[None, None, None]],
+    ):
         @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA)
         async def route_menu(call: tg.CallbackQuery):
             user = call.from_user
@@ -136,7 +171,7 @@ class MenuHandler:
 
             await bot.answer_callback_query(call.id)
 
-            menu = self.get_menu_by_id(route_to)
+            menu = self.menu_by_id[route_to]
             await bot.edit_message_text(
                 text=menu.text,
                 chat_id=user.id,
@@ -145,7 +180,7 @@ class MenuHandler:
             )
 
         @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA)
-        async def route_menu(call: tg.CallbackQuery):
+        async def render_inactive_menu(call: tg.CallbackQuery):
             await bot.answer_callback_query(call.id)
 
         @bot.callback_query_handler(callback_data=TERMINATE_MENU_CALLBACK_DATA)
@@ -154,9 +189,11 @@ class MenuHandler:
             data = TERMINATE_MENU_CALLBACK_DATA.parse(call.data)
             selected_menu_item_id = data["id"]
 
-            selected_menu_item = self.get_menu_item_by_id(selected_menu_item_id)
+            selected_menu_item = self.menu_item_by_id[selected_menu_item_id]
             terminator = selected_menu_item.terminator
-            current_menu = self.get_menu_by_id(selected_menu_item.parent_menu.id)
+            if terminator is None:
+                raise RuntimeError("Got MenuItem that is not terminating item.")
+            current_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
 
             await bot.answer_callback_query(call.id)
             await bot.edit_message_text(
@@ -166,4 +203,4 @@ class MenuHandler:
                 reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
             )
 
-            await on_terminal_menu_option_selected(bot, user, call.message, terminator)
+            await on_terminal_menu_option_selected(TerminatorContext(bot, user, call.message, terminator))
