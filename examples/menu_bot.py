@@ -8,68 +8,48 @@ from telebot_components.menu.menu import MenuHandler, Menu, MenuItem, Terminator
 
 
 def create_menu_bot(token: str):
-    bot_prefix = "example-feedback-bot"
+    bot_prefix = "example-menu-bot"
     bot = AsyncTeleBot(token)
     logging.basicConfig(level=logging.DEBUG)
 
     menu_tree = Menu(
-        "✊ Главное меню ✊\n\nВыберите тип вашего запроса или сообщения:",
+        "Main menu:",
         [
             MenuItem(
-                label="прислать отчет об акции или открытом письме",
+                label="option 1",
                 submenu=Menu(
-                    "Выберите тип вашего отчета или акции:",
+                    "Submenu 1:",
                     [
                         MenuItem(
-                            label="расклейка/агитация",
+                            label="option 1",
                             terminator=Terminators.Agitation,
                         ),
                         MenuItem(
-                            label="открытое письмо против войны",
+                            label="option 2",
                             terminator=Terminators.Letter,
                         ),
                         MenuItem(
-                            label="образовательная забастовка 'книги вместо бомб'",
+                            label="option 3",
                             terminator=Terminators.Strike,
                         ),
                     ],
                 ),
             ),
             MenuItem(
-                label="прислать отчет об акции или открытом письме",
+                label="option 2",
                 submenu=Menu(
-                    "Выберите тип вашего отчета или акции:",
+                    "Submenu 2:",
                     [
                         MenuItem(
-                            label="расклейка/агитация",
-                            terminator=Terminators.Agitation,
-                        ),
-                        MenuItem(
-                            label="открытое письмо против войны",
-                            terminator=Terminators.Letter,
-                        ),
-                        MenuItem(
-                            label="образовательная забастовка 'книги вместо бомб'",
-                            terminator=Terminators.Strike,
-                        ),
-                    ],
-                ),
-            ),
-            MenuItem(
-                label="присоединиться к антивоенному сопротивлению",
-                submenu=Menu(
-                    "Найти единомышлен_ниц внутри вуза и создать инициативную группу:",
-                    [
-                        MenuItem(
-                            label="Мы уже создали инициативную группу в своем вузе",
+                            label="option 1",
                             terminator=Terminators.Have_initiative,
                         ),
                         MenuItem(
-                            label="Я ищу единомышлен_ниц в своем вузе",
+                            label="option 2",
                             terminator=Terminators.Search_initiative,
                         ),
                         MenuItem(
-                            label="Читать наши материалы по самоорганизации",
+                            label="option 3",
                             terminator=Terminators.Read_info,
                         ),
                     ],

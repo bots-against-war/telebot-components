@@ -78,7 +78,7 @@ class Menu:
     def get_keyboard_markup(self):
         keyboard = [[menu_item.get_inline_button()] for menu_item in self.menu_items]
         if self.parent_menu is not None:
-            keyboard.append([MenuItem(label="Вернуться назад", submenu=self.parent_menu).get_inline_button()])
+            keyboard.append([MenuItem(label="back", submenu=self.parent_menu).get_inline_button()])
         return tg.InlineKeyboardMarkup(keyboard=keyboard)
 
     def get_inactive_keyboard_markup(self, selected_item_id: str):
