@@ -30,11 +30,11 @@ def create_menu_bot(token: str):
                         ),
                         MenuItem(
                             label="option 2",
-                            terminator=FIRST_TERMINATOR,
+                            terminator=SECOND_TERMINATOR,
                         ),
                         MenuItem(
                             label="option 3",
-                            terminator=FIRST_TERMINATOR,
+                            terminator=THIRD_TERMINATOR,
                         ),
                     ],
                 ),

@@ -196,8 +196,7 @@ class MenuHandler:
             current_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
 
             await bot.answer_callback_query(call.id)
-            await bot.edit_message_text(
-                text=current_menu.text,
+            await bot.edit_message_reply_markup(
                 chat_id=user.id,
                 message_id=call.message.id,
                 reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
