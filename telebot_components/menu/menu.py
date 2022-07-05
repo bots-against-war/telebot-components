@@ -17,10 +17,10 @@ class MenuItem:
         self.submenu = submenu
         self.terminator = terminator
 
-        if (self.terminator is not None and self.submenu is not None) and (
-            self.terminator is None and self.submenu is None
-        ):
-            raise RuntimeError("MenuItem is not configured correctly.")
+        if (self.submenu is not None) ^ (self.terminator is None):
+            raise RuntimeError(
+                "MenuItem is not configured correctly. Only submenu OR terminator can be specified in one MenuItem."
+            )
 
         self._id: Optional[str] = None
         self._parent_menu: Optional["Menu"] = None
@@ -164,7 +164,7 @@ class MenuHandler:
         on_terminal_menu_option_selected: Callable[[TerminatorContext], Coroutine[None, None, None]],
     ):
         @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA)
-        async def route_menu(call: tg.CallbackQuery):
+        async def handle_menu(call: tg.CallbackQuery):
             user = call.from_user
             data = ROUTE_MENU_CALLBACK_DATA.parse(call.data)
             route_to = data["route_to"]
@@ -180,11 +180,11 @@ class MenuHandler:
             )
 
         @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA)
-        async def render_inactive_menu(call: tg.CallbackQuery):
+        async def handle_inactive_menu(call: tg.CallbackQuery):
             await bot.answer_callback_query(call.id)
 
         @bot.callback_query_handler(callback_data=TERMINATE_MENU_CALLBACK_DATA)
-        async def route_terminator(call: tg.CallbackQuery):
+        async def handle_terminator(call: tg.CallbackQuery):
             user = call.from_user
             data = TERMINATE_MENU_CALLBACK_DATA.parse(call.data)
             selected_menu_item_id = data["id"]
