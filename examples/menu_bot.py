@@ -92,7 +92,7 @@ def create_menu_bot(token: str):
         )
 
     return BotRunner(
-        name=bot_prefix,
+        bot_prefix=bot_prefix,
         bot=bot,
     )
 
