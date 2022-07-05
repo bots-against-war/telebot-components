@@ -241,7 +241,7 @@ INLINE_FIELD_CALLBACK_DATA = CallbackData("fieldname", "payload", prefix="inline
 @dataclass
 class CallbackProcessingResult(Generic[FieldValueT]):
     response_to_user: Optional[str]
-    update_inline_markup: bool
+    updated_inline_markup: Optional[tg.InlineKeyboardMarkup]
     complete_field: bool
     new_field_value: FieldValueT
 
@@ -265,21 +265,19 @@ class StrictlyInlineFormField(InlineFormField[FieldValueT]):
         return MessageProcessingResult(any_text_to_str(self.please_use_inline_menu, language), None)
 
 
-class MultipleSelectState(TypedDict):
-    selected: set[Enum]
-    page: int
-
-
 @dataclass
-class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[MultipleSelectState]):
-    finish_field_button_caption: AnyText
+class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[Enum]]):
     inline_menu_row_width: int
     options_per_page: int
+    finish_field_button_caption: AnyText
+    next_page_button_caption: AnyText
+    prev_page_button_caption: AnyText
+    min_selected_to_finish: Optional[int] = None
+    max_selected_to_finish: Optional[int] = None
 
     OPTION_PAYLOAD_PREFIX: ClassVar[str] = "opt"
     FINISH_FIELD_PAYLOAD: ClassVar[str] = "finish"
-    NEXT_PAGE_PAYLOAD: ClassVar[str] = "next"
-    PREV_PAGE_PAYLOAD: ClassVar[str] = "prev"
+    TO_PAGE_PAYLOAD_PREFIX: ClassVar[str] = "topage"
     NOOP_PAYLOAD: ClassVar[str] = "noop"
 
     def __post_init__(self) -> None:
@@ -294,98 +292,87 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[Multip
                     return md5(option.value[lang].encode("utf-8")).hexdigest()[:8]
         raise ValueError("Every Enum option must either string or Language -> str dict")
 
-    def value_to_str(self, value: MultipleSelectState, language: MaybeLanguage) -> str:
-        selected = value["selected"]
-        selected_str = [any_text_to_str(opt.value, language) for opt in selected]
+    def value_to_str(self, value: set[Enum], language: MaybeLanguage) -> str:
+        selected_str = [any_text_to_str(opt.value, language) for opt in value]
         return ", ".join(sorted(selected_str))
 
     @property
     def total_pages(self) -> int:
         return 1 + (len(self.EnumClass) // self.options_per_page)
 
-    def init_state(self) -> MultipleSelectState:
-        return MultipleSelectState(selected=set(), page=0)
-
     def process_callback_query(
-        self, callback_payload: str, current_value: Optional[MultipleSelectState], language: MaybeLanguage
-    ) -> CallbackProcessingResult[MultipleSelectState]:
+        self, callback_payload: str, current_value: Optional[set[Enum]], language: MaybeLanguage
+    ) -> CallbackProcessingResult[set[Enum]]:
         if current_value is None:
-            current_value = self.init_state()
-        if callback_payload == self.NOOP_PAYLOAD:
-            return CallbackProcessingResult(
-                response_to_user=None,
-                update_inline_markup=False,
-                complete_field=False,
-                new_field_value=current_value,
-            )
-        if callback_payload == self.FINISH_FIELD_PAYLOAD:
-            return CallbackProcessingResult(
-                response_to_user=self.get_result_message(current_value, language),
-                update_inline_markup=False,
-                complete_field=True,
-                new_field_value=current_value,
-            )
-        elif callback_payload == self.NEXT_PAGE_PAYLOAD:
-            current_value["page"] = min(self.total_pages - 1, current_value["page"] + 1)
-            return CallbackProcessingResult(
-                response_to_user=None,
-                update_inline_markup=True,
-                complete_field=False,
-                new_field_value=current_value,
-            )
-        elif callback_payload == self.PREV_PAGE_PAYLOAD:
-            current_value["page"] = max(0, current_value["page"] - 1)
-            return CallbackProcessingResult(
-                response_to_user=None,
-                update_inline_markup=True,
-                complete_field=False,
-                new_field_value=current_value,
-            )
-        elif callback_payload.startswith(self.OPTION_PAYLOAD_PREFIX):
-            option_hash = callback_payload.removeprefix(self.OPTION_PAYLOAD_PREFIX)
-            selected_option = self._option_by_hash.get(option_hash)
-            if selected_option is None:
-                logger.error(
-                    f"Error parsing callback payload {callback_payload!r} as Enum value {list(self.EnumClass)}"
-                )
+            current_value = set()
+        try:
+            if callback_payload == self.NOOP_PAYLOAD:
                 return CallbackProcessingResult(
-                    response_to_user="Something went wrong, we're on it!",
-                    update_inline_markup=True,
+                    response_to_user=None,
+                    updated_inline_markup=None,
                     complete_field=False,
                     new_field_value=current_value,
                 )
-            new_value = copy.deepcopy(current_value)
-            if selected_option in new_value["selected"]:
-                new_value["selected"].remove(selected_option)
+            if callback_payload == self.FINISH_FIELD_PAYLOAD:
+                return CallbackProcessingResult(
+                    response_to_user=self.get_result_message(current_value, language),
+                    updated_inline_markup=None,
+                    complete_field=True,
+                    new_field_value=current_value,
+                )
+            elif callback_payload.startswith(self.TO_PAGE_PAYLOAD_PREFIX):
+                to_page = int(callback_payload.removeprefix(self.TO_PAGE_PAYLOAD_PREFIX))
+                return CallbackProcessingResult(
+                    response_to_user=None,
+                    updated_inline_markup=self.get_reply_markup(language, current_value, to_page),
+                    complete_field=False,
+                    new_field_value=current_value,
+                )
+            elif callback_payload.startswith(self.OPTION_PAYLOAD_PREFIX):
+                option_hash = callback_payload.removeprefix(self.OPTION_PAYLOAD_PREFIX)
+                selected_option = self._option_by_hash.get(option_hash)
+                if selected_option is None:
+                    raise RuntimeError(
+                        f"Error parsing callback payload {callback_payload!r} as Enum value {list(self.EnumClass)}"
+                    )
+                new_value = copy.deepcopy(current_value)
+                if selected_option in new_value:
+                    new_value.remove(selected_option)
+                else:
+                    new_value.add(selected_option)
+                selected_option_page = list(self.EnumClass).index(selected_option) // self.options_per_page  # type: ignore
+                return CallbackProcessingResult(
+                    response_to_user=None,
+                    updated_inline_markup=self.get_reply_markup(language, new_value, selected_option_page),
+                    complete_field=False,
+                    new_field_value=new_value,
+                )
             else:
-                new_value["selected"].add(selected_option)
+                raise ValueError(f"Unknown callback payload prefix: {callback_payload!r}!")
+        except Exception as e:
+            logger.exception("Unexpected error processing callback query")
             return CallbackProcessingResult(
-                response_to_user=None,
-                update_inline_markup=True,
-                complete_field=False,
-                new_field_value=new_value,
-            )
-        else:
-            logger.error(f"Error parsing callback payload {callback_payload!r}, unknown prefix!")
-            return CallbackProcessingResult(
-                response_to_user="Something went wrong, we're on it!",
-                update_inline_markup=True,
+                response_to_user=f"Something went wrong, we're on it! Details: {e}",
+                updated_inline_markup=None,
                 complete_field=False,
                 new_field_value=current_value,
             )
 
     def get_reply_markup(
-        self, language: MaybeLanguage, current_value: Optional[MultipleSelectState] = None
+        self,
+        language: MaybeLanguage,
+        current_value: Optional[set[Enum]] = None,
+        page: int = 0,
     ) -> tg.InlineKeyboardMarkup:
         if current_value is None:
-            current_value = self.init_state()
+            current_value = set()
         all_options: list[Enum] = list(self.EnumClass)
-        page_start_idx = current_value["page"] * self.options_per_page
-        page_end_idx = (current_value["page"] + 1) * self.options_per_page
+        page_start_idx = page * self.options_per_page
+        page_end_idx = (page + 1) * self.options_per_page
         option_buttons: list[tg.InlineKeyboardButton] = []
         for option in all_options[page_start_idx:page_end_idx]:
             option_text = any_text_to_str(option.value, language)
-            if option in current_value["selected"]:
+            if option in current_value:
                 button_text = "✅ " + option_text
             else:
                 button_text = "⬜ " + option_text
@@ -402,19 +389,25 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[Multip
                 text=" ", callback_data=self.new_callback_data(payload=self.NOOP_PAYLOAD)
             )
             prev_page_button = tg.InlineKeyboardButton(
-                text="⬅️", callback_data=self.new_callback_data(payload=self.PREV_PAGE_PAYLOAD)
+                text=any_text_to_str(self.prev_page_button_caption, language),
+                callback_data=self.new_callback_data(payload=self.TO_PAGE_PAYLOAD_PREFIX + str(page - 1)),
             )
             next_page_button = tg.InlineKeyboardButton(
-                text="➡️", callback_data=self.new_callback_data(payload=self.NEXT_PAGE_PAYLOAD)
+                text=any_text_to_str(self.next_page_button_caption, language),
+                callback_data=self.new_callback_data(payload=self.TO_PAGE_PAYLOAD_PREFIX + str(page + 1)),
             )
             keyboard.row(
-                prev_page_button if current_value["page"] > 0 else noop_button,
-                next_page_button if current_value["page"] < self.total_pages - 1 else noop_button,
+                prev_page_button if page > 0 else noop_button,
+                next_page_button if page < self.total_pages - 1 else noop_button,
             )
-        keyboard.row(
-            tg.InlineKeyboardButton(
-                text=any_text_to_str(self.finish_field_button_caption, language),
-                callback_data=self.new_callback_data(payload=self.FINISH_FIELD_PAYLOAD),
+        n_selected = len(current_value)
+        if (self.min_selected_to_finish is None or n_selected >= self.min_selected_to_finish) and (
+            self.max_selected_to_finish is None or n_selected <= self.max_selected_to_finish
+        ):
+            keyboard.row(
+                tg.InlineKeyboardButton(
+                    text=any_text_to_str(self.finish_field_button_caption, language),
+                    callback_data=self.new_callback_data(payload=self.FINISH_FIELD_PAYLOAD),
+                )
             )
-        )
         return keyboard

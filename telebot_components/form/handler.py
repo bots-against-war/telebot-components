@@ -90,7 +90,7 @@ class _FormAction(Enum):
 class _UserAction:
     send_message_html: Optional[str]
     send_reply_keyboard: tg.ReplyMarkup = tg.ReplyKeyboardRemove()
-    updated_inline_markup: Optional[tg.ReplyMarkup] = None
+    update_inline_markup: Optional[tg.ReplyMarkup] = None
 
 
 @dataclass
@@ -240,11 +240,6 @@ class FormState(Generic[FormResultT]):
         if field_result.response_to_user:
             paragraphs.append(field_result.response_to_user)
 
-        updated_inline_markup = (
-            self.current_field.get_reply_markup(language, field_result.new_field_value)
-            if field_result.update_inline_markup
-            else None
-        )
         send_reply_keyboard: tg.ReplyMarkup = tg.ReplyKeyboardRemove()
         form_action = _FormAction.KEEP_GOING
         if field_result.complete_field:
@@ -265,7 +260,7 @@ class FormState(Generic[FormResultT]):
             user_action=_UserAction(
                 send_message_html=join_paragraphs(paragraphs),
                 send_reply_keyboard=send_reply_keyboard,
-                updated_inline_markup=updated_inline_markup,
+                update_inline_markup=field_result.updated_inline_markup,
             ),
         )
 
@@ -285,6 +280,7 @@ class FormHandler(Generic[FormResultT]):
         self,
         redis: RedisInterface,
         bot_prefix: str,
+        name: str,
         form: Form,
         config: FormHandlerConfig,
         language_store: Optional[LanguageStore] = None,
@@ -293,10 +289,10 @@ class FormHandler(Generic[FormResultT]):
         self.form = form
 
         self.form_state_store = KeyValueStore[Optional[FormState]](
-            name="form-state-for",
+            name=f"form-state-for-{name}",
             prefix=bot_prefix,
             redis=redis,
-            expiration_time=times.HOUR,
+            expiration_time=3 * times.HOUR,
             dumper=lambda fs: fs.to_store() if fs is not None else "",
             loader=lambda dump: FormState.from_store(dump, form.fields),
         )
@@ -364,12 +360,12 @@ class FormHandler(Generic[FormResultT]):
                         parse_mode="HTML",
                         reply_markup=user_action.send_reply_keyboard,
                     )
-                if user_action.updated_inline_markup is not None:
+                if user_action.update_inline_markup is not None:
                     try:
                         await bot.edit_message_reply_markup(
                             chat_id=user.id,
                             message_id=last_message_id,
-                            reply_markup=user_action.updated_inline_markup,
+                            reply_markup=user_action.update_inline_markup,
                         )
                     except Exception:
                         pass
@@ -398,7 +394,7 @@ class FormHandler(Generic[FormResultT]):
                 form_exit_context_constructor=form_exit_context_constructor,
             )
 
-        @bot.callback_query_handler(callback_data=INLINE_FIELD_CALLBACK_DATA)
+        @bot.callback_query_handler(func=currently_filling_form, callback_data=INLINE_FIELD_CALLBACK_DATA)
         async def form_inline_action_handler(call: tg.CallbackQuery):
             async def form_state_updater(form_state: FormState, language: MaybeLanguage):
                 return await form_state.update_with_callback_query(call, language, self.config)
@@ -407,8 +403,6 @@ class FormHandler(Generic[FormResultT]):
                 return FormExitContext(bot, call, result)
 
             try:
-                if not await currently_filling_form(call):
-                    return
                 await form_action_handler(
                     user=call.from_user,
                     last_message_id=call.message.id,

@@ -65,8 +65,8 @@ age_field = IntegerField(
         Language.EN: "You age: {}.",
     },
     not_an_integer_error_msg={
-        Language.RU: "Пожалуйста, введите ваш возраст одним числом.",
-        Language.EN: "Please enter your age as a single number.",
+        Language.RU: "Возраст должен быть указан одним числом.",
+        Language.EN: "Age must be specified as a single number.",
     },
     next_field_getter=NextFieldGetter(
         next_field_name_getter=after_age_field,
@@ -123,9 +123,19 @@ favorite_subject_field = MultipleSelectField(
         Language.RU: "Завершить выбор",
         Language.EN: "Finish selection",
     },
+    next_page_button_caption={
+        Language.RU: "след.",
+        Language.EN: "next",
+    },
+    prev_page_button_caption={
+        Language.RU: "пред.",
+        Language.EN: "prev",
+    },
     inline_menu_row_width=2,
     options_per_page=6,
     next_field_getter=NextFieldGetter.form_end(),
+    min_selected_to_finish=2,
+    max_selected_to_finish=5,
 )
 
 
@@ -237,6 +247,7 @@ def create_form_bot(redis: RedisInterface, token: str):
     form_handler = FormHandler[dict](
         redis=redis,
         bot_prefix=bot_prefix,
+        name="example",
         form=form,
         config=FormHandlerConfig(
             echo_filled_field=True,
@@ -297,7 +308,7 @@ def create_form_bot(redis: RedisInterface, token: str):
     language_store.setup(bot)
 
     return BotRunner(
-        name="example-form-bot",
+        bot_prefix="example-form-bot",
         bot=bot,
     )
 
