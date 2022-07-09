@@ -108,10 +108,10 @@ class FeedbackConfig:
 class FeedbackHandler:
     """
     A class incapsulating the following workflow:
-     - people write messages to a bot
-     - bot forwards them to admin chat
-     - admins reply to messages
-     - bot copy messages back to the user
+     - people write messages to the bot
+     - the bot forwards messages to admin chat
+     - admins reply
+     - the bot copies messages back to the user
     """
 
     def __init__(
