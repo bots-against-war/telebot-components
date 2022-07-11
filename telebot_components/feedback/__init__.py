@@ -33,6 +33,7 @@ from telebot_components.stores.language import (
     Language,
     LanguageStore,
     any_text_to_str,
+    vaildate_singlelang_text,
 )
 
 
@@ -222,15 +223,13 @@ class FeedbackHandler:
         if self.config.force_category_selection and self.service_messages.you_must_select_category is None:
             raise ValueError("force_category_selection is True, you_must_select_category message must be set")
 
-        if self.language_store is not None:
-            languages = self.language_store.languages
-        else:
-            languages = [None]
         for message in self.service_messages.user_facing:
             if message is None:
                 continue
-            for language in languages:
-                any_text_to_str(message, language)
+            if self.language_store is None:
+                vaildate_singlelang_text(message)
+            else:
+                self.language_store.validate_multilang(message)
 
     async def _ban_admin_chat_action(
         self, admin_message: tg.Message, forwarded_message: tg.Message, origin_chat_id: int

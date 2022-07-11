@@ -2,7 +2,7 @@ import copy
 import datetime
 import logging
 from dataclasses import dataclass, fields
-from datetime import date, tzinfo
+from datetime import date, time, tzinfo
 from enum import Enum
 from hashlib import md5
 from typing import Callable, ClassVar, Dict, Generic, Optional, Type, TypedDict, TypeVar
@@ -187,6 +187,17 @@ class DateField(FormField[date]):
             return [self.cant_be_in_the_past_error_msg]
         else:
             return []
+
+
+@dataclass
+class TimeField(FormField[time]):
+    bad_time_format_msg: AnyText
+
+    def parse(self, message: tg.Message) -> time:
+        try:
+            return time.fromisoformat(message.text_content)
+        except ValueError as e:
+            raise BadFieldValueError(self.bad_time_format_msg)
 
 
 @dataclass
