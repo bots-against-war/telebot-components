@@ -13,9 +13,8 @@ from telebot_components.stores.language import (
     AnyText,
     Language,
     LanguageStore,
-    MultilangText,
     any_text_to_str,
-    validate_multilang_text,
+    vaildate_singlelang_text,
 )
 from telebot_components.stores.types import OnOptionSelected
 from telebot_components.stores.utils import callback_query_processing_error
@@ -53,9 +52,11 @@ class CategoryStore:
         self.select_category_callback_data = CallbackData("cat_name", prefix="category")
 
         self.language_store = language_store
-        if self.language_store is not None:
-            for category in categories:
+        for category in categories:
+            if self.language_store is not None:
                 self.language_store.validate_multilang(category.button_caption)
+            else:
+                vaildate_singlelang_text(category.button_caption)
 
     async def save_user_category(self, user: tg.User, category: Category) -> bool:
         return await self.user_category_store.save(user.id, category)

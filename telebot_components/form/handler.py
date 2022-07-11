@@ -35,6 +35,7 @@ from telebot_components.stores.language import (
     LanguageStore,
     MaybeLanguage,
     any_text_to_str,
+    vaildate_singlelang_text,
 )
 from telebot_components.utils import from_yaml_unsafe, join_paragraphs, to_yaml_unsafe
 
@@ -314,10 +315,7 @@ class FormHandler(Generic[FormResultT]):
             if self.language_store is not None:
                 self.language_store.validate_multilang(text)
             else:
-                if not isinstance(text, str):
-                    raise ValueError(
-                        "All form-related texts are expected to be strings when language store is not used"
-                    )
+                vaildate_singlelang_text(text)
 
     async def get_maybe_language(self, user: tg.User) -> MaybeLanguage:
         if self.language_store is None:

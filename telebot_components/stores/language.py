@@ -55,6 +55,12 @@ def validate_multilang_text(t: Any, languages: list[Language]) -> MultilangText:
     return t
 
 
+def vaildate_singlelang_text(t: Any) -> str:
+    if not isinstance(t, str):
+        raise TypeError(f"Single language text must be a string, found {type(t).__name__}: {t}")
+    return t
+
+
 AnyText = Union[str, MultilangText]
 
 
