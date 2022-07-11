@@ -158,6 +158,19 @@ class IntegerField(FormField[int]):
 
 
 @dataclass
+class IntegerListField(FormField[list[int]]):
+    not_an_integer_list_error_msg: AnyText
+
+    def parse(self, message: tg.Message) -> list[int]:
+        try:
+            text = message.text_content.strip()
+            numbers = text.split()
+            return [int(n) for n in numbers]
+        except Exception:
+            raise BadFieldValueError(self.not_an_integer_list_error_msg)
+
+
+@dataclass
 class DateField(FormField[date]):
     timezone: tzinfo
     bad_date_format_error_msg: AnyText
