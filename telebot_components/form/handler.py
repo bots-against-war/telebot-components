@@ -389,9 +389,6 @@ class FormHandler(Generic[FormResultT]):
 
         @bot.message_handler(func=currently_filling_form, chat_types=[constants.ChatType.private], priority=100)
         async def form_message_action_handler(message: tg.Message):
-
-            logger.info(f"Form message action handler got message: {message.id = } {message.media_group_id = }")
-
             async def form_state_updater(form_state: FormState, language: MaybeLanguage):
                 return await form_state.update_with_message(message, language, self.config)
 
