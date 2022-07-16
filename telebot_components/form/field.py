@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import datetime
 import logging
@@ -5,7 +6,7 @@ from dataclasses import dataclass, fields
 from datetime import date, time, tzinfo
 from enum import Enum
 from hashlib import md5
-from typing import Callable, ClassVar, Dict, Generic, Optional, Type, TypedDict, TypeVar
+from typing import Callable, ClassVar, Dict, Generic, Optional, Type, TypeVar, Union
 
 from telebot import types as tg
 from telebot.callback_data import CallbackData
@@ -36,6 +37,9 @@ class NextFieldGetter(Generic[FieldValueT]):
     possible_next_field_names: list[Optional[str]]
     # filled on Form object initialization
     fields_by_name: Optional[Dict[str, "FormField"]] = None
+
+    def __call__(self, user: tg.User, value: Optional[FieldValueT]) -> Optional["FormField"]:
+        return self.get_next_field(user, value)
 
     def get_next_field(self, user: tg.User, value: Optional[FieldValueT]) -> Optional["FormField"]:
         if self.fields_by_name is None:
@@ -71,6 +75,7 @@ class NextFieldGetter(Generic[FieldValueT]):
 class MessageProcessingResult(Generic[FieldValueT]):
     response_to_user: Optional[str]
     parsed_value: Optional[FieldValueT]
+    ignore: bool
 
 
 @dataclass
@@ -81,17 +86,21 @@ class FormField(Generic[FieldValueT]):
     echo_result_template: Optional[AnyText]  # should contain 1 '{}' for field value
     next_field_getter: NextFieldGetter[FieldValueT]
 
-    def process_message(self, message: tg.Message, language: MaybeLanguage) -> MessageProcessingResult[FieldValueT]:
+    async def process_message(
+        self, message: tg.Message, language: MaybeLanguage
+    ) -> MessageProcessingResult[FieldValueT]:
         try:
             value = self.parse(message)
             return MessageProcessingResult(
                 response_to_user=self.get_result_message(value, language),
                 parsed_value=value,
+                ignore=False,
             )
         except BadFieldValueError as error:
             return MessageProcessingResult(
                 response_to_user=any_text_to_str(error.msg, language),
                 parsed_value=None,
+                ignore=False,
             )
 
     async def get_query_message(self, user: tg.User) -> AnyText:
@@ -213,6 +222,106 @@ class TimeField(FormField[time]):
             raise BadFieldValueError(self.bad_time_format_msg)
 
 
+TelegramAttachment = Union[list[tg.PhotoSize], tg.Video, tg.Animation, tg.Audio]
+
+
+_users_uploading_media_group: set[int] = set()
+_media_group_attachments_stash: dict[str, list[TelegramAttachment]] = dict()
+
+
+@dataclass
+class MultipleAttachmentsField(FormField[list[TelegramAttachment]]):
+    attachments_expected_msg: AnyText
+    only_one_media_message_allowed: AnyText
+
+    def __post_init__(self):
+        self.logger = logging.getLogger(f"{__file__}.{self.__class__.__name__}(name={self.name!r})")
+
+    def get_attachment(self, message: tg.Message) -> Optional[TelegramAttachment]:
+        if message.photo is not None:
+            return message.photo
+        elif message.document is not None:
+            return message.document
+        elif message.audio is not None:
+            return message.audio
+        elif message.animation is not None:
+            return message.animation
+        else:
+            return None
+
+    async def process_message(
+        self, message: tg.Message, language: MaybeLanguage
+    ) -> MessageProcessingResult[list[TelegramAttachment]]:
+        """HACK: we want to process media group, but telegram passes them as separate messages,
+        linked only with ID with no info on the total number of items, order or whatever.
+
+        As a workaround, we use a little non-persistent cache internal to field. We store the
+        first message, sleep asynchronously for some time and hope that by the time we wake up,
+        all other messages in the media group have arrived and are already added to the cache
+        """
+        attachment = self.get_attachment(message)
+        if attachment is None:
+            return MessageProcessingResult(
+                response_to_user=any_text_to_str(self.attachments_expected_msg, language),
+                parsed_value=None,
+                ignore=False,
+            )
+        media_group_id = message.media_group_id
+        self.logger.debug(f"{self.__class__.__name__} got a new media: {media_group_id = } ")
+        if media_group_id is None or media_group_id not in _media_group_attachments_stash:
+            # single message / first message in a media group
+            if message.from_user.id in _users_uploading_media_group:
+                # we're already waiting for messages in a media group
+                return MessageProcessingResult(
+                    response_to_user=any_text_to_str(self.only_one_media_message_allowed, language),
+                    parsed_value=None,
+                    ignore=True,
+                )
+            if media_group_id is None:
+                # single media message
+                value = [attachment]
+                return MessageProcessingResult(
+                    response_to_user=self.get_result_message(value, language),
+                    parsed_value=value,
+                    ignore=False,
+                )
+            else:
+                # first message in a media group — waiting for the rest of it
+                initial_value = [attachment]
+                try:
+                    _users_uploading_media_group.add(message.from_user.id)
+                    _media_group_attachments_stash[media_group_id] = initial_value
+                    self.logger.debug("First attachment in a media group, sleeping to wait for other ones")
+                    await asyncio.sleep(1.0)  # waiting for other messages to come in and to be saved in the stash
+                finally:
+                    _users_uploading_media_group.discard(message.from_user.id)
+                    final_value = _media_group_attachments_stash.pop(media_group_id, None)
+                    self.logger.debug(f"Woke up, got {len(final_value)} attachments in a group")
+                return MessageProcessingResult(
+                    response_to_user=self.get_result_message(final_value, language),
+                    parsed_value=final_value,
+                    ignore=False,
+                )
+        else:
+            # second or later message in a media group
+            current_value = _media_group_attachments_stash.get(media_group_id)
+            if not isinstance(current_value, list):
+                self.logger.error(f"Corrupted data in stash: {_media_group_attachments_stash}")
+                return MessageProcessingResult(
+                    response_to_user="Something went wrong...",
+                    parsed_value=None,
+                    ignore=False,
+                )
+            else:
+                self.logger.debug("Second-or-later attachment in a media group, adding it to stash")
+                current_value.append(attachment)
+                return MessageProcessingResult(
+                    response_to_user=None,
+                    parsed_value=None,
+                    ignore=True,
+                )
+
+
 @dataclass
 class _EnumDefinedFieldMixin:
     EnumClass: Type[Enum]
@@ -275,7 +384,7 @@ class InlineFormField(FormField[FieldValueT]):
     def new_callback_data(self, payload: str) -> str:
         return INLINE_FIELD_CALLBACK_DATA.new(fieldname=self.name, payload=payload)
 
-    def process_callback_query(
+    async def process_callback_query(
         self, callback_payload: str, current_value: Optional[FieldValueT], language: MaybeLanguage
     ) -> CallbackProcessingResult[FieldValueT]:
         raise NotImplementedError("InlineFormField cannot be used directly, please use concrete subclasses")
@@ -285,8 +394,14 @@ class InlineFormField(FormField[FieldValueT]):
 class StrictlyInlineFormField(InlineFormField[FieldValueT]):
     please_use_inline_menu: AnyText
 
-    def process_message(self, message: tg.Message, language: MaybeLanguage) -> MessageProcessingResult[FieldValueT]:
-        return MessageProcessingResult(any_text_to_str(self.please_use_inline_menu, language), None)
+    async def process_message(
+        self, message: tg.Message, language: MaybeLanguage
+    ) -> MessageProcessingResult[FieldValueT]:
+        return MessageProcessingResult(
+            any_text_to_str(self.please_use_inline_menu, language),
+            None,
+            ignore=False,
+        )
 
 
 @dataclass
@@ -324,7 +439,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
     def total_pages(self) -> int:
         return 1 + (len(self.EnumClass) // self.options_per_page)
 
-    def process_callback_query(
+    async def process_callback_query(
         self, callback_payload: str, current_value: Optional[set[Enum]], language: MaybeLanguage
     ) -> CallbackProcessingResult[set[Enum]]:
         if current_value is None:
