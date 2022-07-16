@@ -179,7 +179,7 @@ class FormState(Generic[FormResultT]):
                 field_ok = result.parsed_value is not None
                 result_msg = result.response_to_user
                 value = result.parsed_value
-                if result.ignore:
+                if result.no_form_state_mutation:
                     return _FormStateUpdateEffect(
                         _FormAction.KEEP_GOING,
                         user_action=_UserAction(send_message_html=result_msg),

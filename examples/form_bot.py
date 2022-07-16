@@ -7,10 +7,11 @@ from typing import Any, cast
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.runner import BotRunner
+from telebot.types import constants as tgconst
 
 from telebot_components.form.field import (
+    AttachmentsField,
     IntegerField,
-    MultipleAttachmentsField,
     MultipleSelectField,
     NextFieldGetter,
     PlainTextField,
@@ -178,19 +179,24 @@ university_program_field = PlainTextField(
 )
 
 
-photos_field = MultipleAttachmentsField(
+photos_field = AttachmentsField(
     name="photos",
     required=True,
     query_message={Language.RU: "Прикрепите фотографии.", Language.EN: "Please attach photos."},
     echo_result_template=None,
-    attachments_expected_msg={
+    attachments_expected_error_msg={
         Language.RU: "В этом поле нужно прикрепить фотографии.",
         Language.EN: "This field requires you to attach some photos.",
     },
-    only_one_media_message_allowed={
+    only_one_media_message_allowed_error_msg={
         Language.RU: "Можно приложить не более 10 фото.",
         Language.EN: "You can't attach more than 10 photos.",
     },
+    bad_attachment_type_error_msg={
+        Language.RU: "Пожалуйста, прикрепляйте только фотографии с компрессией, не в в виде документов.",
+        Language.EN: "Please attach only photos with compression, not as documents.",
+    },
+    allowed_attachment_types={tgconst.MediaContentType.photo},
     next_field_getter=NextFieldGetter.form_end(),
 )
 
@@ -243,6 +249,11 @@ form.print_graph()
 #            V                 |
 # ┌─────────────────────┐      |
 # │                     │<─────┘
+# │       photos        │
+# └─────────────────────┘
+#            |
+#            V
+# ┌─────────────────────┐
 # │         END         │
 # └─────────────────────┘
 
