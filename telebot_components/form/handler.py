@@ -138,6 +138,12 @@ class FormState(Generic[FormResultT]):
             query_text += " " + form_handler_config.can_skip_field_msg(language)
         return query_text
 
+    def get_current_reply_markup(self, language: MaybeLanguage):
+        return self.current_field.get_reply_markup(
+            language,
+            current_value=self.result_so_far.get(self.current_field.name),
+        )
+
     async def update_with_message(
         self,
         message: tg.Message,
@@ -165,14 +171,19 @@ class FormState(Generic[FormResultT]):
                         _FormAction.KEEP_GOING,
                         user_action=_UserAction(
                             send_message_html=form_handler_config.unsupported_cmd_error_msg(language),
-                            send_reply_keyboard=self.current_field.get_reply_markup(language),
+                            send_reply_keyboard=self.get_current_reply_markup(language),
                         ),
                     )
             else:
-                result = self.current_field.process_message(message, language)
+                result = await self.current_field.process_message(message, language)
                 field_ok = result.parsed_value is not None
                 result_msg = result.response_to_user
                 value = result.parsed_value
+                if result.no_form_state_mutation:
+                    return _FormStateUpdateEffect(
+                        _FormAction.KEEP_GOING,
+                        user_action=_UserAction(send_message_html=result_msg),
+                    )
 
             if not field_ok:
                 if result_msg:
@@ -182,7 +193,7 @@ class FormState(Generic[FormResultT]):
                     _FormAction.KEEP_GOING,
                     user_action=_UserAction(
                         send_message_html=join_paragraphs(reply_paragraphs),
-                        send_reply_keyboard=self.current_field.get_reply_markup(language),
+                        send_reply_keyboard=self.get_current_reply_markup(language),
                     ),
                 )
 
@@ -190,7 +201,7 @@ class FormState(Generic[FormResultT]):
             if form_handler_config.echo_filled_field and result_msg is not None:
                 reply_paragraphs.append(result_msg)
 
-            next_field = self.current_field.next_field_getter.get_next_field(message.from_user, value)
+            next_field = self.current_field.next_field_getter(message.from_user, value)
             if next_field is None:
                 return _FormStateUpdateEffect(
                     _FormAction.COMPLETE,
@@ -206,7 +217,7 @@ class FormState(Generic[FormResultT]):
                 _FormAction.KEEP_GOING,
                 user_action=_UserAction(
                     send_message_html=join_paragraphs(reply_paragraphs),
-                    send_reply_keyboard=self.current_field.get_reply_markup(language),
+                    send_reply_keyboard=self.get_current_reply_markup(language),
                 ),
             )
         except Exception as e:
@@ -231,7 +242,7 @@ class FormState(Generic[FormResultT]):
         callback_data = INLINE_FIELD_CALLBACK_DATA.parse(call.data)
         if callback_data["fieldname"] != self.current_field.name:
             return _FormStateUpdateEffect(_FormAction.DO_NOTHING)
-        field_result = self.current_field.process_callback_query(
+        field_result = await self.current_field.process_callback_query(
             callback_payload=callback_data["payload"],
             current_value=self.result_so_far.get(self.current_field.name),
             language=language,
@@ -244,9 +255,7 @@ class FormState(Generic[FormResultT]):
         send_reply_keyboard: tg.ReplyMarkup = tg.ReplyKeyboardRemove()
         form_action = _FormAction.KEEP_GOING
         if field_result.complete_field:
-            next_field = self.current_field.next_field_getter.get_next_field(
-                user=call.from_user, value=field_result.new_field_value
-            )
+            next_field = self.current_field.next_field_getter(user=call.from_user, value=field_result.new_field_value)
             if next_field is None:
                 form_action = _FormAction.COMPLETE
             else:
@@ -369,13 +378,14 @@ class FormHandler(Generic[FormResultT]):
                         pass
             if state_update_effect.form_action is _FormAction.KEEP_GOING:
                 return
-            await self.form_state_store.drop(user_id)
-            form_exit_context = form_exit_context_constructor(bot, form_state.result_so_far)
-            if state_update_effect.form_action is _FormAction.CANCEL:
-                if on_form_cancelled is not None:
-                    await on_form_cancelled(form_exit_context)
-            elif state_update_effect.form_action is _FormAction.COMPLETE:
-                await on_form_completed(form_exit_context)
+            else:
+                await self.form_state_store.drop(user_id)
+                form_exit_context = form_exit_context_constructor(bot, form_state.result_so_far)
+                if state_update_effect.form_action is _FormAction.CANCEL:
+                    if on_form_cancelled is not None:
+                        await on_form_cancelled(form_exit_context)
+                elif state_update_effect.form_action is _FormAction.COMPLETE:
+                    await on_form_completed(form_exit_context)
 
         @bot.message_handler(func=currently_filling_form, chat_types=[constants.ChatType.private], priority=100)
         async def form_message_action_handler(message: tg.Message):
@@ -429,9 +439,6 @@ class FormHandler(Generic[FormResultT]):
                     any_text_to_str((await self.form.start_field.get_query_message(user)), language),
                 ]
             ),
-            reply_markup=self.form.start_field.get_reply_markup(
-                language=language,
-                current_value=initial_form_state.result_so_far.get(self.form.start_field.name),
-            ),
+            reply_markup=initial_form_state.get_current_reply_markup(language),
             parse_mode="HTML",
         )

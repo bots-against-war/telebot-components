@@ -7,8 +7,10 @@ from typing import Any, cast
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.runner import BotRunner
+from telebot.types import constants as tgconst
 
 from telebot_components.form.field import (
+    AttachmentsField,
     IntegerField,
     MultipleSelectField,
     NextFieldGetter,
@@ -24,7 +26,7 @@ from telebot_components.form.handler import (
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.language import Language, LanguageStore
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 
 name_field = PlainTextField(
@@ -133,7 +135,7 @@ favorite_subject_field = MultipleSelectField(
     },
     inline_menu_row_width=2,
     options_per_page=6,
-    next_field_getter=NextFieldGetter.form_end(),
+    next_field_getter=NextFieldGetter.by_name("photos"),
     min_selected_to_finish=2,
     max_selected_to_finish=5,
 )
@@ -169,11 +171,33 @@ university_program_field = PlainTextField(
         Language.EN: "Enter your faculty and major.",
     },
     echo_result_template=None,
-    next_field_getter=NextFieldGetter.form_end(),
+    next_field_getter=NextFieldGetter.by_name("photos"),
     empty_text_error_msg={
         Language.RU: "Поле не может быть пустым.",
         Language.EN: "This field cannot be empty",
     },
+)
+
+
+photos_field = AttachmentsField(
+    name="photos",
+    required=True,
+    query_message={Language.RU: "Прикрепите фотографии.", Language.EN: "Please attach photos."},
+    echo_result_template=None,
+    attachments_expected_error_msg={
+        Language.RU: "В этом поле нужно прикрепить фотографии.",
+        Language.EN: "This field requires you to attach some photos.",
+    },
+    only_one_media_message_allowed_error_msg={
+        Language.RU: "Можно приложить не более 10 фото.",
+        Language.EN: "You can't attach more than 10 photos.",
+    },
+    bad_attachment_type_error_msg={
+        Language.RU: "Пожалуйста, прикрепляйте только фотографии с компрессией, не в в виде документов.",
+        Language.EN: "Please attach only photos with compression, not as documents.",
+    },
+    allowed_attachment_types={tgconst.MediaContentType.photo},
+    next_field_getter=NextFieldGetter.form_end(),
 )
 
 
@@ -184,6 +208,7 @@ form = Form(
         favorite_subject_field,
         has_finished_school_field,
         university_program_field,
+        photos_field,
     ],
     start_field=name_field,
 )
@@ -224,6 +249,11 @@ form.print_graph()
 #            V                 |
 # ┌─────────────────────┐      |
 # │                     │<─────┘
+# │       photos        │
+# └─────────────────────┘
+#            |
+#            V
+# ┌─────────────────────┐
 # │         END         │
 # └─────────────────────┘
 
@@ -297,12 +327,19 @@ def create_form_bot(redis: RedisInterface, token: str):
         )
 
     async def on_form_completed(context: FormExitContext):
-        form_result_dump = pformat(context.result, indent=2, width=70, sort_dicts=False)
+        result_to_dump = context.result.copy()
+        result_to_dump.pop("photos")
+        form_result_dump = pformat(result_to_dump, indent=2, width=70, sort_dicts=False)
         await bot.send_message(
             context.last_update.from_user.id,
             f"<pre>{html.escape(form_result_dump, quote=False)}</pre>",
             parse_mode="HTML",
         )
+        photos: list[list[tg.PhotoSize]] = context.result["photos"]
+        for photo in photos:
+            await bot.send_photo(
+                context.last_update.from_user.id, photo=photo[0].file_id, caption=photo[0].file_unique_id
+            )
 
     form_handler.setup(bot, on_form_completed=on_form_completed, on_form_cancelled=on_form_cancelled)
     language_store.setup(bot)
