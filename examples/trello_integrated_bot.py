@@ -129,7 +129,7 @@ if __name__ == "__main__":
         server_listening_future = asyncio.Future()
         bot_runner = await create_trello_integrated_feedback_bot(
             token=os.environ["TOKEN"],
-            admin_chat_id=os.environ["ADMIN_CHAT_ID"],
+            admin_chat_id=int(os.environ["ADMIN_CHAT_ID"]),
             user_api_key=os.environ["TRELLO_USER_API_KEY"],
             user_token=os.environ["TRELLO_USER_TOKEN"],
             organization_name="my-trello-org",
