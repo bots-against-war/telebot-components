@@ -338,12 +338,12 @@ class FeedbackHandler:
         user: tg.User,
         message_forwarder: Callable[[], Coroutine[None, None, tg.Message]],
         user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
-    ):
+    ) -> Optional[tg.Message]:
         if self.banned_users_store is not None and await self.banned_users_store.is_banned(user.id):
-            return
+            return None
         anti_spam_status = await self.anti_spam.status(user)
         if anti_spam_status is AntiSpamStatus.SOFT_BAN:
-            return
+            return None
 
         if self.language_store is not None:
             language = await self.language_store.get_user_language(user)
@@ -352,7 +352,7 @@ class FeedbackHandler:
         if anti_spam_status is AntiSpamStatus.THROTTLING:
             anti_spam = cast(AntiSpam, self.anti_spam)  # only real AntiSpam can return this status
             await user_replier(self.service_messages.throttling(anti_spam.config, language), None)
-            return
+            return None
 
         if self.config.hashtags_in_admin_chat:
             category_hashtag = None  # sentinel
@@ -366,7 +366,7 @@ class FeedbackHandler:
                             any_text_to_str(you_must_select_category, language),
                             await self.category_store.markup_for_user(user),
                         )
-                        return
+                        return None
                 else:
                     category_hashtag = category.hashtag
 
@@ -435,10 +435,11 @@ class FeedbackHandler:
                 category=category,
                 postprocess_card_description=postprocess_card_description,
             )
+        return forwarded_msg
 
     async def emulate_user_message(
         self, bot: AsyncTeleBot, user: tg.User, text: str, no_response: bool = False, **send_message_kwargs
-    ):
+    ) -> Optional[tg.Message]:
         """Sometimes we want FeedbackHandler to act like the user has sent us a message, but without actually
         a message there (they might have pressed a button or interacted with the bot in some other way). This
         method can be used in such cases.
@@ -453,7 +454,7 @@ class FeedbackHandler:
             else:
                 return await bot.send_message(user.id, text=text, reply_markup=reply_markup)
 
-        await self._handle_user_message(
+        return await self._handle_user_message(
             bot=bot,
             user=user,
             message_forwarder=message_forwarder,
