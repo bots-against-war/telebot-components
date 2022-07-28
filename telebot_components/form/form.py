@@ -1,6 +1,6 @@
+import copy
 from collections import defaultdict
 from dataclasses import dataclass
-from dataclasses import replace as dataclass_replace
 from itertools import chain
 from typing import Optional
 
@@ -16,8 +16,8 @@ class Form:
     """
 
     def __init__(self, fields: list[FormField], start_field: FormField, allow_cyclic: bool = False):
-        self.fields = [dataclass_replace(f) for f in fields]  # copying fields to avoid modifying user's objects
-        self.start_field = dataclass_replace(start_field)
+        self.fields = [copy.deepcopy(f) for f in fields]  # copying fields to avoid modifying user's objects
+        self.start_field = copy.deepcopy(start_field)
 
         # validating field name uniqueness
         field_names = [f.name for f in self.fields]
