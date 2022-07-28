@@ -1,5 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
 from itertools import chain
 from typing import Optional
 
@@ -9,29 +10,36 @@ FieldNameT = Optional[str]
 
 
 class Form:
-    def __init__(self, fields: list[FormField], start_field: FormField, allow_cyclic: bool = False):
-        self.fields = fields
-        self.start_field = start_field
+    """Container for collection of fields linked together via next_field_getter attribute. Does not modify passed
+    objects, creates private copies. If allow_cyclic attribute is False (default) performs topological sort to
+    validate form acyclicity and cat print it's graph structure in ASCII with print_graph method.
+    """
 
-        # binding next field getters so that they can look up next form field by its name
-        fields_by_name = {f.name: f for f in fields}
-        for f in fields:
-            if isinstance(f.next_field_getter, NextFieldGetter):
-                f.next_field_getter.fields_by_name = fields_by_name
+    def __init__(self, fields: list[FormField], start_field: FormField, allow_cyclic: bool = False):
+        self.fields = [dataclass_replace(f) for f in fields]  # copying fields to avoid modifying user's objects
+        self.start_field = dataclass_replace(start_field)
 
         # validating field name uniqueness
-        field_names = [f.name for f in fields]
+        field_names = [f.name for f in self.fields]
         for fn in field_names:
             if field_names.count(fn) > 1:
                 raise ValueError(f"All fields must have unique names, but there is at least one duplicate: {fn}!")
 
+        # binding next field getters so that they can look up next form field by its name
+        fields_by_name = {f.name: f for f in self.fields}
+        for f in self.fields:
+            if isinstance(f.next_field_getter, NextFieldGetter):
+                f.next_field_getter.fields_by_name = fields_by_name
+
         # validating that field graph is connected and that the start field has no incoming edges
-        reachable_field_names = set(chain.from_iterable(f.next_field_getter.possible_next_field_names for f in fields))
-        if not allow_cyclic and start_field.name in reachable_field_names:
+        reachable_field_names = set(
+            chain.from_iterable(f.next_field_getter.possible_next_field_names for f in self.fields)
+        )
+        if not allow_cyclic and self.start_field.name in reachable_field_names:
             raise ValueError(
-                f"Form configuration error: start field '{start_field.name}' is reachable from other field(s)"
+                f"Form configuration error: start field '{self.start_field.name}' is reachable from other field(s)"
             )
-        reachable_field_names.add(start_field.name)
+        reachable_field_names.add(self.start_field.name)
         if None not in reachable_field_names:
             raise ValueError("Endless form: no field has None (form end) as a possible next field")
         reachable_field_names.remove(None)
@@ -52,7 +60,7 @@ class Form:
         # topological sort to validate acyclicity + for nice rendering
         if not allow_cyclic:
             next_field_names: dict[FieldNameT, set[FieldNameT]] = {
-                f.name: set(f.next_field_getter.possible_next_field_names) for f in fields
+                f.name: set(f.next_field_getter.possible_next_field_names) for f in self.fields
             }
             prev_field_names: dict[FieldNameT, set[FieldNameT]] = defaultdict(set)
             for field_name, nexts in next_field_names.items():
@@ -60,7 +68,7 @@ class Form:
                     prev_field_names[next].add(field_name)
 
             topologically_sorted: list[Optional[str]] = []
-            vertices_without_incoming_edges: set[Optional[str]] = {start_field.name}
+            vertices_without_incoming_edges: set[Optional[str]] = {self.start_field.name}
             while vertices_without_incoming_edges:
                 from_ = vertices_without_incoming_edges.pop()
                 topologically_sorted.append(from_)

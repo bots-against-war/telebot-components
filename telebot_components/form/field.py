@@ -47,7 +47,7 @@ class NextFieldGetter(Generic[FieldValueT]):
     def get_next_field(self, user: tg.User, value: Optional[FieldValueT]) -> Optional["FormField"]:
         if self.fields_by_name is None:
             raise RuntimeError(
-                "Next field getter hasn't been properly initialized, did you forget to call bind_form_fields?"
+                "Next field getter hasn't been properly initialized, did you forget to wrap your fields in a Form object?"
             )
         next_field_name = self.next_field_name_getter(user, value)
         if next_field_name is None:
