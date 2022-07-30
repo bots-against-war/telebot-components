@@ -5,6 +5,7 @@ from typing import Any, Callable, Coroutine, Optional, Protocol, TypedDict, cast
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
+from telebot.api import ApiHTTPException
 from telebot.types import constants as tg_constants
 from telebot.types.service import FilterFunc
 
@@ -591,9 +592,15 @@ class FeedbackHandler:
                         )
                 else:
                     # actual response to the user
-                    await bot.copy_message(
-                        chat_id=origin_chat_id, from_chat_id=self.admin_chat_id, message_id=message.id
-                    )
+                    try:
+                        await bot.copy_message(
+                            chat_id=origin_chat_id, from_chat_id=self.admin_chat_id, message_id=message.id
+                        )
+                    except ApiHTTPException as e:
+                        # this is normal and most likely means that user has blocked the bot
+                        self.logger.info(f"Error copying message to user chat. {e!r}")
+                        await bot.reply_to(message, str(e))
+                        return
                     # TODO: save copied message id to allow 'undo send' command
                     await self.message_log_store.push(origin_chat_id, message.id)
                     if self.service_messages.copied_to_user_ok is not None:
@@ -603,7 +610,7 @@ class FeedbackHandler:
                     if self.trello_integration is not None:
                         await self.trello_integration.export_admin_message(message, to_user_id=origin_chat_id)
             except Exception as e:
-                await bot.reply_to(message, f"Something went wrong: {e}")
+                await bot.reply_to(message, f"Something went wrong! {e}")
                 self.logger.exception(f"Unexpected error while replying to forwarded msg")
 
 
