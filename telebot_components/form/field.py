@@ -399,8 +399,7 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
         self, language: MaybeLanguage, current_value: Optional[FieldValueT] = None
     ) -> tg.ReplyKeyboardMarkup:
         kbd = tg.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=self.menu_row_width)
-        for option in self.EnumClass:
-            kbd.add(tg.KeyboardButton(any_text_to_str(option.value, language)))
+        kbd.add(*[tg.KeyboardButton(any_text_to_str(option.value, language)) for option in self.EnumClass])
         return kbd
 
     def parse(self, message: tg.Message) -> Enum:
