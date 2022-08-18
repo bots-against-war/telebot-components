@@ -124,8 +124,10 @@ class TrelloIntegration:
         if not categories:
             # is no categories were supplied to the integration, is just create a "virtual" category
             # with the bot prefix as name
+            self.implicit_categories = True
             self.categories = [Category(name=self.bot_prefix, button_caption="not used")]
         else:
+            self.implicit_categories = False
             self.categories = categories
         self.trello_client = TrelloClient(self.credentials.user_api_key, token=self.credentials.user_token)
 
@@ -167,7 +169,7 @@ class TrelloIntegration:
         matching_boards = [b for b in all_boards if b.name == self.credentials.board_name]
         if not matching_boards:
             raise TrelloIntegrationCredentialsError(
-                f"Board not found in the {self.organization.name} organization: '{self.credentials.board_name}'"
+                f"Board not found in the {self.organization.name!r} organization: {self.credentials.board_name!r}"
             )
         if len(matching_boards) > 1:
             raise TrelloIntegrationCredentialsError(f"Ambiguous board name, several found: {matching_boards}")
@@ -205,7 +207,7 @@ class TrelloIntegration:
         return f"/trello-webhook/{self.bot_prefix}/{webhook_secret}"
 
     async def initialize_webhook(self, base_url: str, server_listening_future: asyncio.Future):
-        """Must be  as a background job in parallel with webhook app setup"""
+        """Must be run as a background job in parallel with webhook app setup"""
         self.ensure_initialized()
         await server_listening_future
         self.logger.info("Server is listening, setting up Trello webhook now")
@@ -215,7 +217,7 @@ class TrelloIntegration:
             if (
                 self.reply_with_card_comments
                 and trello_webhook_data["id_model"] == self.board.id
-                and trello_webhook_data["base_url"] == cast(str, base_url)
+                and trello_webhook_data["base_url"] == base_url
             ):
                 self.logger.info("Stored Trello webhook data seem fine, running with it")
             else:
@@ -239,7 +241,7 @@ class TrelloIntegration:
                     self.thread_pool,
                     partial(
                         self.trello_client.create_hook,
-                        callback_url=cast(str, base_url) + webhook_path,
+                        callback_url=base_url + webhook_path,
                         id_model=self.board.id,
                         desc="telebot_components trello integration webhook",
                     ),
@@ -248,7 +250,7 @@ class TrelloIntegration:
                     TrelloWebhookData(
                         id=created_webhook.id,
                         id_model=self.board.id,
-                        base_url=cast(str, base_url),
+                        base_url=base_url,
                         path=webhook_path,
                     )
                 )
@@ -396,10 +398,16 @@ class TrelloIntegration:
         forwarded_message: tg.Message,
         category: Optional[Category] = None,
         postprocess_card_description: Callable[[str], str] = lambda s: s,
-    ):
+    ) -> None:
         self.ensure_initialized()
         if category is None:
-            category = self.categories[0]  # guaranteed to exist
+            if self.implicit_categories:
+                category = self.categories[0]  # guaranteed to exist
+            else:
+                # if the categories are explicit, but the message to export has none,
+                # it means that the category has not been selected by the user and we
+                # have no place to put their message
+                return
 
         if category.name not in self.lists_by_category_name:
             return

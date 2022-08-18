@@ -12,4 +12,8 @@ async def callback_query_processing_error(
 ):
     if logger is not None:
         logger.exception(details)
-    await bot.answer_callback_query(call.id, f"Server error: {details} :(", show_alert=True)
+    await bot.answer_callback_query(
+        call.id,
+        f"Server error: {details}. Try refreshing menu buttons.",
+        show_alert=True,
+    )
