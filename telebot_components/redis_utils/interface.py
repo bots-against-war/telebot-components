@@ -147,6 +147,11 @@ class RedisInterface(ABC):
         """Return the list of keys within hash ``name``"""
         ...
 
+    @abstractmethod
+    async def hdel(self, name: str, *keys: str) -> int:
+        """Delete ``keys`` from hash ``name``"""
+        ...
+
 
 RedisCmdReturn = Union[bytes, list[bytes], None, int]
 
