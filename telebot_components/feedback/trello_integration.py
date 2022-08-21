@@ -50,6 +50,7 @@ class TrelloLabelData(TypedDict):
     color: str  # Valid values: yellow, purple, blue, red, green, orange, black, sky, pink, lime
     id_board: str
 
+
 @dataclass
 class ExportedCardContent:
     description: str
@@ -486,7 +487,6 @@ class TrelloIntegration:
             )
         await self.append_card_label(trello_card.id)
 
-
     def add_admin_reply_prefix(self, description: str) -> str:
         return "🤖: " + description
 
@@ -508,7 +508,7 @@ class TrelloIntegration:
         except Exception as e:
             self.logger.info(f"Error exporting admin message #{message}, ignoring: {e}")
 
-    async def create_label(self, name='Not answered', color='pink') -> trello.Label:
+    async def create_label(self, name="Not answered", color="pink") -> trello.Label:
         loop = asyncio.get_running_loop()
         self.logger.info(f"Adding label {name} to board {self.board.id}")
         trello_label = await loop.run_in_executor(
@@ -523,10 +523,7 @@ class TrelloIntegration:
         await self.trello_label_data.save(
             self.TRELLO_LABEL_NEW_MESSAGE,
             TrelloLabelData(
-                id=trello_label.id,
-                name=trello_label.name,
-                color=trello_label.color,
-                id_board=self.board.id
+                id=trello_label.id, name=trello_label.name, color=trello_label.color, id_board=self.board.id
             ),
         )
 
