@@ -44,6 +44,12 @@ class TrelloWebhookData(TypedDict):
     path: str
 
 
+class TrelloLabelData(TypedDict):
+    id: str
+    name: str
+    color: str  # Valid values: yellow, purple, blue, red, green, orange, black, sky, pink, lime
+    id_board: str
+
 @dataclass
 class ExportedCardContent:
     description: str
@@ -121,6 +127,13 @@ class TrelloIntegration:
             expiration_time=None,
         )
 
+        self.trello_label_data = KeyValueStore[TrelloLabelData](
+            name="trello-label-data",
+            prefix=bot_prefix,
+            redis=redis,
+            expiration_time=None,
+        )
+
         if not categories:
             # is no categories were supplied to the integration, is just create a "virtual" category
             # with the bot prefix as name
@@ -142,6 +155,7 @@ class TrelloIntegration:
 
     STORED_WEBHOOK_DATA_KEY = "const-stored-key"
     STORED_WEBHOOK_SECRET_KEY = "const-generated-webhook-secret"
+    TRELLO_LABEL_NEW_MESSAGE = "trello-label-new-message"
 
     async def load_trello_webhook_data(self) -> Optional[TrelloWebhookData]:
         return await self.trello_webhook_data_store.load(self.STORED_WEBHOOK_DATA_KEY)
@@ -188,6 +202,11 @@ class TrelloIntegration:
         if not await self.webhook_secret_store.exists(self.STORED_WEBHOOK_SECRET_KEY):
             self.logger.info("Webhook secret not found, generating new one")
             await self.webhook_secret_store.save(self.STORED_WEBHOOK_SECRET_KEY, secrets.token_urlsafe(32))
+
+        if not await self.trello_label_data.exists(self.TRELLO_LABEL_NEW_MESSAGE):
+            self.logger.info("Trello label not found, generating new one")
+            await self.create_label()
+
         self.initialized = True
 
     def ensure_initialized(self):
@@ -290,6 +309,7 @@ class TrelloIntegration:
                 description_appendix=self.add_admin_reply_prefix(reply_text),
                 user_id=origin_message_data["origin_chat_id"],
             )
+            await self.remove_card_label(commented_card_id)
             loop = asyncio.get_running_loop()
 
             def delete_reply_comment():
@@ -464,6 +484,8 @@ class TrelloIntegration:
                     file=BytesIO(card_content.attachment_content),
                 ),
             )
+        await self.append_card_label(trello_card.id)
+
 
     def add_admin_reply_prefix(self, description: str) -> str:
         return "🤖: " + description
@@ -482,8 +504,64 @@ class TrelloIntegration:
                 description_appendix=description,
                 user_id=to_user_id,
             )
+            await self.remove_card_label(trello_card_data["id"])
         except Exception as e:
             self.logger.info(f"Error exporting admin message #{message}, ignoring: {e}")
+
+    async def create_label(self, name='Not answered', color='pink') -> trello.Label:
+        loop = asyncio.get_running_loop()
+        self.logger.info(f"Adding label {name} to board {self.board.id}")
+        trello_label = await loop.run_in_executor(
+            self.thread_pool,
+            partial(
+                self.board.add_label,
+                name=name,
+                color=color,
+            ),
+        )
+        trello_label = cast(trello.Label, trello_label)
+        await self.trello_label_data.save(
+            self.TRELLO_LABEL_NEW_MESSAGE,
+            TrelloLabelData(
+                id=trello_label.id,
+                name=trello_label.name,
+                color=trello_label.color,
+                id_board=self.board.id
+            ),
+        )
+
+        return trello_label
+
+    async def ensure_label(self) -> trello.Label:
+        existing_label_in_redis = await self.trello_label_data.load(self.TRELLO_LABEL_NEW_MESSAGE)
+        existing_labels_in_trello = self.board.get_labels(limit=100)
+        existing_label_in_trello = [x for x in existing_labels_in_trello if x.id == existing_label_in_redis["id"]]
+        if not existing_label_in_trello:
+            await self.trello_label_data.drop(self.TRELLO_LABEL_NEW_MESSAGE)
+            return await self.create_label()
+        return existing_label_in_trello[0]
+
+    async def append_card_label(self, card_id: str):
+        loop = asyncio.get_running_loop()
+        label = await self.ensure_label()
+        trello_card = await loop.run_in_executor(self.thread_pool, self.trello_client.get_card, card_id)
+        self.logger.debug(f"Append label {label.id} to card {trello_card.id}")
+        await loop.run_in_executor(
+            self.thread_pool,
+            trello_card.add_label,
+            label,
+        )
+
+    async def remove_card_label(self, card_id: str):
+        loop = asyncio.get_running_loop()
+        label = await self.ensure_label()
+        trello_card = await loop.run_in_executor(self.thread_pool, self.trello_client.get_card, card_id)
+        self.logger.debug(f"Remove label {label.id} from card {trello_card.id}")
+        await loop.run_in_executor(
+            self.thread_pool,
+            trello_card.remove_label,
+            label,
+        )
 
 
 def safe_markdownify(html_text: str, fallback_text: str) -> str:
