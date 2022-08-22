@@ -162,9 +162,12 @@ if __name__ == "__main__":
     import asyncio
     import os
 
+    from dotenv import load_dotenv
     from redis.asyncio import Redis  # type: ignore
 
     from telebot_components.redis_utils.emulation import RedisEmulation
+
+    load_dotenv()
 
     redis = RedisEmulation()
     # redis = Redis.from_url(os.environ["REDIS_URL"])

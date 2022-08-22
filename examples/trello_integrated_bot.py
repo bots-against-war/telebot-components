@@ -111,10 +111,13 @@ if __name__ == "__main__":
     import logging
     import os
 
+    from dotenv import load_dotenv
     from redis.asyncio import Redis  # type: ignore
     from telebot.webhook import WebhookApp
 
     from telebot_components.redis_utils.emulation import RedisEmulation
+
+    load_dotenv()
 
     redis_url = os.environ.get("REDIS_URL")
     redis = Redis.from_url(redis_url) if redis_url is not None else RedisEmulation()

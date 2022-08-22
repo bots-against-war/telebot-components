@@ -101,6 +101,10 @@ if __name__ == "__main__":
     import asyncio
     import os
 
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
     bot_runner = create_menu_bot(
         token=os.environ["TOKEN"],
     )
