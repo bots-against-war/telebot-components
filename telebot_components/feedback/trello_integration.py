@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import secrets
@@ -17,10 +18,13 @@ from telebot.runner import AuxBotEndpoint
 from trello import TrelloClient
 
 from telebot_components.constants import times
+from telebot_components.constants.emoji import EMOJI
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.category import Category
 from telebot_components.stores.generic import KeyValueStore
 from telebot_components.utils import (
+    html_link,
+    markdown_link,
     telegram_html_escape,
     telegram_message_url,
     trim_with_ellipsis,
@@ -45,11 +49,11 @@ class TrelloWebhookData(TypedDict):
 
 
 @dataclass
-class ExportedCardContent:
+class CardContent:
     description: str
     title: str
-    attachment: Optional[tg.File]
-    attachment_content: Optional[bytes]
+    attachment: Optional[tg.File] = None
+    attachment_content: Optional[bytes] = None
 
 
 @dataclass
@@ -64,12 +68,6 @@ OnMessageRepliedFromTrello = Callable[[MessageRepliedFromTrelloContext], Corouti
 
 class TrelloIntegrationCredentialsError(RuntimeError):
     pass
-
-
-class TrelloCardDescriptionUpdateError(RuntimeError):
-    def __init__(self, msg: str, card: trello.Card):
-        super().__init__(msg)
-        self.card = card
 
 
 @dataclass
@@ -276,7 +274,7 @@ class TrelloIntegration:
             reply_text = comment_text.removeprefix("/reply").strip()
             commented_card_data = webhook_action_data["card"]
             commented_card_id: str = commented_card_data["id"]
-            commented_card_link: str = "https://trello.com/c/" + commented_card_data["shortLink"]
+            commented_card_url: str = trello_card_url(commented_card_data["shortLink"])
             origin_message_data = await self.origin_message_data_for_trello_card_id.load(commented_card_id)
             if origin_message_data is None:
                 return web.Response()
@@ -285,19 +283,24 @@ class TrelloIntegration:
                 chat_id=self.admin_chat_id,
                 reply_to_message_id=origin_message_data["forwarded_message_id"],
                 text=(
-                    f'<i>{telegram_html_escape(comment_author)} via <a href="{commented_card_link}">Trello</a></i>\n'
+                    f'<i>{telegram_html_escape(comment_author)} via {html_link(commented_card_url, "Trello")}</i>\n'
                     + telegram_html_escape(reply_text)
                 ),
                 parse_mode="HTML",
             )
+            user_id = origin_message_data["origin_chat_id"]
             await self.bot.send_message(
-                chat_id=origin_message_data["origin_chat_id"],
+                chat_id=user_id,
                 text=reply_text,
             )
-            await self._append_card_description(
+            description = self._add_admin_reply_prefix(reply_text)
+            await self._append_card_content(
                 card_id=commented_card_id,
-                description_appendix=self.add_admin_reply_prefix(reply_text),
-                user_id=origin_message_data["origin_chat_id"],
+                content=CardContent(
+                    description=description,
+                    title=title_with_user_hash(user_id, description),
+                ),
+                user_id=user_id,
             )
             loop = asyncio.get_running_loop()
 
@@ -337,13 +340,15 @@ class TrelloIntegration:
                 handler=self.webhook_event_handler,
             ),
             AuxBotEndpoint(
-                method="HEAD",  # type: ignore
+                method="HEAD",
                 route=await self.webhook_path(),
                 handler=self.webhook_probe_handler,
             ),
         ]
 
-    async def _card_content_from_message(self, message: tg.Message, include_attachments: bool) -> ExportedCardContent:
+    async def _card_content_from_message(
+        self, message: tg.Message, user_id: int, include_attachments: bool
+    ) -> CardContent:
         attachment = None
         attachment_content = None
         if message.content_type == "text":
@@ -372,9 +377,9 @@ class TrelloIntegration:
                     )
             else:
                 description = f"{description}\n📎 `{message.content_type}` (см. оригинал сообщения)"
-        return ExportedCardContent(
+        return CardContent(
             description=description,
-            title=trim_with_ellipsis(description, target_len=40),
+            title=title_with_user_hash(user_id, description),
             attachment=attachment,
             attachment_content=attachment_content,
         )
@@ -382,29 +387,57 @@ class TrelloIntegration:
     def _add_admin_chat_link(self, description: str, to_message: tg.Message) -> str:
         # i.e. this is a Telegram supergroup and allows direct msg links
         if str(self.admin_chat_id).startswith("-100"):
-            return f"{description}\n[💬]({telegram_message_url(self.admin_chat_id, to_message.id)})"
+            return f"{description}\n" + markdown_link(telegram_message_url(self.admin_chat_id, to_message.id), "💬")
         else:
             return description
 
-    async def _append_card_description(self, card_id: str, description_appendix: str, user_id: int) -> trello.Card:
+    async def _append_card_content(
+        self,
+        card_id: str,
+        content: CardContent,
+        user_id: int,
+    ) -> trello.Card:
         """
         Fetch an existing card description, add an appendix and update the description.
 
-        May throw TrelloCardDescriptionUpdateError on card overflow!
+        On card overflow, create a new card with a description appendix, adding "previous card" and "next card" links
         """
         loop = asyncio.get_running_loop()
         self.logger.debug(f"Updating existing card {card_id = }")
         trello_card = await loop.run_in_executor(self.thread_pool, self.trello_client.get_card, card_id)
-        delimiter = "—" * 20
-        updated_card_description = f"{trello_card.description}\n\n{delimiter}\n\n{description_appendix}"
         try:
             await loop.run_in_executor(
                 self.thread_pool,
                 trello_card.set_description,
-                updated_card_description,
+                concatenate_card_text_sections(trello_card.description, content.description),
             )
         except Exception as e:
-            raise TrelloCardDescriptionUpdateError(str(e), card=trello_card)
+            self.logger.info(f"Seems like the card is overflown, trying to create a new one (error {e!r})")
+            new_trello_card = await loop.run_in_executor(
+                self.thread_pool,
+                partial(
+                    trello_card.trello_list.add_card,
+                    name=content.title,
+                    desc=concatenate_card_text_sections(
+                        markdown_link(trello_card.short_url, "⬅️ previous card ⬅️"),
+                        content.description,
+                    ),
+                    position="top",
+                ),
+            )
+            try:
+                await loop.run_in_executor(
+                    self.thread_pool,
+                    trello_card.set_description,
+                    concatenate_card_text_sections(
+                        trello_card.description,
+                        markdown_link(new_trello_card.short_url, "➡️ next card ➡️"),
+                    ),
+                )
+            except Exception:
+                self.logger.info("Can't add forwardlink to the old card, ignoring", exc_info=True)
+
+            trello_card = new_trello_card
         await self.trello_card_data_for_user.touch(user_id)
         await self.origin_message_data_for_trello_card_id.touch(trello_card.id)
         return trello_card
@@ -431,38 +464,34 @@ class TrelloIntegration:
 
         loop = asyncio.get_running_loop()
 
-        card_content = await self._card_content_from_message(forwarded_message, include_attachments=True)
+        card_content = await self._card_content_from_message(forwarded_message, user.id, include_attachments=True)
         self.logger.debug(f"Card content: {card_content}")
         card_content.description = postprocess_card_description(card_content.description)
         card_content.description = self._add_admin_chat_link(card_content.description, to_message=forwarded_message)
         card_content.description = "👤: " + card_content.description
 
-        existing_trello_card_data = await self.trello_card_data_for_user.load(user.id)
+        current_trello_card_data = await self.trello_card_data_for_user.load(user.id)
 
-        existing_trello_card: Optional[trello.Card] = None
-        if existing_trello_card_data is not None and existing_trello_card_data["category_name"] == category.name:
+        current_card: Optional[trello.Card] = None
+        if current_trello_card_data is not None and current_trello_card_data["category_name"] == category.name:
             try:
-                existing_trello_card = await self._append_card_description(
-                    card_id=existing_trello_card_data["id"],
-                    description_appendix=card_content.description,
+                current_card = await self._append_card_content(
+                    card_id=current_trello_card_data["id"],
+                    content=card_content,
                     user_id=user.id,
                 )
-            except TrelloCardDescriptionUpdateError as card_overflow_error:
-                # TODO: add link to a previous card to the next
-                # try adding link to the next card to this one (but only after it's created)
-                card_content.description = f"⬅️⬅️⬅️ previous card ⬅️⬅️⬅️"
             except Exception as e:
-                self.logger.info(f"Error appending existing card description, will create new one: {e}")
+                self.logger.exception(f"Error in _append_card_content, will create new one")
                 new_card_reason = "error occured appending to existing card"
-        elif existing_trello_card_data is None:
+        elif current_trello_card_data is None:
             new_card_reason = "no saved card data found for the user"
         else:
             new_card_reason = "user category has changed"
 
-        if existing_trello_card is None:
-            self.logger.info(f"Adding new card ({new_card_reason})")
+        if current_card is None:
+            self.logger.info(f"Creating a new card ({new_card_reason})")
             trello_list = self.lists_by_category_name[category.name]
-            existing_trello_card = await loop.run_in_executor(
+            current_card = await loop.run_in_executor(
                 self.thread_pool,
                 partial(
                     trello_list.add_card,
@@ -471,49 +500,53 @@ class TrelloIntegration:
                     position="top",
                 ),
             )
-            existing_trello_card = cast(trello.Card, existing_trello_card)
+            current_card = cast(trello.Card, current_card)
+
+        # storing the current card as the active card for the user
+        if current_trello_card_data is None or current_trello_card_data["id"] != current_card.id:
             await self.trello_card_data_for_user.save(
                 user.id,
-                TrelloCardData(id=existing_trello_card.id, category_name=category.name),
+                TrelloCardData(id=current_card.id, category_name=category.name),
             )
-        # storing the last user message in the card as origin
+
+        # storing the last user message exported to the card as the origin (will be replied to)
         await self.origin_message_data_for_trello_card_id.save(
-            existing_trello_card.id,
+            current_card.id,
             OriginMessageData(
                 forwarded_message_id=forwarded_message.id,
                 origin_chat_id=user.id,
             ),
         )
         if card_content.attachment is not None and card_content.attachment_content is not None:
-            self.logger.debug(f"Attaching file to card #{existing_trello_card.id}: {card_content.attachment.file_path}")
+            self.logger.debug(f"Attaching file to card #{current_card.id}: {card_content.attachment.file_path}")
             await loop.run_in_executor(
                 self.thread_pool,
                 partial(
-                    existing_trello_card.attach,
+                    current_card.attach,
                     name=card_content.attachment.file_path,
                     file=BytesIO(card_content.attachment_content),
                 ),
             )
 
-    def add_admin_reply_prefix(self, description: str) -> str:
+    def _add_admin_reply_prefix(self, description: str) -> str:
         return "🤖: " + description
 
     async def export_admin_message(self, message: tg.Message, to_user_id: int) -> None:
         trello_card_data = await self.trello_card_data_for_user.load(to_user_id)
         if trello_card_data is None:
-            self.logger.info("Not exporting admin message responding to cardless user")
+            self.logger.info("Not exporting admin message as it responds to a cardless user")
             return
-        card_content = await self._card_content_from_message(message, include_attachments=False)
-        description = self._add_admin_chat_link(card_content.description, to_message=message)
-        description = self.add_admin_reply_prefix(description)
+        card_content = await self._card_content_from_message(message, to_user_id, include_attachments=False)
+        card_content.description = self._add_admin_chat_link(card_content.description, to_message=message)
+        card_content.description = self._add_admin_reply_prefix(card_content.description)
         try:
-            await self._append_card_description(
+            await self._append_card_content(
                 card_id=trello_card_data["id"],
-                description_appendix=description,
+                content=card_content,
                 user_id=to_user_id,
             )
-        except Exception as e:
-            self.logger.info(f"Error exporting admin message #{message}, ignoring: {e}")
+        except Exception:
+            self.logger.exception(f"Error exporting admin message #{message}, ignoring")
 
 
 def safe_markdownify(html_text: str, fallback_text: str) -> str:
@@ -523,3 +556,31 @@ def safe_markdownify(html_text: str, fallback_text: str) -> str:
         return md
     except Exception:
         return fallback_text + "\n⚠️ Не удалось отобразить часть текста, оригинал сообщения по ссылке."
+
+
+def concatenate_card_text_sections(first: str, second: str) -> str:
+    if not first:
+        return second
+    elif not second:
+        return first
+    else:
+        delimiter = "—" * 20
+        return f"{first}\n\n{delimiter}\n\n{second}"
+
+
+def trello_card_url(short_link: str) -> str:
+    return "https://trello.com/c/" + short_link
+
+
+def title_with_user_hash(user_id: int, description: str) -> str:
+    return f"{emoji_hash(user_id)}: {trim_with_ellipsis(description, target_len=40)}"
+
+
+def emoji_hash(user_id: int, n_emoji: int = 4) -> str:
+    user_id_hash = hashlib.md5(user_id.to_bytes(64, "little")).digest()
+    res = ""
+    for i in range(n_emoji):
+        two_bytes = user_id_hash[2 * i : 2 * (i + 1)]
+        emoji_idx = int.from_bytes(two_bytes, "little") % len(EMOJI)
+        res += EMOJI[emoji_idx]
+    return res

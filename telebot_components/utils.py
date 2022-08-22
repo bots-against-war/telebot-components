@@ -68,3 +68,11 @@ def from_yaml_unsafe(dump: str) -> Any:
 def telegram_html_escape(string: str) -> str:
     """See https://core.telegram.org/bots/api#html-style"""
     return string.replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
+
+
+def html_link(href: str, text: str) -> str:
+    return f'<a href="{href}">{text}</a>'
+
+
+def markdown_link(href: str, text: str) -> str:
+    return f"[{text}]({href})"
