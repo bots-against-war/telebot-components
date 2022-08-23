@@ -298,7 +298,7 @@ class TrelloIntegration:
                 card_id=commented_card_id,
                 content=CardContent(
                     description=description,
-                    title=title_with_user_hash(user_id, description),
+                    title=self._title_with_user_hash(user_id, description),
                 ),
                 user_id=user_id,
             )
@@ -379,7 +379,7 @@ class TrelloIntegration:
                 description = f"{description}\n📎 `{message.content_type}` (см. оригинал сообщения)"
         return CardContent(
             description=description,
-            title=title_with_user_hash(user_id, description),
+            title=self._title_with_user_hash(user_id, description),
             attachment=attachment,
             attachment_content=attachment_content,
         )
@@ -480,7 +480,7 @@ class TrelloIntegration:
                     content=card_content,
                     user_id=user.id,
                 )
-            except Exception as e:
+            except Exception:
                 self.logger.exception(f"Error in _append_card_content, will create new one")
                 new_card_reason = "error occured appending to existing card"
         elif current_trello_card_data is None:
@@ -503,11 +503,10 @@ class TrelloIntegration:
             current_card = cast(trello.Card, current_card)
 
         # storing the current card as the active card for the user
-        if current_trello_card_data is None or current_trello_card_data["id"] != current_card.id:
-            await self.trello_card_data_for_user.save(
-                user.id,
-                TrelloCardData(id=current_card.id, category_name=category.name),
-            )
+        await self.trello_card_data_for_user.save(
+            user.id,
+            TrelloCardData(id=current_card.id, category_name=category.name),
+        )
 
         # storing the last user message exported to the card as the origin (will be replied to)
         await self.origin_message_data_for_trello_card_id.save(
@@ -548,6 +547,9 @@ class TrelloIntegration:
         except Exception:
             self.logger.exception(f"Error exporting admin message #{message}, ignoring")
 
+    def _title_with_user_hash(self, user_id: int, description: str) -> str:
+        return f"{emoji_hash(user_id, self.bot_prefix)}: {trim_with_ellipsis(description, target_len=40)}"
+
 
 def safe_markdownify(html_text: str, fallback_text: str) -> str:
     try:
@@ -572,12 +574,8 @@ def trello_card_url(short_link: str) -> str:
     return "https://trello.com/c/" + short_link
 
 
-def title_with_user_hash(user_id: int, description: str) -> str:
-    return f"{emoji_hash(user_id)}: {trim_with_ellipsis(description, target_len=40)}"
-
-
-def emoji_hash(user_id: int, n_emoji: int = 4) -> str:
-    user_id_hash = hashlib.md5(user_id.to_bytes(64, "little")).digest()
+def emoji_hash(user_id: int, bot_prefix: str, n_emoji: int = 4) -> str:
+    user_id_hash = hashlib.md5(user_id.to_bytes(64, "little") + bot_prefix.encode("utf-8")).digest()
     res = ""
     for i in range(n_emoji):
         two_bytes = user_id_hash[2 * i : 2 * (i + 1)]

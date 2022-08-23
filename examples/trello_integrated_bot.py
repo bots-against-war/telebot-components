@@ -121,7 +121,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.DEBUG)
 
-    ONE_WAY = True
+    EXPORT_ONLY = True
 
     BASE_URL = "https://my-deployed-app.com"  # no trailing slash!; unused when ONE_WAY=True
 
@@ -132,15 +132,15 @@ if __name__ == "__main__":
             admin_chat_id=int(os.environ["ADMIN_CHAT_ID"]),
             user_api_key=os.environ["TRELLO_USER_API_KEY"],
             user_token=os.environ["TRELLO_USER_TOKEN"],
-            organization_name="my-trello-org",
-            board_name="my-trello-board",
-            reply_with_card_comments=not ONE_WAY,
+            organization_name="my-org-name",
+            board_name="my-board-name",
+            reply_with_card_comments=not EXPORT_ONLY,
             base_url=BASE_URL,
             redis=redis,
             server_listening_future=server_listening_future,
         )
 
-        if ONE_WAY:
+        if EXPORT_ONLY:
             await bot_runner.run_polling()
         else:
             webhook_app = WebhookApp(base_url=BASE_URL)

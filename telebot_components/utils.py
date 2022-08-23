@@ -1,5 +1,7 @@
+import asyncio
 import io
 from typing import Any, Optional, Union
+from weakref import WeakValueDictionary
 
 from ruamel.yaml import YAML  # type: ignore
 
@@ -76,3 +78,19 @@ def html_link(href: str, text: str) -> str:
 
 def markdown_link(href: str, text: str) -> str:
     return f"[{text}]({href})"
+
+
+# TODO: unused for now, move to telebot library and use to force sequential processing of
+# the same-origin updates
+class LockRegistry:
+    def __init__(self):
+        self._lock_by_key: dict[Any, asyncio.Lock] = WeakValueDictionary()
+
+    def get_lock(self, key: Any) -> asyncio.Lock:
+        maybe_lock = self._lock_by_key.get(key)
+        if maybe_lock is None:
+            lock = asyncio.Lock()
+            self._lock_by_key[key] = lock
+            return lock
+        else:
+            return maybe_lock
