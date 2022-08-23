@@ -1,4 +1,5 @@
 import asyncio
+from typing import Literal
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -11,6 +12,7 @@ from telebot_components.feedback.anti_spam import DisabledAntiSpam
 from telebot_components.feedback.trello_integration import (
     TrelloIntegration,
     TrelloIntegrationCredentials,
+    UnansweredLabelConfig,
 )
 from telebot_components.redis_utils.interface import RedisInterface
 
@@ -26,6 +28,11 @@ async def create_trello_integrated_feedback_bot(
     base_url: str,
     redis: RedisInterface,
     server_listening_future: asyncio.Future,
+    unanswered_label: bool,
+    unanswered_label_name: str,
+    unanswered_label_color: Literal[
+        "yellow", "purple", "blue", "red", "green", "orange", "black", "sky", "pink", "lime"
+    ],
 ) -> BotRunner:
     bot_prefix = f"trello-integration-bot"
 
@@ -43,6 +50,8 @@ async def create_trello_integrated_feedback_bot(
             organization_name=organization_name,
             board_name=board_name,
         ),
+        unanswered_label=unanswered_label,
+        unanswered_label_config=UnansweredLabelConfig(name=unanswered_label_name, color=unanswered_label_color),
     )
 
     await trello_integration.initialize()
@@ -138,6 +147,9 @@ if __name__ == "__main__":
             base_url=BASE_URL,
             redis=redis,
             server_listening_future=server_listening_future,
+            unanswered_label=True,
+            unanswered_label_color="orange",
+            unanswered_label_name="Not answered",
         )
 
         if ONE_WAY:

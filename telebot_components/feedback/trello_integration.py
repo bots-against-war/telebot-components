@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
 from io import BytesIO
-from typing import Callable, Coroutine, Optional, TypedDict, Union, cast
+from typing import Callable, Coroutine, Literal, Optional, TypedDict, Union, cast
 
 import trello  # type: ignore
 from aiohttp import web
@@ -47,7 +47,7 @@ class TrelloWebhookData(TypedDict):
 class TrelloLabelData(TypedDict):
     id: str
     name: str
-    color: str  # Valid values: yellow, purple, blue, red, green, orange, black, sky, pink, lime
+    color: str
     id_board: str
 
 
@@ -63,6 +63,12 @@ class MessageRepliedFromTrelloContext:
     forwarded_user_message_id: int
     reply_message_id: int
     origin_chat_id: int
+
+
+@dataclass
+class UnansweredLabelConfig:
+    name: str
+    color: Literal["yellow", "purple", "blue", "red", "green", "orange", "black", "sky", "pink", "lime"]
 
 
 OnMessageRepliedFromTrello = Callable[[MessageRepliedFromTrelloContext], Coroutine[None, None, None]]
@@ -92,6 +98,8 @@ class TrelloIntegration:
         admin_chat_id: int,
         credentials: TrelloIntegrationCredentials,
         reply_with_card_comments: bool,
+        unanswered_label: bool = True,
+        unanswered_label_config: UnansweredLabelConfig = UnansweredLabelConfig(name="Not answered", color="pink"),
         categories: Optional[list[Category]] = None,
     ):
         self.bot = bot
@@ -99,7 +107,9 @@ class TrelloIntegration:
         self.bot_prefix = bot_prefix
         self.admin_chat_id = admin_chat_id
         self.credentials = credentials
+        self.unanswered_label = unanswered_label
         self.reply_with_card_comments = reply_with_card_comments
+        self.unanswered_label_config = unanswered_label_config
 
         self.trello_card_data_for_user = KeyValueStore[TrelloCardData](
             name="trello-card-data",
@@ -204,9 +214,8 @@ class TrelloIntegration:
             self.logger.info("Webhook secret not found, generating new one")
             await self.webhook_secret_store.save(self.STORED_WEBHOOK_SECRET_KEY, secrets.token_urlsafe(32))
 
-        if not await self.trello_label_data.exists(self.TRELLO_LABEL_NEW_MESSAGE):
-            self.logger.info("Trello label not found, generating new one")
-            await self.create_label()
+        if self.unanswered_label:
+            await self.ensure_unanswered_label()
 
         self.initialized = True
 
@@ -305,12 +314,12 @@ class TrelloIntegration:
                 chat_id=origin_message_data["origin_chat_id"],
                 text=reply_text,
             )
-            await self.append_card_description(
+            trello_card = await self.append_card_description(
                 card_id=commented_card_id,
                 description_appendix=self.add_admin_reply_prefix(reply_text),
                 user_id=origin_message_data["origin_chat_id"],
             )
-            await self.remove_card_label(commented_card_id)
+            await self.remove_unanswered_label(trello_card)
             loop = asyncio.get_running_loop()
 
             def delete_reply_comment():
@@ -485,7 +494,7 @@ class TrelloIntegration:
                     file=BytesIO(card_content.attachment_content),
                 ),
             )
-        await self.append_card_label(trello_card.id)
+        await self.append_unanswered_label(trello_card)
 
     def add_admin_reply_prefix(self, description: str) -> str:
         return "🤖: " + description
@@ -499,24 +508,24 @@ class TrelloIntegration:
         description = self.add_backlink_if_possible(card_content.description, to_message=message)
         description = self.add_admin_reply_prefix(description)
         try:
-            await self.append_card_description(
+            trello_card = await self.append_card_description(
                 card_id=trello_card_data["id"],
                 description_appendix=description,
                 user_id=to_user_id,
             )
-            await self.remove_card_label(trello_card_data["id"])
+            await self.remove_unanswered_label(trello_card)
         except Exception as e:
             self.logger.info(f"Error exporting admin message #{message}, ignoring: {e}")
 
-    async def create_label(self, name="Not answered", color="pink") -> trello.Label:
+    async def create_unanswered_label(self) -> trello.Label:
         loop = asyncio.get_running_loop()
-        self.logger.info(f"Adding label {name} to board {self.board.id}")
+        self.logger.info(f"Adding label {self.unanswered_label_config.name} to board {self.board.id}")
         trello_label = await loop.run_in_executor(
             self.thread_pool,
             partial(
                 self.board.add_label,
-                name=name,
-                color=color,
+                name=self.unanswered_label_config.name,
+                color=self.unanswered_label_config.color,
             ),
         )
         trello_label = cast(trello.Label, trello_label)
@@ -529,19 +538,25 @@ class TrelloIntegration:
 
         return trello_label
 
-    async def ensure_label(self) -> trello.Label:
+    async def ensure_unanswered_label(self) -> trello.Label:
         existing_label_in_redis = await self.trello_label_data.load(self.TRELLO_LABEL_NEW_MESSAGE)
+        if not existing_label_in_redis:
+            self.logger.info("Unread label in redis not found, generating new one")
+            return await self.create_unanswered_label()
+
         existing_labels_in_trello = self.board.get_labels(limit=100)
         existing_label_in_trello = [x for x in existing_labels_in_trello if x.id == existing_label_in_redis["id"]]
         if not existing_label_in_trello:
             await self.trello_label_data.drop(self.TRELLO_LABEL_NEW_MESSAGE)
-            return await self.create_label()
+            return await self.create_unanswered_label()
+
         return existing_label_in_trello[0]
 
-    async def append_card_label(self, card_id: str):
+    async def append_unanswered_label(self, trello_card: trello.Card):
+        if not self.unanswered_label:
+            return True
         loop = asyncio.get_running_loop()
-        label = await self.ensure_label()
-        trello_card = await loop.run_in_executor(self.thread_pool, self.trello_client.get_card, card_id)
+        label = await self.ensure_unanswered_label()
         self.logger.debug(f"Append label {label.id} to card {trello_card.id}")
         await loop.run_in_executor(
             self.thread_pool,
@@ -549,10 +564,11 @@ class TrelloIntegration:
             label,
         )
 
-    async def remove_card_label(self, card_id: str):
+    async def remove_unanswered_label(self, trello_card: trello.Card):
+        if not self.unanswered_label:
+            return True
         loop = asyncio.get_running_loop()
-        label = await self.ensure_label()
-        trello_card = await loop.run_in_executor(self.thread_pool, self.trello_client.get_card, card_id)
+        label = await self.ensure_unanswered_label()
         self.logger.debug(f"Remove label {label.id} from card {trello_card.id}")
         await loop.run_in_executor(
             self.thread_pool,
