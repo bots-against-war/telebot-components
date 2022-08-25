@@ -27,10 +27,10 @@ Framework / toolkit for building bots with [telebot](https://github.com/bots-aga
 ### Testing
 Use command below for run tests
 ```bash
-pytest tests -vv
+poetry run pytest tests -vv
 ```
 
-By default all tests are run with in-memory Redis emulation. But if you want you can run them
+By default, all tests are run with in-memory Redis emulation. But if you want you can run them
 locally on real Redis (**read manual below**) 
 
 > **Note**: Tests must be able to find an empty Redis DB to use; they also clean up after themselves.
@@ -39,14 +39,13 @@ locally on real Redis (**read manual below**)
 For first start you need to do 3 things:
 1. Use command below to generate environment variables file:
     ```bash
-    make init-config
+    cp ./examples/example.env ./examples/.env
     ```
    > **Note**: After generate `.env` file you need to add your [bot's token](https://core.telegram.org/bots#6-botfather).  
    > Also for bot with `trello integration` you need to add `trello` token and api key. You can get it [here](https://trello.com/app-key).
-2. Start `redis` inside `docker` container.  
-   Run redis on local machine, by default on 6379 port. If you need change it in `./docker/docker-compose.yml`
+2. If you want start redis on local machine, run
     ```bash
-    make up-redis
+    docker run --name baw-redis -d -p 6379:6379 redis redis-server --save 60 1 --loglevel warning
     ```
 3. Run any bot from `./examples`
     ```bash
