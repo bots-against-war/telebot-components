@@ -27,7 +27,7 @@ Framework / toolkit for building bots with [telebot](https://github.com/bots-aga
 ### Testing
 Use command below for run tests
 ```bash
-poetry run pytest tests -vv
+pytest tests -vv
 ```
 
 By default all tests are run with in-memory Redis emulation. But if you want you can run them
