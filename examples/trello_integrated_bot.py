@@ -1,5 +1,4 @@
 import asyncio
-from typing import Literal
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -12,6 +11,7 @@ from telebot_components.feedback.anti_spam import DisabledAntiSpam
 from telebot_components.feedback.trello_integration import (
     TrelloIntegration,
     TrelloIntegrationCredentials,
+    TrelloLabelColor,
     UnansweredLabelConfig,
 )
 from telebot_components.redis_utils.interface import RedisInterface
@@ -30,9 +30,7 @@ async def create_trello_integrated_feedback_bot(
     server_listening_future: asyncio.Future,
     unanswered_label: bool,
     unanswered_label_name: str,
-    unanswered_label_color: Literal[
-        "yellow", "purple", "blue", "red", "green", "orange", "black", "sky", "pink", "lime"
-    ],
+    unanswered_label_color: TrelloLabelColor,
 ) -> BotRunner:
     bot_prefix = f"trello-integration-bot"
 

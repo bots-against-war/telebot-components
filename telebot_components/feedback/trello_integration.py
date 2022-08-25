@@ -26,6 +26,8 @@ from telebot_components.utils import (
     trim_with_ellipsis,
 )
 
+TrelloLabelColor = Literal["yellow", "purple", "blue", "red", "green", "orange", "black", "sky", "pink", "lime"]
+
 
 class TrelloCardData(TypedDict):
     id: str
@@ -47,7 +49,7 @@ class TrelloWebhookData(TypedDict):
 class TrelloLabelData(TypedDict):
     id: str
     name: str
-    color: str
+    color: TrelloLabelColor
     id_board: str
 
 
@@ -68,7 +70,7 @@ class MessageRepliedFromTrelloContext:
 @dataclass
 class UnansweredLabelConfig:
     name: str
-    color: Literal["yellow", "purple", "blue", "red", "green", "orange", "black", "sky", "pink", "lime"]
+    color: TrelloLabelColor
 
 
 OnMessageRepliedFromTrello = Callable[[MessageRepliedFromTrelloContext], Coroutine[None, None, None]]
