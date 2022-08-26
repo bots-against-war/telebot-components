@@ -2,6 +2,10 @@ import io
 from typing import Any, Optional, Union
 
 from ruamel.yaml import YAML  # type: ignore
+from telebot import AsyncTeleBot
+from telebot import types as tg
+
+from telebot_components.form.field import TelegramAttachment
 
 
 def telegram_message_url(
@@ -68,3 +72,20 @@ def from_yaml_unsafe(dump: str) -> Any:
 def telegram_html_escape(string: str) -> str:
     """See https://core.telegram.org/bots/api#html-style"""
     return string.replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
+
+
+async def send_attachment(
+    bot: AsyncTeleBot, chat_id: Union[int, str], attachment: TelegramAttachment, caption: str, **send_message_kwargs
+):
+    if isinstance(attachment, list) and all(isinstance(att, tg.PhotoSize) for att in attachment):
+        return await bot.send_photo(chat_id, photo=attachment[0].file_id, caption=caption, **send_message_kwargs)
+    elif isinstance(attachment, tg.Document):
+        return await bot.send_document(chat_id, document=attachment.file_id, caption=caption, **send_message_kwargs)
+    elif isinstance(attachment, tg.Video):
+        return await bot.send_video(chat_id, video=attachment.file_id, caption=caption, **send_message_kwargs)
+    elif isinstance(attachment, tg.Animation):
+        return await bot.send_animation(chat_id, animation=attachment.file_id, caption=caption, **send_message_kwargs)
+    elif isinstance(attachment, tg.Audio):
+        return await bot.send_audio(chat_id, audio=attachment.file_id, caption=caption, **send_message_kwargs)
+    else:
+        raise TypeError(f"Can not send attachment of type: {type(attachment)!r}.")
