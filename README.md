@@ -5,27 +5,36 @@ Framework / toolkit for building bots with [telebot](https://github.com/bots-aga
 <!-- ## Development -->
 
 ## Development
-
 ### Setup
+1. Clone repository
+   ```bash
+   git clone git@github.com:bots-against-war/telebot-components.git baw
+   cd ./baw
+   ```
 
-The project requires Poerty 1.2.x or higher (see [installation instruction](https://python-poetry.org/docs/master#installing-with-the-official-installer))).
-For example, to install `1.2.0b2` on Unix, run
+2. The project requires Poerty 1.2.x or higher (see [installation instruction](https://python-poetry.org/docs/master#installing-with-the-official-installer))).
+   For example, to install `1.2.0b2` on Unix, run
+   ```bash
+   curl -sSL https://install.python-poetry.org | python3 - --version 1.2.0b2
+   ```
 
-```bash
-curl -sSL https://install.python-poetry.org | python3 - --version 1.2.0b2
-```
-
-Then, to install the library with all dependencies, run from project root
-
-```bash
-poetry install
-```
-
-You might need to manually install dynamic versioning plugin:
-
-```bash
-poetry plugin add poetry-dynamic-versioning-plugin
-```
+3. Then, to install the library with all dependencies, run from project root
+   ```bash
+   poetry install
+   ```
+   - You might need to manually install dynamic versioning plugin (without it local build will
+     always have version `0.0.0`):
+     ```bash
+     poetry plugin add poetry-dynamic-versioning-plugin
+     ```
+   - To create virtualenv inside the project’s root directory, use command
+     ```bash
+     poetry config virtualenvs.in-project false --local
+     ```
+4. Run `pre-commit` to set up git hook scripts
+   ```bash
+   pre-commit install
+   ```
 
 
 ### Testing
