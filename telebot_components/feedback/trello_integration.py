@@ -544,28 +544,28 @@ class TrelloIntegration:
         card_content.description = self._add_admin_chat_link(card_content.description, to_message=forwarded_message)
         card_content.description = "👤: " + card_content.description
 
-        current_trello_card_data = await self.trello_card_data_for_user.load(user.id)
+        existing_trello_card_data = await self.trello_card_data_for_user.load(user.id)
 
-        current_card: Optional[trello.Card] = None
-        if current_trello_card_data is not None and current_trello_card_data["category_name"] == category.name:
+        trello_card: Optional[trello.Card] = None
+        if existing_trello_card_data is not None and existing_trello_card_data["category_name"] == category.name:
             try:
-                current_card = await self._append_card_content(
-                    card_id=current_trello_card_data["id"],
+                trello_card = await self._append_card_content(
+                    card_id=existing_trello_card_data["id"],
                     content=card_content,
                     user_id=user.id,
                 )
             except Exception:
                 self.logger.exception(f"Unexpected error appending card content, will try creating a new one")
                 new_card_reason = "error occured appending to existing card"
-        elif current_trello_card_data is None:
+        elif existing_trello_card_data is None:
             new_card_reason = "no saved card data found for the user"
         else:
             new_card_reason = "user category has changed"
 
-        if current_card is None:
+        if trello_card is None:
             self.logger.info(f"Creating a new card ({new_card_reason})")
             trello_list = self.lists_by_category_name[category.name]
-            current_card = await loop.run_in_executor(
+            trello_card = await loop.run_in_executor(
                 self.thread_pool,
                 partial(
                     trello_list.add_card,
@@ -574,33 +574,33 @@ class TrelloIntegration:
                     position="top",
                 ),
             )
-            current_card = cast(trello.Card, current_card)
+            trello_card = cast(trello.Card, trello_card)
 
             # storing the newly created card as the "active" card for the user
             await self.trello_card_data_for_user.save(
                 user.id,
-                TrelloCardData(id=current_card.id, category_name=category.name),
+                TrelloCardData(id=trello_card.id, category_name=category.name),
             )
 
         # storing the last user message exported to the card as the origin for the card (will be replied to)
         await self.origin_message_data_for_trello_card_id.save(
-            current_card.id,
+            trello_card.id,
             OriginMessageData(
                 forwarded_message_id=forwarded_message.id,
                 origin_chat_id=user.id,
             ),
         )
         if card_content.attachment is not None and card_content.attachment_content is not None:
-            self.logger.debug(f"Attaching file to card #{current_card.id}: {card_content.attachment.file_path}")
+            self.logger.debug(f"Attaching file to card #{trello_card.id}: {card_content.attachment.file_path}")
             await loop.run_in_executor(
                 self.thread_pool,
                 partial(
-                    current_card.attach,
+                    trello_card.attach,
                     name=card_content.attachment.file_path,
                     file=BytesIO(card_content.attachment_content),
                 ),
             )
-        await self.append_unanswered_label(current_card)
+        await self.append_unanswered_label(trello_card)
 
     def _add_admin_reply_prefix(self, description: str) -> str:
         return "🤖: " + description
