@@ -82,6 +82,13 @@ class TrelloIntegration:
     # to execute blocking calls as async, shared by all TrelloIntegration instances
     thread_pool: Optional[ThreadPoolExecutor] = None
 
+    STORED_WEBHOOK_DATA_KEY = "const-stored-key"
+    STORED_WEBHOOK_SECRET_KEY = "const-generated-webhook-secret"
+
+    # https://community.atlassian.com/t5/Trello-questions/Is-there-a-text-limit-in-the-quot-Description-quot-field-of/qaq-p/838401#M6890
+    # actually, the limit is 16384, but we set it a bit lower to leave some space for the "next card" link
+    MAX_CARD_DESCRIPTION_LENGTH = 16200
+
     def __init__(
         self,
         bot: AsyncTeleBot,
@@ -146,9 +153,6 @@ class TrelloIntegration:
 
     def set_on_message_replied_from_trello(self, new: OnMessageRepliedFromTrello):
         self.on_message_replied_from_trello = new
-
-    STORED_WEBHOOK_DATA_KEY = "const-stored-key"
-    STORED_WEBHOOK_SECRET_KEY = "const-generated-webhook-secret"
 
     async def load_trello_webhook_data(self) -> Optional[TrelloWebhookData]:
         return await self.trello_webhook_data_store.load(self.STORED_WEBHOOK_DATA_KEY)
@@ -405,21 +409,27 @@ class TrelloIntegration:
         loop = asyncio.get_running_loop()
         self.logger.debug(f"Updating existing card {card_id = }")
         trello_card = await loop.run_in_executor(self.thread_pool, self.trello_client.get_card, card_id)
-        try:
+
+        new_description = concatenate_card_text_sections(trello_card.description, content.description)
+        if len(new_description) < self.MAX_CARD_DESCRIPTION_LENGTH:
             await loop.run_in_executor(
                 self.thread_pool,
                 trello_card.set_description,
-                concatenate_card_text_sections(trello_card.description, content.description),
+                new_description,
             )
-        except Exception as e:
-            self.logger.info(f"Seems like the card is overflown, trying to create a new one (error {e!r})")
+            await self.trello_card_data_for_user.touch(user_id)
+            await self.origin_message_data_for_trello_card_id.touch(trello_card.id)
+            return trello_card
+        else:
+            self.logger.info("Seems like the card is overflown, trying to create a new one")
+            old_trello_card = trello_card
             new_trello_card = await loop.run_in_executor(
                 self.thread_pool,
                 partial(
-                    trello_card.trello_list.add_card,
+                    old_trello_card.trello_list.add_card,
                     name=content.title,
                     desc=concatenate_card_text_sections(
-                        markdown_link(trello_card.short_url, "⬅️ previous card ⬅️"),
+                        markdown_link(old_trello_card.short_url, "⬅️ previous card ⬅️"),
                         content.description,
                     ),
                     position="top",
@@ -428,19 +438,28 @@ class TrelloIntegration:
             try:
                 await loop.run_in_executor(
                     self.thread_pool,
-                    trello_card.set_description,
+                    old_trello_card.set_description,
                     concatenate_card_text_sections(
-                        trello_card.description,
+                        old_trello_card.description,
                         markdown_link(new_trello_card.short_url, "➡️ next card ➡️"),
                     ),
                 )
             except Exception:
                 self.logger.info("Can't add forwardlink to the old card, ignoring", exc_info=True)
 
-            trello_card = new_trello_card
-        await self.trello_card_data_for_user.touch(user_id)
-        await self.origin_message_data_for_trello_card_id.touch(trello_card.id)
-        return trello_card
+            old_trello_card_data = await self.trello_card_data_for_user.load(user_id)
+            if old_trello_card_data is not None:
+                await self.trello_card_data_for_user.save(
+                    user_id,
+                    TrelloCardData(
+                        id=new_trello_card.id,
+                        category_name=old_trello_card_data["category_name"],
+                    ),
+                )
+            old_trello_card_origin_message = await self.origin_message_data_for_trello_card_id.load(old_trello_card.id)
+            if old_trello_card_origin_message is not None:
+                await self.origin_message_data_for_trello_card_id.save(new_trello_card.id, old_trello_card_origin_message)
+            return new_trello_card
 
     async def export_user_message(
         self,
@@ -481,7 +500,7 @@ class TrelloIntegration:
                     user_id=user.id,
                 )
             except Exception:
-                self.logger.exception(f"Error in _append_card_content, will create new one")
+                self.logger.exception(f"Unexpected error appending card content, will try creating a new one")
                 new_card_reason = "error occured appending to existing card"
         elif current_trello_card_data is None:
             new_card_reason = "no saved card data found for the user"
@@ -502,13 +521,13 @@ class TrelloIntegration:
             )
             current_card = cast(trello.Card, current_card)
 
-        # storing the current card as the active card for the user
-        await self.trello_card_data_for_user.save(
-            user.id,
-            TrelloCardData(id=current_card.id, category_name=category.name),
-        )
+            # storing the newly created card as the "active" card for the user
+            await self.trello_card_data_for_user.save(
+                user.id,
+                TrelloCardData(id=current_card.id, category_name=category.name),
+            )
 
-        # storing the last user message exported to the card as the origin (will be replied to)
+        # storing the last user message exported to the card as the origin for the card (will be replied to)
         await self.origin_message_data_for_trello_card_id.save(
             current_card.id,
             OriginMessageData(
