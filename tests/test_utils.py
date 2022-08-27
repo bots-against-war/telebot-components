@@ -10,9 +10,11 @@ import pytest
 
 from telebot_components.utils import (
     LockRegistry,
+    emoji_hash,
     from_yaml_unsafe,
     join_paragraphs,
     telegram_message_url,
+    text_hash,
     to_yaml_unsafe,
     trim_with_ellipsis,
 )
@@ -189,3 +191,15 @@ async def test_lock_registry():
 
     # checking that lock registry doesn't hold references for unused keys anymore
     assert len(lock_registry._lock_by_key) == 0
+
+
+def test_alphabet_hash():
+    assert emoji_hash(123456789, "hello-world") == "🤸👐🃏🦯"
+    assert emoji_hash(10000, "hello-world") == "⚒🌑💄🧃"
+    assert emoji_hash(-10000, "hello-world") == "🔵🦠🕔🌂"
+
+    assert emoji_hash(1, "hello-world") == "⬛🈲🧅🛖"
+    assert emoji_hash(1, "hello-world2") == "🥕✔🔩🧐"
+
+    assert text_hash(1312, "foo") == "tbape0"
+    assert text_hash(817269837164, "foo") == "hGSS2k"

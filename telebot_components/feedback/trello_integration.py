@@ -33,6 +33,7 @@ from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.category import Category
 from telebot_components.stores.generic import KeyValueStore
 from telebot_components.utils import (
+    emoji_hash,
     html_link,
     markdown_link,
     telegram_html_escape,
@@ -82,7 +83,7 @@ class MessageRepliedFromTrelloContext:
     origin_chat_id: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class UnansweredLabelConfig:
     name: str
     color: TrelloLabelColor
@@ -126,6 +127,9 @@ class TrelloIntegration:
         unanswered_label: bool = True,
         unanswered_label_config: UnansweredLabelConfig = UnansweredLabelConfig(name="Not answered", color="pink"),
         categories: Optional[list[Category]] = None,
+        # used to sign trello cards with anonymized user id hash (unique for a user and a bot prefix)
+        #                        user id, bot prefix
+        user_id_hash_func: Callable[[int, str], str] = emoji_hash,
     ):
         self.bot = bot
         self.redis = redis
@@ -135,6 +139,7 @@ class TrelloIntegration:
         self.unanswered_label = unanswered_label
         self.reply_with_card_comments = reply_with_card_comments
         self.unanswered_label_config = unanswered_label_config
+        self.user_id_hash_func = user_id_hash_func
 
         self.trello_card_data_for_user = KeyValueStore[TrelloCardData](
             name="trello-card-data",
@@ -620,7 +625,7 @@ class TrelloIntegration:
             self.logger.exception(f"Error exporting admin message #{message}, ignoring")
 
     def _title_with_user_hash(self, user_id: int, description: str) -> str:
-        return f"{emoji_hash(user_id, self.bot_prefix)}: {trim_with_ellipsis(description, target_len=40)}"
+        return f"{self.user_id_hash_func(user_id, self.bot_prefix)}: {trim_with_ellipsis(description, target_len=40)}"
 
     async def create_unanswered_label(self) -> trello.Label:
         loop = asyncio.get_running_loop()
@@ -703,13 +708,3 @@ def concatenate_card_text_sections(first: str, second: str) -> str:
 
 def trello_card_url(short_link: str) -> str:
     return "https://trello.com/c/" + short_link
-
-
-def emoji_hash(user_id: int, bot_prefix: str, n_emoji: int = 4) -> str:
-    user_id_hash = hashlib.md5(user_id.to_bytes(64, "little") + bot_prefix.encode("utf-8")).digest()
-    res = ""
-    for i in range(n_emoji):
-        two_bytes = user_id_hash[2 * i : 2 * (i + 1)]
-        emoji_idx = int.from_bytes(two_bytes, "little") % len(EMOJI)
-        res += EMOJI[emoji_idx]
-    return res
