@@ -7,11 +7,27 @@ Framework / toolkit for building bots with [telebot](https://github.com/bots-aga
 
 ## Development
 
-Install with Poetry (requires 1.2.x and higher with plugin support - [install instruction](https://python-poetry.org/docs/master#installing-with-the-official-installer)):
+### Setup
+
+The project requires Poerty 1.2.x or higher (see [installation instruction](https://python-poetry.org/docs/master#installing-with-the-official-installer))).
+For example, to install `1.2.0b2` on Unix, run
+
+```bash
+curl -sSL https://install.python-poetry.org | python3 - --version 1.2.0b2
+```
+
+Then, to install the library with all dependencies, run from project root
 
 ```bash
 poetry install
 ```
+
+You might need to manually install dynamic versioning plugin:
+
+```bash
+poetry plugin add poetry-dynamic-versioning-plugin
+```
+
 
 ### Testing
 
