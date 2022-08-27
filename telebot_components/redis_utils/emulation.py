@@ -164,9 +164,18 @@ class RedisEmulation(RedisInterface):
         return self.hashes.get(name, {}).get(key)
 
     async def hkeys(self, name: str) -> list[bytes]:
-        # NOTE: redis client does not default anything received from Redis by default,
+        # NOTE: redis client does not decode anything received from Redis by default,
         # so we have to re-encode keys from a hash
         return [key.encode("utf-8") for key in self.hashes.get(name, {}).keys()]
+
+    async def hdel(self, name: str, *keys: str) -> int:
+        count = 0
+        hash_ = self.hashes.get(name, {})
+        for k in keys:
+            value = hash_.pop(k, None)
+            if value is not None:
+                count += 1
+        return count
 
 
 class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
@@ -252,6 +261,10 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def hkeys(self, name: str) -> list[bytes]:
         self._stack.append(self.redis_em.hkeys(name))
         return []
+
+    async def hdel(self, name: str, *keys: str) -> int:
+        self._stack.append(self.redis_em.hdel(name, *keys))
+        return 0
 
     async def execute(self, raise_on_error: bool = True) -> list[RedisCmdReturn]:
         results: list[RedisCmdReturn] = []

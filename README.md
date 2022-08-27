@@ -7,7 +7,7 @@ Framework / toolkit for building bots with [telebot](https://github.com/bots-aga
 
 ## Development
 
-Install with Poetry (requires 1.2.x and higher with plugin support):
+Install with Poetry (requires 1.2.x and higher with plugin support - [install instruction](https://python-poetry.org/docs/master#installing-with-the-official-installer)):
 
 ```bash
 poetry install
@@ -16,7 +16,7 @@ poetry install
 ### Testing
 
 ```bash
-pytest tests -vv
+poetry run pytest tests -vv
 ```
 
 By default all tests are run with in-memory Redis emulation. But if you have Redis installed you can run them
