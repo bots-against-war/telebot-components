@@ -577,7 +577,7 @@ class TrelloIntegration:
                     file=BytesIO(card_content.attachment_content),
                 ),
             )
-        await self.append_unanswered_label(trello_card)
+        await self.append_unanswered_label(current_card)
 
     def _add_admin_reply_prefix(self, description: str) -> str:
         return "🤖: " + description
