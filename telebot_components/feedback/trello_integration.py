@@ -7,7 +7,17 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
 from io import BytesIO
-from typing import Callable, Coroutine, Literal, Optional, TypedDict, Union, cast
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Literal,
+    Optional,
+    TypedDict,
+    Union,
+    cast,
+)
 
 import trello  # type: ignore
 from aiohttp import web
@@ -336,6 +346,7 @@ class TrelloIntegration:
                     title=self._title_with_user_hash(user_id, description),
                 ),
                 user_id=user_id,
+                old_trello_card_callback=self.remove_unanswered_label,
             )
             await self.remove_unanswered_label(trello_card)
             loop = asyncio.get_running_loop()
@@ -432,11 +443,14 @@ class TrelloIntegration:
         card_id: str,
         content: CardContent,
         user_id: int,
+        old_trello_card_callback: Optional[Callable[[trello.Card], Awaitable[Any]]] = None,
     ) -> trello.Card:
         """
-        Fetch an existing card description, add an appendix and update the description.
+        Fetch an existing card description, add an appendix and update the description. Returns Card object.
 
-        On card overflow, create a new card with a description appendix, adding "previous card" and "next card" links
+        On card overflow, create a new card with a description appendix, adding "previous card" and "next card" links.
+        In this case returns Card object for the new card. If some additional processing is needed on the old card,
+        old_trello_card_callback can be used.
         """
         loop = asyncio.get_running_loop()
         self.logger.debug(f"Updating existing card {card_id = }")
@@ -490,7 +504,11 @@ class TrelloIntegration:
                 )
             old_trello_card_origin_message = await self.origin_message_data_for_trello_card_id.load(old_trello_card.id)
             if old_trello_card_origin_message is not None:
-                await self.origin_message_data_for_trello_card_id.save(new_trello_card.id, old_trello_card_origin_message)
+                await self.origin_message_data_for_trello_card_id.save(
+                    new_trello_card.id, old_trello_card_origin_message
+                )
+            if old_trello_card_callback is not None:
+                await old_trello_card_callback(old_trello_card)
             return new_trello_card
 
     async def export_user_message(
@@ -595,6 +613,7 @@ class TrelloIntegration:
                 card_id=trello_card_data["id"],
                 content=card_content,
                 user_id=to_user_id,
+                old_trello_card_callback=self.remove_unanswered_label,
             )
             await self.remove_unanswered_label(trello_card)
         except Exception:
