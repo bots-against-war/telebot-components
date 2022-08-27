@@ -41,7 +41,7 @@ For first start you need to do 3 things:
     ```bash
     cp ./examples/example.env ./examples/.env
     ```
-   > **Note**: After generate `.env` file you need to add your [bot's token](https://core.telegram.org/bots#6-botfather).  
+   > **Note**: After `.env` file is generated you will need to add your [bot's token](https://core.telegram.org/bots#6-botfather) to it.  
    > Also for bot with `trello integration` you need to add `trello` token and api key. You can get it [here](https://trello.com/app-key).
 2. If you want start redis on local machine, run
     ```bash
