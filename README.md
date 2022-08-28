@@ -11,18 +11,31 @@ Framework / toolkit for building bots with [telebot](https://github.com/bots-aga
    git clone git@github.com:bots-against-war/telebot-components.git baw
    cd ./baw
    ```
-2. Install dependencies with Poetry (requires 1.2.x and higher with plugin support - [install instruction](https://python-poetry.org/docs/master#installing-with-the-official-installer)):
+
+2. The project requires Poerty 1.2.x or higher (see [installation instruction](https://python-poetry.org/docs/master#installing-with-the-official-installer))).
+   For example, to install `1.2.0b2` on Unix, run
+   ```bash
+   curl -sSL https://install.python-poetry.org | python3 - --version 1.2.0b2
+   ```
+
+3. Then, to install the library with all dependencies, run from project root
    ```bash
    poetry install
    ```
-   - For create the virtualenv inside the project’s root directory, use command
-   ```bash
-   poetry config virtualenvs.in-project false --local
-   ```
-3. Run pre-commit to set up the git hook scripts
+   - You might need to manually install dynamic versioning plugin (without it local build will
+     always have version `0.0.0`):
+     ```bash
+     poetry plugin add poetry-dynamic-versioning-plugin
+     ```
+   - To create virtualenv inside the project’s root directory, use command
+     ```bash
+     poetry config virtualenvs.in-project false --local
+     ```
+4. Run `pre-commit` to set up git hook scripts
    ```bash
    pre-commit install
    ```
+
 
 ### Testing
 Use command below for run tests
