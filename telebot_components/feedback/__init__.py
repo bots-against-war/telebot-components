@@ -457,12 +457,10 @@ class FeedbackHandler:
         """
 
         async def message_forwarder() -> tg.Message:
-            return await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
-
-        async def attachment_forwarder() -> tg.Message:
             if attachment is None:
-                raise ValueError(f"Attachment can not be None.")
-            return await send_attachment(bot, self.admin_chat_id, attachment, text, **send_message_kwargs)
+                return await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
+            else:
+                return await send_attachment(bot, self.admin_chat_id, attachment, text)
 
         async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> Optional[tg.Message]:
             if no_response:
@@ -470,15 +468,10 @@ class FeedbackHandler:
             else:
                 return await bot.send_message(user.id, text=text, reply_markup=reply_markup)
 
-        if attachment is not None:
-            forwarder = attachment_forwarder
-        else:
-            forwarder = message_forwarder
-
         return await self._handle_user_message(
             bot=bot,
             user=user,
-            message_forwarder=forwarder,
+            message_forwarder=message_forwarder,
             user_replier=user_replier,
             export_to_trello=export_to_trello,
         )

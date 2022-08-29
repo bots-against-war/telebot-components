@@ -74,18 +74,16 @@ def telegram_html_escape(string: str) -> str:
     return string.replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
 
 
-async def send_attachment(
-    bot: AsyncTeleBot, chat_id: Union[int, str], attachment: TelegramAttachment, caption: str, **send_message_kwargs
-):
+async def send_attachment(bot: AsyncTeleBot, chat_id: Union[int, str], attachment: TelegramAttachment, caption: str):
     if isinstance(attachment, list) and all(isinstance(att, tg.PhotoSize) for att in attachment):
-        return await bot.send_photo(chat_id, photo=attachment[0].file_id, caption=caption, **send_message_kwargs)
+        return await bot.send_photo(chat_id, photo=attachment[0].file_id, caption=caption)
     elif isinstance(attachment, tg.Document):
-        return await bot.send_document(chat_id, document=attachment.file_id, caption=caption, **send_message_kwargs)
+        return await bot.send_document(chat_id, document=attachment.file_id, caption=caption)
     elif isinstance(attachment, tg.Video):
-        return await bot.send_video(chat_id, video=attachment.file_id, caption=caption, **send_message_kwargs)
+        return await bot.send_video(chat_id, video=attachment.file_id, caption=caption)
     elif isinstance(attachment, tg.Animation):
-        return await bot.send_animation(chat_id, animation=attachment.file_id, caption=caption, **send_message_kwargs)
+        return await bot.send_animation(chat_id, animation=attachment.file_id, caption=caption)
     elif isinstance(attachment, tg.Audio):
-        return await bot.send_audio(chat_id, audio=attachment.file_id, caption=caption, **send_message_kwargs)
+        return await bot.send_audio(chat_id, audio=attachment.file_id, caption=caption)
     else:
         raise TypeError(f"Can not send attachment of type: {type(attachment)!r}.")
