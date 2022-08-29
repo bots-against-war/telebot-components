@@ -1,13 +1,20 @@
+import asyncio
+import time
+from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional, Union
+from itertools import chain
+from typing import Any, Coroutine, Optional, Union
 
 import pytest
 
 from telebot_components.utils import (
+    LockRegistry,
+    emoji_hash,
     from_yaml_unsafe,
     join_paragraphs,
     telegram_message_url,
+    text_hash,
     to_yaml_unsafe,
     trim_with_ellipsis,
 )
@@ -151,3 +158,48 @@ class Container:
 )
 def test_yaml_serialization(obj: Any):
     assert from_yaml_unsafe(to_yaml_unsafe(obj)) == obj
+
+
+async def test_lock_registry():
+    @dataclass
+    class Event:
+        is_start: bool
+        idx: int
+        timestamp: float
+
+    shared_state: dict[str, list[Event]] = defaultdict(list)
+    lock_registry = LockRegistry()
+
+    async def worker(key: str, idx: int) -> None:
+        async with lock_registry.get_lock(key):
+            shared_state[key].append(Event(is_start=True, idx=idx, timestamp=time.time()))
+            await asyncio.sleep(0.01)
+            shared_state[key].append(Event(is_start=False, idx=idx, timestamp=time.time()))
+
+    worker_coros: list[Coroutine[None, None, None]] = []
+    for key_int in range(1000):
+        for idx in range(10):
+            worker_coros.append(worker(str(key_int), idx))
+
+    await asyncio.gather(*worker_coros)
+
+    for key in shared_state.keys():
+        events = shared_state[key]
+        # checking that the lock forces concurrent execution, with each index starting and finishing
+        assert [e.idx for e in events] == list(chain.from_iterable([idx, idx] for idx in range(10)))
+        assert [e.is_start for e in events] == list(chain.from_iterable([True, False] for _ in range(10)))
+
+    # checking that lock registry doesn't hold references for unused keys anymore
+    assert len(lock_registry._lock_by_key) == 0
+
+
+def test_alphabet_hash():
+    assert emoji_hash(123456789, "hello-world") == "🤸👐🃏🦯"
+    assert emoji_hash(10000, "hello-world") == "⚒🌑💄🧃"
+    assert emoji_hash(-10000, "hello-world") == "🔵🦠🕔🌂"
+
+    assert emoji_hash(1, "hello-world") == "⬛🈲🧅🛖"
+    assert emoji_hash(1, "hello-world2") == "🥕✔🔩🧐"
+
+    assert text_hash(1312, "foo") == "tbape0"
+    assert text_hash(817269837164, "foo") == "hGSS2k"

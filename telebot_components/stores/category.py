@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Optional
+from typing import Callable, Optional
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -35,10 +35,15 @@ class CategoryStore:
         redis: RedisInterface,
         categories: list[Category],
         category_expiration_time: timedelta,
+        default_category: Optional[Category] = None,
         language_store: Optional[LanguageStore] = None,
+        mark_selected: Callable[[str], str] = lambda caption: "✅ " + caption,
     ):
         self.logger = logging.getLogger(f"{__name__}.{bot_prefix}")
         self.categories = categories
+        self.default_category = default_category
+        if self.default_category is not None:
+            self.categories.append(self.default_category)
         self.categories_by_name = {c.name: c for c in categories}
         self.user_category_store = KeyValueStore[Optional[Category]](
             name="user-category",
@@ -58,11 +63,15 @@ class CategoryStore:
             else:
                 vaildate_singlelang_text(category.button_caption)
 
+        self.mark_selected = mark_selected
+
     async def save_user_category(self, user: tg.User, category: Category) -> bool:
+        if category not in self.categories:
+            self.logger.warning("Saving category that has not been passed to the store on initialization")
         return await self.user_category_store.save(user.id, category)
 
     async def get_user_category(self, user: tg.User) -> Optional[Category]:
-        return await self.user_category_store.load(user.id)
+        return await self.user_category_store.load(user.id) or self.default_category
 
     def setup(self, bot: AsyncTeleBot, on_category_selected: Optional[OnOptionSelected[Category]] = None):
         @bot.callback_query_handler(callback_data=self.select_category_callback_data)
@@ -97,13 +106,14 @@ class CategoryStore:
                     self.logger.exception("Error in on_category_selected callback")
 
     async def markup_for_user_localised(self, user: tg.User, language: Optional[Language]) -> tg.InlineKeyboardMarkup:
-        current_category = await self.get_user_category(user)
+        current_user_category = await self.get_user_category(user)
 
         def caption(category: Category) -> str:
             caption = any_text_to_str(category.button_caption, language)
-            if current_category is not None and category.name == current_category.name:
-                caption = "✅ " + caption
-            return caption
+            if current_user_category is not None and category.name == current_user_category.name:
+                return self.mark_selected(caption)
+            else:
+                return caption
 
         return tg.InlineKeyboardMarkup(
             keyboard=[

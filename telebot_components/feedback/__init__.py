@@ -38,6 +38,7 @@ from telebot_components.stores.language import (
     vaildate_singlelang_text,
 )
 from telebot_components.utils import send_attachment
+from telebot_components.utils import html_link
 
 
 @dataclass
@@ -306,7 +307,7 @@ class FeedbackHandler:
         if self.trello_integration is not None:
             trello_help = "🗂️ <i>Интеграция с Trello</i>\n"
             trello_help += (
-                f'· Помимо чата сообщения выгружаются на <a href="{self.trello_integration.board.url}">доску</a> Trello '
+                f'· Помимо чата сообщения выгружаются на {html_link(self.trello_integration.board.url, "доску Trello")} '
                 + f"в списки: "
                 + ", ".join(f"<b>{l.name}</b>" for l in self.trello_integration.lists_by_category_name.values())
                 + "\n"

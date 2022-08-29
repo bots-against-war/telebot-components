@@ -1,11 +1,17 @@
+import asyncio
+import hashlib
 import io
+import string
 from typing import Any, Optional, Union
+from weakref import WeakValueDictionary
 
 from ruamel.yaml import YAML  # type: ignore
 from telebot import AsyncTeleBot
 from telebot import types as tg
 
 from telebot_components.form.field import TelegramAttachment
+
+from telebot_components.constants.emoji import EMOJI
 
 
 def telegram_message_url(
@@ -72,6 +78,68 @@ def from_yaml_unsafe(dump: str) -> Any:
 def telegram_html_escape(string: str) -> str:
     """See https://core.telegram.org/bots/api#html-style"""
     return string.replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
+
+
+def html_link(href: str, text: str) -> str:
+    return f'<a href="{href}">{text}</a>'
+
+
+def markdown_link(href: str, text: str) -> str:
+    return f"[{text}]({href})"
+
+
+def _pretty_hash_from_alphabet(some_id: int, bot_prefix: str, length: int, alphabet: list[str]) -> str:
+    """Do not use for any security-related hashing, just for user-facing anonymized signatures"""
+    if len(alphabet) > 65536:
+        raise ValueError(f"Alphabet has length {len(alphabet)}, exceeding the max supported value of 1024")
+
+    try:
+        abs_bytes = abs(some_id).to_bytes(64, "big")
+    except OverflowError:
+        raise ValueError(f"{some_id = }, which seems too large for an id...")
+    sign_byte = b"+" if some_id > 0 else b"-"
+    bot_bytes = bot_prefix.encode("utf-8")
+    some_id_hash = hashlib.md5(sign_byte + abs_bytes + bot_bytes).digest()
+
+    max_length = len(some_id_hash) // 2
+    if length > max_length:
+        raise ValueError(f"{length = }, but can't exceed {max_length}")
+
+    res = ""
+    for i in range(length):
+        two_hash_bytes = some_id_hash[2 * i : 2 * (i + 1)]
+        char_idx = int.from_bytes(two_hash_bytes, "little") % len(alphabet)
+        res += alphabet[char_idx]
+    return res
+
+
+def emoji_hash(some_id: int, bot_prefix: str, length: int = 4) -> str:
+    return _pretty_hash_from_alphabet(some_id, bot_prefix, length, alphabet=EMOJI)
+
+
+def text_hash(some_id: int, bot_prefix: str, length: int = 6) -> str:
+    return _pretty_hash_from_alphabet(
+        some_id,
+        bot_prefix,
+        length,
+        alphabet=list(string.ascii_letters + string.digits),
+    )
+
+
+# TODO: unused for now, move to telebot library and use to force sequential processing of
+# the same-origin updates
+class LockRegistry:
+    def __init__(self):
+        self._lock_by_key: dict[Any, asyncio.Lock] = WeakValueDictionary()
+
+    def get_lock(self, key: Any) -> asyncio.Lock:
+        maybe_lock = self._lock_by_key.get(key)
+        if maybe_lock is None:
+            lock = asyncio.Lock()
+            self._lock_by_key[key] = lock
+            return lock
+        else:
+            return maybe_lock
 
 
 async def send_attachment(bot: AsyncTeleBot, chat_id: Union[int, str], attachment: TelegramAttachment, caption: str):
