@@ -9,9 +9,8 @@ from ruamel.yaml import YAML  # type: ignore
 from telebot import AsyncTeleBot
 from telebot import types as tg
 
-from telebot_components.form.field import TelegramAttachment
-
 from telebot_components.constants.emoji import EMOJI
+from telebot_components.form.field import TelegramAttachment
 
 
 def telegram_message_url(

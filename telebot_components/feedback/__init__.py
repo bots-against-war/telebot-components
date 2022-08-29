@@ -37,8 +37,7 @@ from telebot_components.stores.language import (
     any_text_to_str,
     vaildate_singlelang_text,
 )
-from telebot_components.utils import send_attachment
-from telebot_components.utils import html_link
+from telebot_components.utils import html_link, send_attachment
 
 
 @dataclass
