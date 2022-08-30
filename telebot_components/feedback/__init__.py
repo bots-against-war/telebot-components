@@ -20,6 +20,7 @@ from telebot_components.feedback.trello_integration import (
     MessageRepliedFromTrelloContext,
     TrelloIntegration,
 )
+from telebot_components.form.field import TelegramAttachment
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
 from telebot_components.stores.category import CategoryStore
@@ -36,7 +37,7 @@ from telebot_components.stores.language import (
     any_text_to_str,
     vaildate_singlelang_text,
 )
-from telebot_components.utils import html_link
+from telebot_components.utils import html_link, send_attachment
 
 
 @dataclass
@@ -340,6 +341,7 @@ class FeedbackHandler:
         user: tg.User,
         message_forwarder: Callable[[], Coroutine[None, None, tg.Message]],
         user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
+        export_to_trello: bool = True,
     ) -> Optional[tg.Message]:
         if self.banned_users_store is not None and await self.banned_users_store.is_banned(user.id):
             return None
@@ -420,7 +422,7 @@ class FeedbackHandler:
                 if self.recently_sent_confirmation_flag_store is not None:
                     await self.recently_sent_confirmation_flag_store.set_flag(user.id)
 
-        if self.trello_integration is not None:
+        if self.trello_integration is not None and export_to_trello:
             category = await self.category_store.get_user_category(user) if self.category_store else None
 
             def postprocess_card_description(descr: str) -> str:
@@ -440,7 +442,14 @@ class FeedbackHandler:
         return forwarded_msg
 
     async def emulate_user_message(
-        self, bot: AsyncTeleBot, user: tg.User, text: str, no_response: bool = False, **send_message_kwargs
+        self,
+        bot: AsyncTeleBot,
+        user: tg.User,
+        text: str,
+        attachment: Optional[TelegramAttachment] = None,
+        no_response: bool = False,
+        export_to_trello: bool = True,
+        **send_message_kwargs,
     ) -> Optional[tg.Message]:
         """Sometimes we want FeedbackHandler to act like the user has sent us a message, but without actually
         a message there (they might have pressed a button or interacted with the bot in some other way). This
@@ -448,7 +457,10 @@ class FeedbackHandler:
         """
 
         async def message_forwarder() -> tg.Message:
-            return await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
+            if attachment is None:
+                return await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
+            else:
+                return await send_attachment(bot, self.admin_chat_id, attachment, text)
 
         async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> Optional[tg.Message]:
             if no_response:
@@ -461,6 +473,7 @@ class FeedbackHandler:
             user=user,
             message_forwarder=message_forwarder,
             user_replier=user_replier,
+            export_to_trello=export_to_trello,
         )
 
     def setup(self, bot: AsyncTeleBot):
