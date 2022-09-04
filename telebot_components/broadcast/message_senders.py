@@ -20,8 +20,8 @@ class AbstractMessageSender(ABC):
     def __init_subclass__(cls) -> None:
         cls._registry[cls.concrete_name()] = cls
 
-    @abstractmethod
     @classmethod
+    @abstractmethod
     def concrete_name(self) -> str:
         ...
 
@@ -35,8 +35,8 @@ class AbstractMessageSender(ABC):
             "concrete_name": self.concrete_name(),
         }
 
-    @abstractmethod
     @classmethod
+    @abstractmethod
     def load_concrete(self, dump: dict) -> "AbstractMessageSender":
         ...
 
@@ -65,7 +65,7 @@ class DataclassMessageSender(AbstractMessageSender):
         return asdict(self)
 
 
-@dataclass
+@dataclass(frozen=True)
 class MessageCopySender(DataclassMessageSender):
     source_chat_id: int
     source_message_id: int
@@ -89,7 +89,7 @@ class MessageCopySender(DataclassMessageSender):
         )
 
 
-@dataclass
+@dataclass(frozen=True)
 class TextSender(DataclassMessageSender):
     text: str
     parse_mode: str = "HTML"

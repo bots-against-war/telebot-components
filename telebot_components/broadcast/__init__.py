@@ -94,7 +94,7 @@ class BroadcastHandler:
         """At least one person should be subscribed to the topic"""
         return await self.subscribers_by_topic_store.list_keys()
 
-    async def currently_active_topics(self) -> list[str]:
+    async def currently_broadcasting_topics(self) -> list[str]:
         """Topics we're broadcasting on at the moment"""
         return await self.current_broadcast_by_topic_store.list_keys()
 
@@ -128,6 +128,7 @@ class BroadcastHandler:
         return all(unsubscribe_results.values())
 
     async def topic_subscribers(self, topic: str) -> list[Subscriber]:
+        # TODO: make more efficient with HVALS
         user_ids = await self.subscribers_by_topic_store.list_subkeys(topic)
         maybe_subscribers = [await self.subscribers_by_topic_store.get_subkey(topic, user_id) for user_id in user_ids]
         return [s for s in maybe_subscribers if s is not None]
@@ -150,14 +151,18 @@ class BroadcastHandler:
             return False
 
     async def background_job(
-        self, bot: AsyncTeleBot, on_broadcast_start: Optional[BroadcastCallback] = None
+        self,
+        bot: AsyncTeleBot,
+        on_broadcast_start: Optional[BroadcastCallback] = None,
+        on_broadcast_end: Optional[BroadcastCallback] = None,
     ):
-        pass
+        await asyncio.gather(
+            self._consume_broadcasts_queue(on_broadcast_start),
+            self._send_current_broadcasts(bot, on_broadcast_end),
+        )
 
     @restart_on_errors
-    async def _process_broadcasts_queue(
-        self, on_broadcast_start: Optional[BroadcastCallback] = None
-    ):
+    async def _consume_broadcasts_queue(self, on_broadcast_start: Optional[BroadcastCallback] = None):
         while True:
             if time.time() < self.next_broadcast_queue_processing_time:
                 await asyncio.sleep(5)
@@ -180,7 +185,11 @@ class BroadcastHandler:
                     )
                     dequeued_broadcasts.append(qb)
                     if on_broadcast_start is not None:
-                        await on_broadcast_start(qb)
+                        try:
+                            await on_broadcast_start(qb)
+                        except:
+                            logger.exception("Unexpected error in on_broadcast_start callback, ignoring")
+                    self.is_broadcasting = True
                 else:
                     logger.info(
                         f"Overdue broadcast on topic {qb.topic} "
@@ -192,22 +201,29 @@ class BroadcastHandler:
                 for b in dequeued_broadcasts:
                     await self.broadcast_queue_store.remove(self.CONST_KEY, b)
                 queued_broadcasts = await self.broadcast_queue_store.all(self.CONST_KEY)
-            self.next_broadcast_queue_processing_time = min([qb.start_time for qb in queued_broadcasts])
+            self.next_broadcast_queue_processing_time = (
+                min([qb.start_time for qb in queued_broadcasts]) if queued_broadcasts else time.time() + 300
+            )
             logger.info(
                 f"The next broadcast queue processing will happen in {self.next_broadcast_queue_processing_time - time.time():.2f} sec"
             )
 
     @restart_on_errors
-    async def _broadcast(self, bot: AsyncTeleBot, on_broadcast_end: Optional[BroadcastCallback] = None):
-        BATCH_SIZE = 200  # each batch should take around 10-20 sec to complete
-        self.is_broadcasting = bool(await self.currently_active_topics())
+    async def _send_current_broadcasts(self, bot: AsyncTeleBot, on_broadcast_end: Optional[BroadcastCallback] = None):
+        # BATCH_SIZE = 200  # each batch should take around 10-20 sec to complete
+        # MESSAGES_PER_SECOND_LIMIT = 20  # telegram rate limit is around 30 msg/sec, but we play safe
+
+        BATCH_SIZE = 1  # testing
+        MESSAGES_PER_SECOND_LIMIT = 0.3  # testing
+
+        self.is_broadcasting = bool(await self.currently_broadcasting_topics())
         while True:
             await asyncio.sleep(1)
             if not self.is_broadcasting:
                 continue
 
             logger.info("Sending messages to subscribers")
-            topics_to_send = await self.currently_active_topics()
+            topics_to_send = await self.currently_broadcasting_topics()
             # sorting in decreasing priority order (top priority = first)
             topics_to_send.sort(key=self.topic_priority_key, reverse=True)
             logger.info(f"Current topic priority: {topics_to_send}")
@@ -228,7 +244,10 @@ class BroadcastHandler:
                     if broadcast is not None:
                         logger.info(f"Broadcast completed: {broadcast}")
                         if on_broadcast_end is not None:
-                            await on_broadcast_end(broadcast)
+                            try:
+                                await on_broadcast_end(broadcast)
+                            except Exception:
+                                logger.exception("Unexpected error in on_broadcast_end callback, ignoring")
                     continue
                 logger.info(f"{len(subscribers)} subscribers from topic {topic} with sender {broadcast}")
                 batch.extend([(broadcast, subscriber) for subscriber in subscribers])
@@ -239,35 +258,38 @@ class BroadcastHandler:
                 continue
 
             logger.info(f"Sending batch of {len(batch)} messages...")
-            success_count = 0
+            start_time = time.time()
             request_times: list[float] = []
-            for broadcast, subscriber in batch:
-                # respecting Telegram rate limit, see https://core.telegram.org/bots/faq#broadcasting-to-users
-                last_second_request_times = [t for t in request_times if t > time.time() - 1]
-                if len(last_second_request_times) >= 20:
-                    # if sending request right now would violate rate limit, we sleep for some time
-                    # so that the 1 second time window moves forward enough to include less than 20 requests
-                    last_20_request_times = sorted(last_second_request_times)[-20:]
-                    first_request_from_last_20_time = last_20_request_times[0]
-                    await asyncio.sleep(first_request_from_last_20_time - (time.time() - 1))
 
-                while True:  # retry loop
+            async def _send_broadcasted_message(
+                broadcast: QueuedBroadcast, subscriber: Subscriber, delay: float
+            ) -> bool:
+                await asyncio.sleep(delay)
+                for attempt in range(100):  # retry loop
                     try:
                         request_times.append(time.time())
                         await broadcast.sender.send(MessageSenderContext(bot, subscriber))
-                        success_count += 1
+                        return True
                     except telegram_api.ApiHTTPException as exc:
                         if exc.response.status == 429:
                             logger.exception(f"Rate limiting error received from Telegram: {exc!r}")
                             await asyncio.sleep(1)
-                            continue
                         else:
                             logger.info(f"HTTP error received from Telegram: {exc!r}")
+                            return False
                     except Exception:
                         logger.exception(f"Unexpected error sending message to {subscriber = }")
-                    break  # exiting retry loop
+                        return False
+                logger.error("All retry attempts exhausted :(")
+                return False
+
+            coroutines = [
+                _send_broadcasted_message(broadcast, subscriber, delay=float(message_idx) / MESSAGES_PER_SECOND_LIMIT)
+                for message_idx, (broadcast, subscriber) in enumerate(batch)
+            ]
+            success_flags = await asyncio.gather(*coroutines)
 
             logger.info(
-                f"Batch sent: {success_count} / {len(batch)} messages are successful; "
-                + f"took around {max(request_times) - min(request_times):.3f} sec"
+                f"Batch sent: {sum(success_flags)} / {len(batch)} messages are successful; "
+                + f"took {time.time() - start_time:.3f} sec"
             )
