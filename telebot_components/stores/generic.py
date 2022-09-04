@@ -81,6 +81,16 @@ class KeySetStore(GenericStore[ItemT]):
                 self.logger.exception("Unexpected error adding item to the set")
                 return False
 
+    async def pop_multiple(self, key: str_able, count: int) -> list[ItemT]:
+        dumps = await self.redis.spop(self._full_key(key), count=count)
+        if dumps is None:
+            return []
+        if isinstance(dumps, bytes):
+            dumps_list = [dumps]
+        else:
+            dumps_list = dumps
+        return [self.loader(d.decode("utf-8")) for d in dumps_list]
+
     async def remove(self, key: str_able, item: ItemT) -> bool:
         n_removed = await self.redis.srem(self._full_key(key), self.dumper(item).encode("utf-8"))
         return n_removed == 1

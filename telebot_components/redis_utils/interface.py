@@ -90,6 +90,11 @@ class RedisInterface(ABC):
         ...
 
     @abstractmethod
+    async def spop(self, name: str, count: Optional[int] = None) -> Optional[Union[bytes, list[bytes]]]:
+        """Remove and return a random member of set ``name``, or an array of members, when count is specified"""
+        ...
+
+    @abstractmethod
     async def incr(self, name: str) -> int:
         """Increments the value of ``key`` by 1 and return its value after the operation.
         If no key exists, the value will be initialized as 0 and then incremented.

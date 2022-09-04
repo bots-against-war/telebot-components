@@ -26,6 +26,10 @@ async def redis() -> AsyncGenerator[RedisInterface, None]:
             raise RuntimeError(f"Didn't found an empy Redis DB for testing")
         yield redis
         await redis.flushdb(asynchronous=False)
+        try:
+            await redis.connection.disconnect()
+        except Exception:
+            pass
     else:
         yield RedisEmulation()
 

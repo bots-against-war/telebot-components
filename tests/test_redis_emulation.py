@@ -51,6 +51,25 @@ async def test_sets(redis: RedisInterface):
     assert await redis.srem(key, value1) == 1
     assert set(await redis.smembers(key)) == {value2, value3}
 
+    value4, value5, value6 = generate_values(3)
+    await redis.sadd(key, value3, value4, value5, value6)
+    expected_set = {value2, value3, value4, value5, value6}
+
+    popped_value = await redis.spop(key)
+    assert isinstance(popped_value, bytes)
+    assert popped_value in expected_set
+    expected_set.remove(popped_value)
+    assert set(await redis.smembers(key)) == expected_set
+
+    popped_values = await redis.spop(key, count=2)
+    assert isinstance(popped_values, list)
+    for popped_value in popped_values:
+        assert popped_value in expected_set
+        expected_set.remove(popped_value)
+    assert set(await redis.smembers(key)) == expected_set
+
+    assert await redis.spop("non-existent-key") is None
+
 
 @pytest_skip_on_real_redis
 async def test_set_with_ttl(redis: RedisInterface, time_supplier: TimeSupplier):
