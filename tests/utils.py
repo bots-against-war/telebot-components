@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import Any, Callable
 from uuid import uuid4
@@ -20,9 +21,18 @@ class TimeSupplier:
         return self.current_time
 
     def mock_time_sleep(self, delay: float):
+        for _ in range(10000):
+            sum(range(100))  # spending CPU time on dummy calculations
         self.current_time += delay
 
     async def mock_asyncio_sleep(self, delay: float):
+        future = asyncio.Future[None]()
+
+        async def set_future_result():
+            future.set_result(None)
+
+        task = asyncio.create_task(set_future_result())
+        await future  # using dummy await here to delegate control to other coroutines
         self.current_time += delay
 
     def emulate_wait(self, delay: float):
@@ -62,3 +72,39 @@ def telegram_api_mock(form_data_handler: Callable[[dict[str, str]], dict[str, An
 
 def generate_str() -> str:
     return uuid4().hex
+
+
+# @dataclass
+# class MethodCall:
+#     args: tuple[Any, ...]
+#     kwargs: dict[str, Any]
+
+
+# def capturing(method):
+#     async def decorated(self: "MockTeleBot", *args, **kwargs):
+#         self.method_calls[method.__name__].append(MethodCall(args, kwargs))
+#         return await method(self, *args, **kwargs)
+
+#     return decorated
+
+
+# class MockTeleBot(AsyncTeleBot):
+#     """Please patch methods as needed when you add new tests"""
+
+#     method_calls: dict[str, list[MethodCall]] = defaultdict(list)
+
+#     @capturing
+#     async def delete_webhook(self, drop_pending_updates: Optional[bool] = None, timeout: Optional[float] = None):
+#         pass
+
+#     @capturing
+#     async def set_webhook(
+#         self,
+#         url: str,
+#         certificate: Optional[api.FileObject] = None,
+#         max_connections: Optional[int] = None,
+#         ip_address: Optional[str] = None,
+#         drop_pending_updates: Optional[bool] = None,
+#         timeout: Optional[float] = None,
+#     ):
+#         return True

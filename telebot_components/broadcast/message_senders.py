@@ -75,7 +75,7 @@ class MessageCopySender(DataclassMessageSender):
         return "MessageCopySender"
 
     @classmethod
-    def from_message(cls, message: tg.Message) -> 'MessageCopySender':
+    def from_message(cls, message: tg.Message) -> "MessageCopySender":
         return MessageCopySender(
             source_chat_id=message.chat.id,
             source_message_id=message.id,

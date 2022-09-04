@@ -14,7 +14,6 @@ from telebot import types as tg
 from telebot_components.constants.emoji import EMOJI
 from telebot_components.form.field import TelegramAttachment
 
-
 logger = logging.getLogger(__name__)
 
 

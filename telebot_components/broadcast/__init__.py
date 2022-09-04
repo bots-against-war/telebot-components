@@ -1,23 +1,30 @@
 import asyncio
-from dataclasses import dataclass
 import json
 import logging
 import random
 import time
+from dataclasses import dataclass
 from functools import partial
 from typing import Any, Awaitable, Callable, Optional, TypedDict, TypeVar
 
 from telebot import AsyncTeleBot
-from telebot import types as tg
 from telebot import api as telegram_api
+from telebot import types as tg
 
-from telebot_components.redis_utils.interface import RedisInterface
-from telebot_components.stores.generic import KeyDictStore, KeyListStore, KeySetStore, KeyValueStore
-from telebot_components.broadcast.message_senders import AbstractMessageSender, MessageSenderContext, TextSender
+from telebot_components.broadcast.message_senders import (
+    AbstractMessageSender,
+    MessageSenderContext,
+    TextSender,
+)
 from telebot_components.broadcast.subscriber import Subscriber
-
+from telebot_components.redis_utils.interface import RedisInterface
+from telebot_components.stores.generic import (
+    KeyDictStore,
+    KeyListStore,
+    KeySetStore,
+    KeyValueStore,
+)
 from telebot_components.utils import restart_on_errors
-
 
 logger = logging.getLogger(__name__)
 
