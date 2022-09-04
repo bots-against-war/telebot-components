@@ -128,10 +128,7 @@ class BroadcastHandler:
         return all(unsubscribe_results.values())
 
     async def topic_subscribers(self, topic: str) -> list[Subscriber]:
-        # TODO: make more efficient with HVALS
-        user_ids = await self.subscribers_by_topic_store.list_subkeys(topic)
-        maybe_subscribers = [await self.subscribers_by_topic_store.get_subkey(topic, user_id) for user_id in user_ids]
-        return [s for s in maybe_subscribers if s is not None]
+        return await self.subscribers_by_topic_store.list_values(topic)
 
     async def all_subscribers(self) -> dict[str, list[Subscriber]]:
         return await self._map_topics(self.topic_subscribers)
@@ -161,6 +158,7 @@ class BroadcastHandler:
             self._send_current_broadcasts(bot, on_broadcast_end),
         )
 
+    # TODO: prevent shutdown during broadcasting
     @restart_on_errors
     async def _consume_broadcasts_queue(self, on_broadcast_start: Optional[BroadcastCallback] = None):
         while True:
@@ -208,13 +206,11 @@ class BroadcastHandler:
                 f"The next broadcast queue processing will happen in {self.next_broadcast_queue_processing_time - time.time():.2f} sec"
             )
 
+    # TODO: prevent shutdown during broadcasting
     @restart_on_errors
     async def _send_current_broadcasts(self, bot: AsyncTeleBot, on_broadcast_end: Optional[BroadcastCallback] = None):
-        # BATCH_SIZE = 200  # each batch should take around 10-20 sec to complete
-        # MESSAGES_PER_SECOND_LIMIT = 20  # telegram rate limit is around 30 msg/sec, but we play safe
-
-        BATCH_SIZE = 1  # testing
-        MESSAGES_PER_SECOND_LIMIT = 0.3  # testing
+        BATCH_SIZE = 200  # each batch should take around 10-20 sec to complete
+        MESSAGES_PER_SECOND_LIMIT = 20  # telegram rate limit is around 30 msg/sec, but we play safe
 
         self.is_broadcasting = bool(await self.currently_broadcasting_topics())
         while True:

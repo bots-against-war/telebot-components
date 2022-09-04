@@ -279,7 +279,30 @@ async def test_key_dict_store(redis: RedisInterface):
     assert await user_data_store.get_subkey("bad", 1) == UserData(name="vlad", age=69)
 
     assert set(await user_data_store.list_subkeys("good")) == {"1", "2", "9"}
+
+    good_values = await user_data_store.list_values("good")
+    expected_good_values = [
+        UserData(name="alex", age=27),
+        UserData(name="maria", age=35),
+        UserData(name="sasha", age=21),
+    ]
+    assert len(good_values) == len(expected_good_values)
+    for v in good_values:
+        assert v in expected_good_values
+    for v in expected_good_values:
+        assert v in good_values
+
     assert set(await user_data_store.list_subkeys("bad")) == {"1", "9"}
+    bad_values = await user_data_store.list_values("bad")
+    expected_bad_values = [
+        UserData(name="vlad", age=69),
+        UserData(name="mark", age=25),
+    ]
+    assert len(bad_values) == len(expected_bad_values)
+    for v in bad_values:
+        assert v in expected_bad_values
+    for v in expected_bad_values:
+        assert v in bad_values
 
     await user_data_store.remove_subkey("good", 2)
     assert set(await user_data_store.list_subkeys("good")) == {"1", "9"}

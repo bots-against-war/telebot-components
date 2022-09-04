@@ -248,5 +248,9 @@ class KeyDictStore(GenericStore[ValueT]):
         subkeys = await self.redis.hkeys(self._full_key(key))
         return [subkey.decode("utf-8") for subkey in subkeys]
 
+    async def list_values(self, key: str_able) -> list[ValueT]:
+        value_dumps = await self.redis.hvals(self._full_key(key))
+        return [self.loader(dump.decode("utf-8")) for dump in value_dumps]
+
     async def remove_subkey(self, key: str_able, subkey: str_able) -> bool:
         return await self.redis.hdel(self._full_key(key), str(subkey)) == 1
