@@ -3,12 +3,15 @@ from dataclasses import asdict, dataclass, is_dataclass
 from typing import Type
 
 from telebot import AsyncTeleBot
+from telebot import types as tg
+
+from telebot_components.broadcast.subscriber import Subscriber
 
 
 @dataclass
 class MessageSenderContext:
     bot: AsyncTeleBot
-    user_id: int
+    subscriber: Subscriber
 
 
 class AbstractMessageSender(ABC):
@@ -71,9 +74,16 @@ class MessageCopySender(DataclassMessageSender):
     def concrete_name(self) -> str:
         return "MessageCopySender"
 
+    @classmethod
+    def from_message(cls, message: tg.Message) -> 'MessageCopySender':
+        return MessageCopySender(
+            source_chat_id=message.chat.id,
+            source_message_id=message.id,
+        )
+
     async def send(self, context: MessageSenderContext):
         await context.bot.copy_message(
-            chat_id=context.user_id,
+            chat_id=context.subscriber["user_id"],
             from_chat_id=self.source_chat_id,
             message_id=self.source_message_id,
         )
@@ -90,7 +100,7 @@ class TextSender(DataclassMessageSender):
 
     async def send(self, context: MessageSenderContext):
         await context.bot.send_message(
-            chat_id=context.user_id,
+            chat_id=context.subscriber["user_id"],
             text=self.text,
             parse_mode=self.parse_mode,
         )
