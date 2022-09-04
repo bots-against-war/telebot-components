@@ -52,6 +52,7 @@ def create_broadcsting_bot(redis: RedisInterface, token: str, admin_chat_id: int
         topic = message.text_content.removeprefix("/broadcast").strip()
         if not topic:
             await bot.reply_to(message, "Please specify topic to broadcast the message")
+            return
         await broadcast_handler.new_broadcast(topic, sender=MessageCopySender.from_message(message.reply_to_message))
 
     async def on_broadcast_start(queued_broadcast: QueuedBroadcast):
