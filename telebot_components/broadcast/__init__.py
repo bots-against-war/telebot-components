@@ -210,7 +210,7 @@ class BroadcastHandler:
                 min([qb.start_time for qb in queued_broadcasts]) if queued_broadcasts else time.time() + 300
             )
             logger.info(
-                f"The next broadcast queue processing will happen in {self.next_broadcast_queue_processing_time - time.time():.2f} sec"
+                f"The next broadcast queue processing scheduled in {self.next_broadcast_queue_processing_time - time.time():.2f} sec"
             )
 
     # TODO: prevent shutdown during broadcasting
@@ -256,7 +256,7 @@ class BroadcastHandler:
                 batch.extend([(broadcast, subscriber) for subscriber in subscribers])
 
             if not batch:
-                logger.info("No subscribers to sent to, seems like we've finished sending messages, standing by")
+                logger.info("No subscribers to send to, seems like we're done for now")
                 self.is_broadcasting = False
                 continue
 

@@ -13,8 +13,15 @@ from telebot_components.broadcast.message_senders import (
 from telebot_components.redis_utils.interface import RedisInterface
 from tests.utils import TimeSupplier
 
-#                  subscriber id, mock message sender id, sent at
-sent_messages: list[tuple[int, int, float]] = []
+
+@dataclass(frozen=True)
+class MockSentMessage:
+    subscriber_id: int
+    mock_message_sender_id: int
+    sent_at: float
+
+
+sent_messages: list[MockSentMessage] = []
 
 
 @dataclass(frozen=True)
@@ -26,7 +33,7 @@ class MockMessageSender(DataclassMessageSender):
         return "MockMessageSender"
 
     async def send(self, context: MessageSenderContext):
-        sent_messages.append((context.subscriber["user_id"], self.id_, time.time()))
+        sent_messages.append(MockSentMessage(context.subscriber["user_id"], self.id_, time.time()))
 
 
 @pytest.fixture
@@ -41,6 +48,7 @@ async def test_broadcast_handler_basic(broadcast_handler: BroadcastHandler, time
     broadcast_completed = asyncio.Future[None]()
 
     async def on_broadcast_end(queued_broadcast: QueuedBroadcast):
+        print(broadcast_completed)
         broadcast_completed.set_result(None)
 
     for user_id in range(10000):
@@ -62,3 +70,8 @@ async def test_broadcast_handler_basic(broadcast_handler: BroadcastHandler, time
     await broadcast_completed
 
     assert len(sent_messages) == 10000
+    assert {m.subscriber_id for m in sent_messages} == set(range(10000))
+
+    background_job_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await background_job_task

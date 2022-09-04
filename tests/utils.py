@@ -29,10 +29,14 @@ class TimeSupplier:
         future = asyncio.Future[None]()
 
         async def set_future_result():
-            future.set_result(None)
+            if not future.done():
+                future.set_result(None)
 
         task = asyncio.create_task(set_future_result())
-        await future  # using dummy await here to delegate control to other coroutines
+        try:
+            await future  # using dummy await here to delegate control to other coroutines
+        except Exception:
+            pass
         self.current_time += delay
 
     def emulate_wait(self, delay: float):
