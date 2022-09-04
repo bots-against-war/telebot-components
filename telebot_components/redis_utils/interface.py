@@ -153,6 +153,11 @@ class RedisInterface(ABC):
         ...
 
     @abstractmethod
+    async def hvals(self, name: str) -> list[bytes]:
+        """Return the list of values within hash ``name``"""
+        ...
+
+    @abstractmethod
     async def hdel(self, name: str, *keys: str) -> int:
         """Delete ``keys`` from hash ``name``"""
         ...

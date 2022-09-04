@@ -187,6 +187,9 @@ class RedisEmulation(RedisInterface):
         # so we have to re-encode keys from a hash
         return [key.encode("utf-8") for key in self.hashes.get(name, {}).keys()]
 
+    async def hvals(self, name: str) -> list[bytes]:
+        return [value for value in self.hashes.get(name, {}).values()]
+
     async def hdel(self, name: str, *keys: str) -> int:
         count = 0
         hash_ = self.hashes.get(name, {})
@@ -283,6 +286,10 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
 
     async def hkeys(self, name: str) -> list[bytes]:
         self._stack.append(self.redis_em.hkeys(name))
+        return []
+
+    async def hvals(self, name: str) -> list[bytes]:
+        self._stack.append(self.redis_em.hvals(name))
         return []
 
     async def hdel(self, name: str, *keys: str) -> int:
