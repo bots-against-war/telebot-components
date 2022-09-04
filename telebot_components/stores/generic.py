@@ -70,15 +70,19 @@ ItemT = TypeVar("ItemT")
 @dataclass
 class KeySetStore(GenericStore[ItemT]):
     async def add(self, key: str_able, item: ItemT, reset_ttl: bool = True) -> bool:
+        return await self.add_multiple(key, [item], reset_ttl)
+
+    async def add_multiple(self, key: str_able, items: list[ItemT], reset_ttl: bool = True) -> bool:
         async with self.redis.pipeline() as pipe:
-            await pipe.sadd(self._full_key(key), self.dumper(item).encode("utf-8"))
+            item_dumps = [self.dumper(item).encode("utf-8") for item in items]
+            await pipe.sadd(self._full_key(key), *item_dumps)
             if reset_ttl and self.expiration_time is not None:
                 await pipe.expire(self._full_key(key), self.expiration_time)
             try:
                 results = await pipe.execute()
                 return all(r == 1 for r in results)
             except Exception:
-                self.logger.exception("Unexpected error adding item to the set")
+                self.logger.exception("Unexpected error adding items to the set")
                 return False
 
     async def pop_multiple(self, key: str_able, count: int) -> list[ItemT]:

@@ -161,11 +161,14 @@ async def test_key_set_store(redis: RedisInterface, key: str_able, jsonable_valu
     assert await store.drop(key)
     assert await store.all(key) == set()
 
-    values = [jsonable_value_factory() for _ in range(10)]
-    for value in values:
+    values_one_by_one = [jsonable_value_factory() for _ in range(10)]
+    for value in values_one_by_one:
         await store.add(key, value)
 
-    values_set = set(values)
+    values_bulk = [jsonable_value_factory() for _ in range(10)]
+    await store.add_multiple(key, values_bulk)
+
+    values_set = set(values_one_by_one + values_bulk)
     popped_set = set(await store.pop_multiple(key, count=3))
     assert popped_set.issubset(values_set)
     for popped in popped_set:
