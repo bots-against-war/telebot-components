@@ -19,6 +19,8 @@ from telebot_components.utils import (
     trim_with_ellipsis,
 )
 
+from telebot_components.utils.strings import html_link, mask, remove_command_prefix
+
 
 @pytest.mark.parametrize(
     "paragraphs, expected_joined",
@@ -203,3 +205,44 @@ def test_alphabet_hash():
 
     assert text_hash(1312, "foo") == "tbape0"
     assert text_hash(817269837164, "foo") == "hGSS2k"
+
+
+@pytest.mark.parametrize(
+    "original, open_ratio, expected_masked",
+    [
+        pytest.param("hello world", 0.3, "hel********"),
+        pytest.param("hello world", 0.5, "hello******"),
+        pytest.param("abcdefg", 0, "*******"),
+        pytest.param("abcdefg", 1, "abcdefg"),
+    ],
+)
+def test_mask_string(original: str, open_ratio: float, expected_masked: str):
+    assert mask(original, open_ratio) == expected_masked
+
+
+@pytest.mark.parametrize(
+    "original, expected",
+    [
+        pytest.param("hi", "hi"),
+        pytest.param("/command", ""),
+        pytest.param("/command    ", ""),
+        pytest.param("/command payload", "payload"),
+        pytest.param("/command@bot_username", ""),
+        pytest.param("/command@bot_username payload", "payload"),
+        pytest.param("/command@bot_username        payload        ", "payload"),
+    ],
+)
+def test_remove_command_prefix(original: str, expected: str):
+    assert remove_command_prefix(original) == expected
+
+
+@pytest.mark.parametrize(
+    "href, text, expected",
+    [
+        pytest.param("", "", '<a href=""></a>'),
+        pytest.param("", "hello", '<a href="">hello</a>'),
+        pytest.param("google.com", "world", '<a href="google.com">world</a>'),
+    ],
+)
+def test_html_link(href: str, text: str, expected: str):
+    assert html_link(href, text) == expected
