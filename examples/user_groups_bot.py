@@ -19,12 +19,12 @@ def create_bot_with_user_groups(token: str, redis: RedisInterface):
     enemies_group = UserGroupStore(redis, bot_prefix, "enemies")
 
     @bot.message_handler(commands=["kiss"])
-    @friends_group.membership_required(bot)
+    @friends_group.membership_required(bot, membership_required_reply_text="i won't kiss you")
     async def start_cmd_handler_for_friends(message: tg.Message):
         await bot.send_message(message.from_user.id, "<3")
 
     @bot.message_handler(commands=["fight"])
-    @enemies_group.membership_required(bot)
+    @enemies_group.membership_required(bot, membership_required_reply_text="i won't fight you")
     async def start_cmd_handler_for_enemies(message: tg.Message):
         await bot.send_message(message.from_user.id, "👊👊👊")
 
@@ -42,7 +42,7 @@ def create_bot_with_user_groups(token: str, redis: RedisInterface):
             await bot.reply_to(message, "unknown group")
             return
         await group.add_identity(identity)
-        await bot.reply_to(message, f"added {identity!r} to {group_name!r}")
+        await bot.reply_to(message, f"added {identity!r} as {group_name!r}")
 
     return BotRunner(
         bot_prefix=bot_prefix,
