@@ -13,7 +13,7 @@ class BannedUsersStore:
 
     Currently only supports permanent ban.
 
-    NOTE: deprecated, for new applications user UserGroupStore
+    NOTE: deprecated, for new applications use UserGroupStore
     """
 
     def __init__(self, redis: RedisInterface, bot_prefix: str, cached: bool):
