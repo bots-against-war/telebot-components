@@ -78,6 +78,7 @@ class UserGroupStore:
                             await bot.send_message(message.from_user.id, membership_required_reply_text)
                 except Exception:
                     logger.exception("Unexpected error in membership_required decorator")
+                    raise
 
             return wrapped  # type: ignore
 
