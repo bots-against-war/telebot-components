@@ -4,6 +4,7 @@ import re
 
 def mask(string: str, open_ratio: float) -> str:
     """some-very-secret-string -> some-ver****************"""
+    open_ratio = max(min(open_ratio, 1.0), 0.0)
     open_characters = math.floor(len(string) * open_ratio)
     return string[:open_characters] + "*" * (len(string) - open_characters)
 

@@ -214,6 +214,8 @@ def test_alphabet_hash():
         pytest.param("hello world", 0.5, "hello******"),
         pytest.param("abcdefg", 0, "*******"),
         pytest.param("abcdefg", 1, "abcdefg"),
+        pytest.param("abcdefg", 1000, "abcdefg"),
+        pytest.param("abcdefg", -1000, "*******"),
     ],
 )
 def test_mask_string(original: str, open_ratio: float, expected_masked: str):
