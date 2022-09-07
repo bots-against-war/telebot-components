@@ -18,7 +18,6 @@ from telebot_components.utils import (
     to_yaml_unsafe,
     trim_with_ellipsis,
 )
-
 from telebot_components.utils.strings import html_link, mask, remove_command_prefix
 
 

@@ -5,14 +5,15 @@ from typing import Any, Awaitable, Callable, Coroutine, Optional
 from telebot import AsyncTeleBot, invoke_handler
 from telebot import types as tg
 from telebot.types.service import HandlerFunction
+
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import SetStore
-
 
 logger = logging.getLogger(__name__)
 
 
 unity = lambda x: x
+
 
 async def telegram_user_id_identity(user: tg.User) -> str:
     return str(user.id)
@@ -66,7 +67,6 @@ class UserGroupStore:
 
     def membership_required(self, bot: AsyncTeleBot, membership_required_reply_text: Optional[str] = None):
         def decorator(handler_func: HandlerFunction[tg.Message]) -> HandlerFunction[tg.Message]:
-
             @functools.wraps(handler_func)
             async def wrapped(*args) -> None:
                 try:

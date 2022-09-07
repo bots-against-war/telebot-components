@@ -3,10 +3,9 @@ import logging
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.runner import BotRunner
+
 from telebot_components.redis_utils.interface import RedisInterface
-
 from telebot_components.stores.user_group import UserGroupStore
-
 
 logging.basicConfig(level=logging.DEBUG)
 

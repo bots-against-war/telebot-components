@@ -18,7 +18,7 @@ AirtableValueT = Union[str, int, float, bool, list[str], dict]
 
 class AirtableConfig(TypedDict):
     """Serialized Airtable table configuration.
-    
+
     column_id_by_name has the following format:
     {
         "name": "fldlKmD92YqW6Pdlw",
