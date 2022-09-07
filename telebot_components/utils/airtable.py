@@ -17,9 +17,16 @@ AirtableValueT = Union[str, int, float, bool, list[str], dict]
 
 
 class AirtableConfig(TypedDict):
-    """
-    Typically loaded from secret store, can be generated from Airtable API docs
-    with scripts/airtable_config_parser.py
+    """Serialized Airtable table configuration.
+    
+    column_id_by_name has the following format:
+    {
+        "name": "fldlKmD92YqW6Pdlw",
+        "age": "fldwwBJb1FSA03Yvg",
+        ...
+    }
+    here "fldXXXXXXXXXXXXXX" values are provided by Airtable API docs, and "name", "age" etc must correspond
+    to the names of AirtableColumnEnumT implementation members
     """
 
     base_id: str
