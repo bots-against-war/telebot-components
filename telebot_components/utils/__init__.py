@@ -141,7 +141,12 @@ class LockRegistry:
             return maybe_lock
 
 
-async def send_attachment(bot: AsyncTeleBot, chat_id: Union[int, str], attachment: TelegramAttachment, caption: str):
+async def send_attachment(
+    bot: AsyncTeleBot,
+    chat_id: Union[int, str],
+    attachment: TelegramAttachment,
+    caption: Optional[str] = None,
+):
     if isinstance(attachment, list) and all(isinstance(att, tg.PhotoSize) for att in attachment):
         return await bot.send_photo(chat_id, photo=attachment[0].file_id, caption=caption)
     elif isinstance(attachment, tg.Document):
