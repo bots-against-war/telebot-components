@@ -12,6 +12,8 @@ class BannedUsersStore:
     if a user is banned far more often than we need to ban someone.
 
     Currently only supports permanent ban.
+
+    NOTE: deprecated, for new applications use UserGroupStore
     """
 
     def __init__(self, redis: RedisInterface, bot_prefix: str, cached: bool):
