@@ -78,37 +78,18 @@ def generate_str() -> str:
     return uuid4().hex
 
 
-# @dataclass
-# class MethodCall:
-#     args: tuple[Any, ...]
-#     kwargs: dict[str, Any]
+def assert_required_subdict(actual: dict, required: dict):
+    """Actual dict is allowed to have extra keys beyond those required"""
+    for required_key, required_value in required.items():
+        assert required_key in actual, f"{actual} misses required key {required_key!r}"
+        assert (
+            actual[required_key] == required_value
+        ), f"{actual} contains {required_key!r}: {actual[required_key]} != {required_value}"
 
 
-# def capturing(method):
-#     async def decorated(self: "MockTeleBot", *args, **kwargs):
-#         self.method_calls[method.__name__].append(MethodCall(args, kwargs))
-#         return await method(self, *args, **kwargs)
-
-#     return decorated
-
-
-# class MockTeleBot(AsyncTeleBot):
-#     """Please patch methods as needed when you add new tests"""
-
-#     method_calls: dict[str, list[MethodCall]] = defaultdict(list)
-
-#     @capturing
-#     async def delete_webhook(self, drop_pending_updates: Optional[bool] = None, timeout: Optional[float] = None):
-#         pass
-
-#     @capturing
-#     async def set_webhook(
-#         self,
-#         url: str,
-#         certificate: Optional[api.FileObject] = None,
-#         max_connections: Optional[int] = None,
-#         ip_address: Optional[str] = None,
-#         drop_pending_updates: Optional[bool] = None,
-#         timeout: Optional[float] = None,
-#     ):
-#         return True
+def assert_list_of_required_subdicts(actual_dicts: list[dict], required_subdicts: list[dict]):
+    assert len(actual_dicts) == len(
+        required_subdicts
+    ), f"actual dicts list has mismatching size: {len(actual_dicts)} != {len(required_subdicts)}"
+    for actual, required in zip(actual_dicts, required_subdicts):
+        assert_required_subdict(actual, required)
