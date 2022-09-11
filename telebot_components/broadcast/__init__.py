@@ -5,11 +5,12 @@ import random
 import time
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Awaitable, Callable, Optional, TypedDict, TypeVar
+from typing import Any, Awaitable, Callable, Optional, TypeVar
 
 from telebot import AsyncTeleBot
 from telebot import api as telegram_api
 from telebot import types as tg
+from telebot.graceful_shutdown import PreventShutdown
 
 from telebot_components.broadcast.message_senders import (
     AbstractMessageSender,
@@ -22,8 +23,6 @@ from telebot_components.utils import restart_on_errors
 
 logger = logging.getLogger(__name__)
 
-
-from telebot.graceful_shutdown import PreventShutdown
 
 prevent_shutdown_on_consuming_queue = PreventShutdown("consuming broadcast queue")
 prevent_shutdown_on_broadcasting = PreventShutdown("broadcasting")
