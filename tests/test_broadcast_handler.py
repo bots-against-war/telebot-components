@@ -32,7 +32,7 @@ class MockMessageSender(DataclassMessageSender):
     def concrete_name(self) -> str:
         return "MockMessageSender"
 
-    async def send(self, context: MessageSenderContext):
+    async def send(self, context: MessageSenderContext) -> None:
         sent_messages.append(MockSentMessage(context.subscriber["user_id"], self.id_, time.time()))
 
 
@@ -71,6 +71,7 @@ async def test_broadcast_handler_basic(broadcast_handler: BroadcastHandler, time
 
     assert len(sent_messages) == 10000
     assert {m.subscriber_id for m in sent_messages} == set(range(10000))
+    assert {m.mock_message_sender_id for m in sent_messages} == {1312}
 
     background_job_task.cancel()
     with pytest.raises(asyncio.CancelledError):

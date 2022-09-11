@@ -222,7 +222,7 @@ class BroadcastHandler:
         self.is_broadcasting = bool(await self.currently_broadcasting_topics())
         while True:
             async with prevent_shutdown_on_broadcasting.allow_shutdown():
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.1)
             if not self.is_broadcasting:
                 continue
 

@@ -47,7 +47,7 @@ class AbstractMessageSender(ABC):
         return type_.load_concrete(dump["concrete_dump"])
 
     @abstractmethod
-    async def send(self, context: MessageSenderContext):
+    async def send(self, context: MessageSenderContext) -> None:
         ...
 
 
@@ -81,7 +81,7 @@ class MessageCopySender(DataclassMessageSender):
             source_message_id=message.id,
         )
 
-    async def send(self, context: MessageSenderContext):
+    async def send(self, context: MessageSenderContext) -> None:
         await context.bot.copy_message(
             chat_id=context.subscriber["user_id"],
             from_chat_id=self.source_chat_id,
@@ -98,7 +98,7 @@ class TextSender(DataclassMessageSender):
     def concrete_name(self) -> str:
         return "TextSender"
 
-    async def send(self, context: MessageSenderContext):
+    async def send(self, context: MessageSenderContext) -> None:
         await context.bot.send_message(
             chat_id=context.subscriber["user_id"],
             text=self.text,
