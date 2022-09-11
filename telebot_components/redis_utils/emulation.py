@@ -2,7 +2,7 @@ import time as time_module
 from collections import defaultdict
 from datetime import timedelta
 from fnmatch import fnmatch
-from typing import Coroutine, Mapping, Optional
+from typing import Coroutine, Mapping, Optional, Union
 
 from telebot_components.redis_utils.interface import (
     RedisCmdReturn,
@@ -82,6 +82,25 @@ class RedisEmulation(RedisInterface):
     async def smembers(self, name: str) -> list[bytes]:
         self._evict_if_expired(name)
         return list(self.sets[name])
+
+    async def spop(self, name: str, count: Optional[int] = None) -> Optional[Union[bytes, list[bytes]]]:
+        self._evict_if_expired(name)
+        set_ = self.sets.get(name)
+        if set_ is None:
+            return None
+        if count is None:
+            try:
+                return set_.pop()
+            except KeyError:
+                return None
+        else:
+            popped: list[bytes] = []
+            for _ in range(count):
+                try:
+                    popped.append(set_.pop())
+                except KeyError:
+                    break
+            return popped
 
     async def sismember(self, name: str, value: bytes) -> int:
         self._evict_if_expired(name)
@@ -168,6 +187,9 @@ class RedisEmulation(RedisInterface):
         # so we have to re-encode keys from a hash
         return [key.encode("utf-8") for key in self.hashes.get(name, {}).keys()]
 
+    async def hvals(self, name: str) -> list[bytes]:
+        return [value for value in self.hashes.get(name, {}).values()]
+
     async def hdel(self, name: str, *keys: str) -> int:
         count = 0
         hash_ = self.hashes.get(name, {})
@@ -220,6 +242,10 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
         self._stack.append(self.redis_em.sismember(name, value))
         return 0
 
+    async def spop(self, name: str, count: Optional[int] = None) -> Optional[Union[bytes, list[bytes]]]:
+        self._stack.append(self.redis_em.spop(name, count))
+        return None
+
     async def incr(self, name: str) -> int:
         self._stack.append(self.redis_em.incr(name))
         return 0
@@ -260,6 +286,10 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
 
     async def hkeys(self, name: str) -> list[bytes]:
         self._stack.append(self.redis_em.hkeys(name))
+        return []
+
+    async def hvals(self, name: str) -> list[bytes]:
+        self._stack.append(self.redis_em.hvals(name))
         return []
 
     async def hdel(self, name: str, *keys: str) -> int:

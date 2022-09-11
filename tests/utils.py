@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import Any, Callable
 from uuid import uuid4
@@ -20,9 +21,22 @@ class TimeSupplier:
         return self.current_time
 
     def mock_time_sleep(self, delay: float):
+        for _ in range(10000):
+            sum(range(100))  # spending CPU time on dummy calculations
         self.current_time += delay
 
     async def mock_asyncio_sleep(self, delay: float):
+        future = asyncio.Future[None]()
+
+        async def set_future_result():
+            if not future.done():
+                future.set_result(None)
+
+        task = asyncio.create_task(set_future_result())
+        try:
+            await future  # using dummy await here to delegate control to other coroutines
+        except Exception:
+            pass
         self.current_time += delay
 
     def emulate_wait(self, delay: float):
@@ -62,3 +76,20 @@ def telegram_api_mock(form_data_handler: Callable[[dict[str, str]], dict[str, An
 
 def generate_str() -> str:
     return uuid4().hex
+
+
+def assert_required_subdict(actual: dict, required: dict):
+    """Actual dict is allowed to have extra keys beyond those required"""
+    for required_key, required_value in required.items():
+        assert required_key in actual, f"{actual} misses required key {required_key!r}"
+        assert (
+            actual[required_key] == required_value
+        ), f"{actual} contains {required_key!r}: {actual[required_key]} != {required_value}"
+
+
+def assert_list_of_required_subdicts(actual_dicts: list[dict], required_subdicts: list[dict]):
+    assert len(actual_dicts) == len(
+        required_subdicts
+    ), f"actual dicts list has mismatching size: {len(actual_dicts)} != {len(required_subdicts)}"
+    for actual, required in zip(actual_dicts, required_subdicts):
+        assert_required_subdict(actual, required)

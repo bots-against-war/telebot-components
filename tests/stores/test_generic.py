@@ -1,6 +1,7 @@
+import random
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Optional, TypedDict
+from typing import Any, Callable, Optional, TypedDict
 from uuid import uuid4
 
 import pytest
@@ -131,35 +132,62 @@ async def test_key_list_store(redis: RedisInterface, key: str_able, jsonable_val
     assert await store.all(key) == []
 
 
-@pytest.fixture(params=[17, "stinky", None])
-def hashable_value(request: fixtures.SubRequest) -> Any:
+@pytest.fixture(
+    params=[
+        lambda: random.randint(0, 10000),
+        lambda: "".join(random.choices("stinky", k=150)),
+    ]
+)
+def jsonable_value_factory(request: fixtures.SubRequest) -> Callable[[], Any]:
     return request.param
 
 
-async def test_key_set_store(redis: RedisInterface, key: str_able, hashable_value: Any):
+async def test_key_set_store(redis: RedisInterface, key: str_able, jsonable_value_factory: Callable[[], Any]):
     store = KeySetStore[Any](
         name="testing",
         prefix=generate_str(),
         redis=redis,
     )
-    for _ in range(10):
-        await store.add(key, hashable_value)
-    assert hashable_value in await store.all(key)
-    assert await store.includes(key, hashable_value)
+
+    values = [jsonable_value_factory() for _ in range(10)]
+
+    for value in values:
+        await store.add(key, value)
+
+    for value in values:
+        assert value in await store.all(key)
+        assert await store.includes(key, value)
+
     assert await store.drop(key)
     assert await store.all(key) == set()
 
+    values_one_by_one = [jsonable_value_factory() for _ in range(10)]
+    for value in values_one_by_one:
+        await store.add(key, value)
 
-async def test_set_store(redis: RedisInterface, hashable_value: Any):
+    values_bulk = [jsonable_value_factory() for _ in range(10)]
+    await store.add_multiple(key, values_bulk)
+
+    values_set = set(values_one_by_one + values_bulk)
+    popped_set = set(await store.pop_multiple(key, count=3))
+    assert popped_set.issubset(values_set)
+    for popped in popped_set:
+        values_set.discard(popped)
+    assert await store.all(key) == values_set
+
+
+async def test_set_store(redis: RedisInterface, jsonable_value_factory: Any):
     store = SetStore[Any](
         name="testing",
         prefix=generate_str(),
         redis=redis,
     )
-    for _ in range(10):
-        await store.add(hashable_value)
-    assert hashable_value in await store.all()
-    assert await store.includes(hashable_value)
+    values = [jsonable_value_factory() for _ in range(10)]
+    for value in values:
+        await store.add(value)
+    for value in values:
+        assert value in await store.all()
+        assert await store.includes(value)
     assert await store.drop()
     assert await store.all() == set()
 
@@ -251,7 +279,30 @@ async def test_key_dict_store(redis: RedisInterface):
     assert await user_data_store.get_subkey("bad", 1) == UserData(name="vlad", age=69)
 
     assert set(await user_data_store.list_subkeys("good")) == {"1", "2", "9"}
+
+    good_values = await user_data_store.list_values("good")
+    expected_good_values = [
+        UserData(name="alex", age=27),
+        UserData(name="maria", age=35),
+        UserData(name="sasha", age=21),
+    ]
+    assert len(good_values) == len(expected_good_values)
+    for v in good_values:
+        assert v in expected_good_values
+    for v in expected_good_values:
+        assert v in good_values
+
     assert set(await user_data_store.list_subkeys("bad")) == {"1", "9"}
+    bad_values = await user_data_store.list_values("bad")
+    expected_bad_values = [
+        UserData(name="vlad", age=69),
+        UserData(name="mark", age=25),
+    ]
+    assert len(bad_values) == len(expected_bad_values)
+    for v in bad_values:
+        assert v in expected_bad_values
+    for v in expected_bad_values:
+        assert v in bad_values
 
     await user_data_store.remove_subkey("good", 2)
     assert set(await user_data_store.list_subkeys("good")) == {"1", "9"}

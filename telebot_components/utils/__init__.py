@@ -1,8 +1,10 @@
 import asyncio
+import functools
 import hashlib
 import io
+import logging
 import string
-from typing import Any, Optional, Union
+from typing import Any, Awaitable, Callable, Optional, TypeVar, Union
 from weakref import WeakValueDictionary
 
 from ruamel.yaml import YAML  # type: ignore
@@ -11,6 +13,8 @@ from telebot import types as tg
 
 from telebot_components.constants.emoji import EMOJI
 from telebot_components.form.field import TelegramAttachment
+
+logger = logging.getLogger(__name__)
 
 
 def telegram_message_url(
@@ -90,7 +94,7 @@ def markdown_link(href: str, text: str) -> str:
 def _pretty_hash_from_alphabet(some_id: int, bot_prefix: str, length: int, alphabet: list[str]) -> str:
     """Do not use for any security-related hashing, just for user-facing anonymized signatures"""
     if len(alphabet) > 65536:
-        raise ValueError(f"Alphabet has length {len(alphabet)}, exceeding the max supported value of 1024")
+        raise ValueError(f"Alphabet has length {len(alphabet)}, exceeding the max supported value of 65536")
 
     try:
         abs_bytes = abs(some_id).to_bytes(64, "big")
@@ -159,3 +163,20 @@ async def send_attachment(
         return await bot.send_audio(chat_id, audio=attachment.file_id, caption=caption)
     else:
         raise TypeError(f"Can not send attachment of type: {type(attachment)!r}.")
+
+
+AsyncFunctionT = TypeVar("AsyncFunctionT", bound=Callable[..., Awaitable])
+
+
+def restart_on_errors(function: AsyncFunctionT) -> AsyncFunctionT:
+    """Decorator to log unexpected errors, primarily in background jobs"""
+
+    @functools.wraps(function)
+    async def decorated(*args, **kwargs):
+        while True:
+            try:
+                return await function(*args, **kwargs)
+            except Exception:
+                logger.exception(f"Unexpected error in {function.__qualname__}, restarting")
+
+    return decorated  # type: ignore
