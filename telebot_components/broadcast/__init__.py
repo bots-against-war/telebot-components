@@ -14,19 +14,19 @@ from telebot import types as tg
 from telebot_components.broadcast.message_senders import (
     AbstractMessageSender,
     MessageSenderContext,
-    TextSender,
 )
 from telebot_components.broadcast.subscriber import Subscriber
 from telebot_components.redis_utils.interface import RedisInterface
-from telebot_components.stores.generic import (
-    KeyDictStore,
-    KeyListStore,
-    KeySetStore,
-    KeyValueStore,
-)
+from telebot_components.stores.generic import KeyDictStore, KeySetStore, KeyValueStore
 from telebot_components.utils import restart_on_errors
 
 logger = logging.getLogger(__name__)
+
+
+from telebot.graceful_shutdown import PreventShutdown
+
+prevent_shutdown_on_consuming_queue = PreventShutdown("consuming broadcast queue")
+prevent_shutdown_on_broadcasting = PreventShutdown("broadcasting")
 
 
 @dataclass(frozen=True)
@@ -165,12 +165,13 @@ class BroadcastHandler:
             self._send_current_broadcasts(bot, on_broadcast_end),
         )
 
-    # TODO: prevent shutdown during broadcasting
+    @prevent_shutdown_on_consuming_queue
     @restart_on_errors
     async def _consume_broadcasts_queue(self, on_broadcast_start: Optional[BroadcastCallback] = None):
         while True:
             if time.time() < self.next_broadcast_queue_processing_time:
-                await asyncio.sleep(5)
+                async with prevent_shutdown_on_consuming_queue.allow_shutdown():
+                    await asyncio.sleep(5)
                 continue
             logger.info("Processing broadcast queue")
             queued_broadcasts = await self.broadcast_queue_store.all(self.CONST_KEY)
@@ -213,7 +214,7 @@ class BroadcastHandler:
                 f"The next broadcast queue processing scheduled in {self.next_broadcast_queue_processing_time - time.time():.2f} sec"
             )
 
-    # TODO: prevent shutdown during broadcasting
+    @prevent_shutdown_on_broadcasting
     @restart_on_errors
     async def _send_current_broadcasts(self, bot: AsyncTeleBot, on_broadcast_end: Optional[BroadcastCallback] = None):
         BATCH_SIZE = 200  # each batch should take around 10-20 sec to complete
@@ -221,7 +222,8 @@ class BroadcastHandler:
 
         self.is_broadcasting = bool(await self.currently_broadcasting_topics())
         while True:
-            await asyncio.sleep(1)
+            async with prevent_shutdown_on_broadcasting.allow_shutdown():
+                await asyncio.sleep(1)
             if not self.is_broadcasting:
                 continue
 
@@ -262,20 +264,18 @@ class BroadcastHandler:
 
             logger.info(f"Sending batch of {len(batch)} messages...")
             start_time = time.time()
-            request_times: list[float] = []
 
             async def _send_broadcasted_message(
                 broadcast: QueuedBroadcast, subscriber: Subscriber, delay: float
             ) -> bool:
                 await asyncio.sleep(delay)
-                for attempt in range(100):  # retry loop
+                for _ in range(100):  # retry loop
                     try:
-                        request_times.append(time.time())
                         await broadcast.sender.send(MessageSenderContext(bot, subscriber))
                         return True
                     except telegram_api.ApiHTTPException as exc:
                         if exc.response.status == 429:
-                            logger.exception(f"Rate limiting error received from Telegram: {exc!r}")
+                            logger.info(f"Rate limiting error received from Telegram: {exc!r}")
                             await asyncio.sleep(1)
                         else:
                             logger.info(f"HTTP error received from Telegram: {exc!r}")
