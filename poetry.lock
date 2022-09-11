@@ -101,7 +101,7 @@ uvloop = ["uvloop (>=0.15.2)"]
 
 [[package]]
 name = "certifi"
-version = "2022.6.15"
+version = "2022.6.15.1"
 description = "Python package for providing Mozilla's CA Bundle."
 category = "main"
 optional = false
@@ -287,7 +287,7 @@ setuptools = "*"
 
 [[package]]
 name = "oauthlib"
-version = "3.2.0"
+version = "3.2.1"
 description = "A generic, spec-compliant, thorough implementation of the OAuth request-signing logic"
 category = "main"
 optional = false
@@ -665,7 +665,7 @@ socks = ["PySocks (>=1.5.6,!=1.5.7,<2.0)"]
 
 [[package]]
 name = "virtualenv"
-version = "20.16.4"
+version = "20.16.5"
 description = "Virtual Python Environment builder"
 category = "dev"
 optional = false
@@ -703,14 +703,13 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "3b698956534aa30047fae238383fa3aa9a5c49b6ac52bef98cd3a517af160562"
+content-hash = "995477cff89b5604c8df16cf419ef722cbf79d5fdfd0be06f8bb576310a6e140"
 
 [metadata.files]
 aiohttp = []
 aioresponses = []
 aiosignal = []
 async-timeout = []
-atomicwrites = []
 attrs = []
 beautifulsoup4 = []
 black = []
@@ -740,6 +739,7 @@ pluggy = []
 pre-commit = []
 py = []
 py-trello = []
+pyairtable = []
 pyparsing = []
 pytest = []
 pytest-aiohttp = []
