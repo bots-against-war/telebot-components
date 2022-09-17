@@ -38,6 +38,7 @@ from telebot_components.stores.language import (
     vaildate_singlelang_text,
 )
 from telebot_components.utils import from_yaml_unsafe, join_paragraphs, to_yaml_unsafe
+from telebot_components.utils.strings import telegram_html_escape
 
 FormResultT = TypeVar("FormResultT", bound=MutableMapping[str, Any], contravariant=True)
 
@@ -150,69 +151,44 @@ class FormState(Generic[FormResultT]):
         language: MaybeLanguage,
         form_handler_config: FormHandlerConfig,
     ) -> _FormStateUpdateEffect:
-        try:
-            reply_paragraphs: list[str] = []
+        reply_paragraphs: list[str] = []
 
-            message_cmd = message.text_content.strip() if message.content_type == "text" else None
-            if message_cmd is not None and message_cmd.startswith("/"):
-                if message_cmd in form_handler_config.cancel_cmds:
-                    return _FormStateUpdateEffect(_FormAction.CANCEL)
-                elif message_cmd == form_handler_config.skip_cmd:
-                    if not self.current_field.required:
-                        value = None
-                        result_msg = None
-                        field_ok = True
-                    else:
-                        value = None
-                        result_msg = any_text_to_str(form_handler_config.cant_skip_field_msg, language)
-                        field_ok = False
+        message_cmd = message.text_content.strip() if message.content_type == "text" else None
+        if message_cmd is not None and message_cmd.startswith("/"):
+            if message_cmd in form_handler_config.cancel_cmds:
+                return _FormStateUpdateEffect(_FormAction.CANCEL)
+            elif message_cmd == form_handler_config.skip_cmd:
+                if not self.current_field.required:
+                    value = None
+                    result_msg = None
+                    field_ok = True
                 else:
-                    return _FormStateUpdateEffect(
-                        _FormAction.KEEP_GOING,
-                        user_action=_UserAction(
-                            send_message_html=form_handler_config.unsupported_cmd_error_msg(language),
-                            send_reply_keyboard=self.get_current_reply_markup(language),
-                        ),
-                    )
+                    value = None
+                    result_msg = any_text_to_str(form_handler_config.cant_skip_field_msg, language)
+                    field_ok = False
             else:
-                result = await self.current_field.process_message(message, language)
-                field_ok = result.parsed_value is not None
-                result_msg = result.response_to_user
-                value = result.parsed_value
-                if result.no_form_state_mutation:
-                    return _FormStateUpdateEffect(
-                        _FormAction.KEEP_GOING,
-                        user_action=_UserAction(send_message_html=result_msg),
-                    )
-
-            if not field_ok:
-                if result_msg:
-                    reply_paragraphs.append(result_msg)
-                reply_paragraphs.append(any_text_to_str(form_handler_config.retry_field_msg, language))
                 return _FormStateUpdateEffect(
                     _FormAction.KEEP_GOING,
                     user_action=_UserAction(
-                        send_message_html=join_paragraphs(reply_paragraphs),
+                        send_message_html=form_handler_config.unsupported_cmd_error_msg(language),
                         send_reply_keyboard=self.get_current_reply_markup(language),
                     ),
                 )
-
-            self.result_so_far[self.current_field.name] = value
-            if form_handler_config.echo_filled_field and result_msg is not None:
-                reply_paragraphs.append(result_msg)
-
-            next_field = self.current_field.next_field_getter(message.from_user, value)
-            if next_field is None:
+        else:
+            result = await self.current_field.process_message(message, language)
+            field_ok = result.parsed_value is not None
+            result_msg = result.response_to_user
+            value = result.parsed_value
+            if result.no_form_state_mutation:
                 return _FormStateUpdateEffect(
-                    _FormAction.COMPLETE,
-                    user_action=_UserAction(send_message_html=join_paragraphs(reply_paragraphs))
-                    if reply_paragraphs
-                    else None,
+                    _FormAction.KEEP_GOING,
+                    user_action=_UserAction(send_message_html=result_msg),
                 )
-            reply_paragraphs.append(
-                await self._full_query_message(next_field, message.from_user, language, form_handler_config)
-            )
-            self.current_field = next_field
+
+        if not field_ok:
+            if result_msg:
+                reply_paragraphs.append(result_msg)
+            reply_paragraphs.append(any_text_to_str(form_handler_config.retry_field_msg, language))
             return _FormStateUpdateEffect(
                 _FormAction.KEEP_GOING,
                 user_action=_UserAction(
@@ -220,16 +196,30 @@ class FormState(Generic[FormResultT]):
                     send_reply_keyboard=self.get_current_reply_markup(language),
                 ),
             )
-        except Exception as e:
-            logger.exception("Unexpected error updating form state")
+
+        self.result_so_far[self.current_field.name] = value
+        if form_handler_config.echo_filled_field and result_msg is not None:
+            reply_paragraphs.append(result_msg)
+
+        next_field = self.current_field.next_field_getter(message.from_user, value)
+        if next_field is None:
             return _FormStateUpdateEffect(
-                _FormAction.CANCEL,
-                user_action=_UserAction(
-                    send_message_html=any_text_to_str(
-                        form_handler_config.cancelling_because_of_error_template, language
-                    ).format(str(e))
+                _FormAction.COMPLETE,
+                user_action=(
+                    _UserAction(send_message_html=join_paragraphs(reply_paragraphs)) if reply_paragraphs else None
                 ),
             )
+        reply_paragraphs.append(
+            await self._full_query_message(next_field, message.from_user, language, form_handler_config)
+        )
+        self.current_field = next_field
+        return _FormStateUpdateEffect(
+            _FormAction.KEEP_GOING,
+            user_action=_UserAction(
+                send_message_html=join_paragraphs(reply_paragraphs),
+                send_reply_keyboard=self.get_current_reply_markup(language),
+            ),
+        )
 
     async def update_with_callback_query(
         self,
@@ -247,7 +237,8 @@ class FormState(Generic[FormResultT]):
             current_value=self.result_so_far.get(self.current_field.name),
             language=language,
         )
-        self.result_so_far[self.current_field.name] = field_result.new_field_value
+        if field_result.new_field_value is not None:
+            self.result_so_far[self.current_field.name] = field_result.new_field_value
         paragraphs: list[str] = []
         if field_result.response_to_user:
             paragraphs.append(field_result.response_to_user)
@@ -354,7 +345,18 @@ class FormHandler(Generic[FormResultT]):
                 logger.error("Error loading form state from the store, dropping it")
                 await self.form_state_store.drop(user_id)
                 return
-            state_update_effect = await form_state_updater(form_state, language)
+            try:
+                state_update_effect = await form_state_updater(form_state, language)
+            except Exception as e:
+                logger.exception(f"Unexpected error updating form state with {form_state_updater!r}")
+                state_update_effect = _FormStateUpdateEffect(
+                    _FormAction.CANCEL,
+                    user_action=_UserAction(
+                        send_message_html=any_text_to_str(
+                            self.config.cancelling_because_of_error_template, language
+                        ).format(telegram_html_escape(str(e)))
+                    ),
+                )
             if state_update_effect.form_action is _FormAction.DO_NOTHING:
                 return
             await self.form_state_store.save(user_id, form_state)

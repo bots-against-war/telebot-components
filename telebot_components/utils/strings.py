@@ -11,7 +11,7 @@ def mask(string: str, open_ratio: float) -> str:
 
 def telegram_html_escape(string: str) -> str:
     """See https://core.telegram.org/bots/api#html-style"""
-    return string.replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
+    return string.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def long_text(s: str) -> str:

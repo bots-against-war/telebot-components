@@ -8,12 +8,28 @@ from dataclasses import fields as dataclass_fields
 from datetime import date, time, tzinfo
 from enum import Enum
 from hashlib import md5
-from typing import Callable, ClassVar, Dict, Generic, Optional, Type, TypeVar, Union
+from typing import (
+    Callable,
+    ClassVar,
+    Dict,
+    Generic,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+    cast,
+)
 
 from telebot import types as tg
 from telebot.callback_data import CallbackData
 from telebot.types import constants as tgconst
 
+from telebot_components.form.helpers.calendar_keyboard import (
+    CalendarAction,
+    CalendarCallbackPayload,
+    CalendarKeyboardConfig,
+    calendar_keyboard,
+)
 from telebot_components.stores.language import (
     AnyText,
     Language,
@@ -421,7 +437,7 @@ class CallbackProcessingResult(Generic[FieldValueT]):
     response_to_user: Optional[str]
     updated_inline_markup: Optional[tg.InlineKeyboardMarkup]
     complete_field: bool
-    new_field_value: FieldValueT
+    new_field_value: Optional[FieldValueT]
 
 
 @dataclass
@@ -595,3 +611,68 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                 )
             )
         return keyboard
+
+
+@dataclass
+class DateMenuField(StrictlyInlineFormField[date]):
+    calendar_keyboard_config: CalendarKeyboardConfig
+
+    async def process_callback_query(
+        self, callback_payload: str, current_value: Optional[date], language: MaybeLanguage
+    ) -> CallbackProcessingResult[date]:
+        payload = CalendarCallbackPayload.load(callback_payload)
+        if payload is None:
+            raise RuntimeError(f"Failed to parse CalendarCallbackPayload from {callback_payload!r}")
+        if payload.action is CalendarAction.NOOP:
+            return CallbackProcessingResult(
+                response_to_user=None,
+                updated_inline_markup=None,
+                complete_field=False,
+                new_field_value=None,
+            )
+        elif payload.action is CalendarAction.UPDATE:
+            return CallbackProcessingResult(
+                response_to_user=None,
+                updated_inline_markup=self._calendar_keyboard(
+                    year=payload.year,
+                    month=payload.month,
+                    selected_value=current_value,
+                ),
+                complete_field=False,
+                new_field_value=None,
+            )
+        elif payload.action is CalendarAction.SELECT:
+            # casts are for type system, runtime validation is performed in CalendarCallbackPayload
+            selected_date = date(cast(int, payload.year), cast(int, payload.month), cast(int, payload.day))
+            return CallbackProcessingResult(
+                response_to_user=(
+                    any_text_to_str(self.echo_result_template, language).format(selected_date)
+                    if self.echo_result_template
+                    else None
+                ),
+                updated_inline_markup=self._calendar_keyboard(
+                    selected_date.year,
+                    selected_date.month,
+                    selected_value=selected_date,
+                ),
+                complete_field=True,
+                new_field_value=selected_date,
+            )
+
+    def _calendar_keyboard(
+        self, year: Optional[int], month: Optional[int], selected_value: Optional[date]
+    ) -> tg.InlineKeyboardMarkup:
+        return calendar_keyboard(
+            year=year,
+            month=month,
+            new_callback_data_with_payload=self.new_callback_data,
+            config=self.calendar_keyboard_config,
+            selected_date=selected_value,
+        )
+
+    def get_reply_markup(self, language: MaybeLanguage, current_value: Optional[date] = None) -> tg.ReplyMarkup:
+        return self._calendar_keyboard(
+            year=current_value.year if current_value else None,
+            month=current_value.month if current_value else None,
+            selected_value=current_value,
+        )
