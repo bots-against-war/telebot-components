@@ -19,7 +19,7 @@ class MenuItem:
 
         if not ((self.submenu is None) ^ (self.terminator is None)):
             raise RuntimeError(
-                "MenuItem is not configured correctly. Only submenu OR terminator can be specified in one MenuItem."
+                "MenuItem is not configured correctly. Either submenu or terminator must be specified in one MenuItem."
             )
 
         self._id: Optional[str] = None
