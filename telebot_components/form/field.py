@@ -38,6 +38,9 @@ from telebot_components.stores.language import (
     any_text_to_str,
 )
 
+
+from telebot_components.form.suggestions import ResponseSuggestionsConfig
+
 logger = logging.getLogger(__name__)
 
 FieldValueT = TypeVar("FieldValueT")
@@ -112,6 +115,9 @@ class FormField(Generic[FieldValueT]):
     query_message: AnyText
     echo_result_template: Optional[AnyText]  # should contain 1 '{}' for field value
     next_field_getter: NextFieldGetter[FieldValueT]
+
+    def __post_init__(self):
+        self._response_suggestions_config: Optional[ResponseSuggestionsConfig] = None
 
     async def process_message(
         self, message: tg.Message, language: MaybeLanguage
@@ -273,6 +279,7 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
     )
 
     def __post_init__(self):
+        super().__post_init__()
         self.logger = logging.getLogger(f"{__file__}.{self.__class__.__name__}(name={self.name!r})")
 
     def get_attachment(self, message: tg.Message) -> Optional[TelegramAttachment]:
@@ -489,6 +496,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
     NOOP_PAYLOAD: ClassVar[str] = "noop"
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         self._option_by_hash = {self.option_hash(o): o for o in self.EnumClass}
 
     def option_hash(self, option: Enum) -> str:
