@@ -7,6 +7,7 @@ import string
 from typing import Any, Awaitable, Callable, Optional, TypeVar, Union
 from weakref import WeakValueDictionary
 
+import piexif
 from ruamel.yaml import YAML  # type: ignore
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -150,11 +151,20 @@ async def send_attachment(
     chat_id: Union[int, str],
     attachment: TelegramAttachment,
     caption: Optional[str] = None,
+    remove_exif_data: bool = True,
 ):
     if isinstance(attachment, list) and all(isinstance(att, tg.PhotoSize) for att in attachment):
         return await bot.send_photo(chat_id, photo=attachment[0].file_id, caption=caption)
     elif isinstance(attachment, tg.Document):
-        return await bot.send_document(chat_id, document=attachment.file_id, caption=caption)
+        if attachment.mime_type == "image/jpeg" and remove_exif_data:
+            return await bot.send_document(
+                chat_id,
+                document=await remove_exif_data_from_photo_document(bot, attachment),
+                caption=caption,
+                visible_file_name=attachment.file_name,
+            )
+        else:
+            return await bot.send_document(chat_id, document=attachment.file_id, caption=caption)
     elif isinstance(attachment, tg.Video):
         return await bot.send_video(chat_id, video=attachment.file_id, caption=caption)
     elif isinstance(attachment, tg.Animation):
@@ -163,6 +173,19 @@ async def send_attachment(
         return await bot.send_audio(chat_id, audio=attachment.file_id, caption=caption)
     else:
         raise TypeError(f"Can not send attachment of type: {type(attachment)!r}.")
+
+
+async def remove_exif_data_from_photo_document(bot: AsyncTeleBot, document: tg.Document) -> io.BytesIO:
+    if document.mime_type != "image/jpeg":
+        raise TypeError(f"Must be image document to process its EXIF, but got: {document.mime_type!r}.")
+
+    file = await bot.get_file(document.file_id)
+    file_content = await bot.download_file(file.file_path)
+
+    cleared_image = io.BytesIO()
+    piexif.remove(file_content, cleared_image)
+
+    return cleared_image
 
 
 AsyncFunctionT = TypeVar("AsyncFunctionT", bound=Callable[..., Awaitable])

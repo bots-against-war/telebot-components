@@ -412,14 +412,18 @@ class TrelloIntegration:
                 description = ""
             if include_attachments:
                 try:  # try downloading document to attach it
-                    doc_or_photo: Union[tg.Document, tg.PhotoSize]
+                    media: Union[tg.Document, tg.PhotoSize, tg.Video, tg.Audio]
                     if message.document is not None:
-                        doc_or_photo = message.document
+                        media = message.document
                     elif message.photo is not None:
-                        doc_or_photo = message.photo[-1]
+                        media = message.photo[-1]
+                    elif message.video is not None:
+                        media = message.video
+                    elif message.audio is not None:
+                        media = message.audio
                     else:
-                        raise RuntimeError("Unsupported")
-                    attachment = await self.bot.get_file(doc_or_photo.file_id)
+                        raise RuntimeError("Media type is unsupported")
+                    attachment = await self.bot.get_file(media.file_id)
                     attachment_content = await self.bot.download_file(attachment.file_path)
                     description = f"{description}\n📎 `{attachment.file_path}`"
                 except Exception:
@@ -522,6 +526,7 @@ class TrelloIntegration:
         forwarded_message: tg.Message,
         category: Optional[Category] = None,
         postprocess_card_description: Callable[[str], str] = lambda s: s,
+        add_admin_chat_link: bool = True,
     ) -> None:
         self.ensure_initialized()
         if category is None:
@@ -541,7 +546,8 @@ class TrelloIntegration:
         card_content = await self._card_content_from_message(forwarded_message, user.id, include_attachments=True)
         self.logger.debug(f"Card content: {card_content}")
         card_content.description = postprocess_card_description(card_content.description)
-        card_content.description = self._add_admin_chat_link(card_content.description, to_message=forwarded_message)
+        if add_admin_chat_link:
+            card_content.description = self._add_admin_chat_link(card_content.description, to_message=forwarded_message)
         card_content.description = "👤: " + card_content.description
 
         existing_trello_card_data = await self.trello_card_data_for_user.load(user.id)
