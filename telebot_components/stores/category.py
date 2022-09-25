@@ -85,7 +85,9 @@ class CategoryStore:
                 return
             category = self.categories_by_name.get(category_name)
             if category is None:
-                await callback_query_processing_error(bot, call, f"unknown category name: {category_name}", self.logger)
+                await callback_query_processing_error(
+                    bot, call, f"unknown category name: {category_name}", self.logger, error_level=False
+                )
                 return
             category_saved = await self.save_user_category(user, category)
             if not category_saved:

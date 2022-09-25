@@ -607,7 +607,7 @@ python-versions = ">=3.6"
 
 [[package]]
 name = "telebot-against-war"
-version = "0.5.2"
+version = "0.5.4"
 description = "Async-first fork of pyTelegramBotApi"
 category = "main"
 optional = false
@@ -703,7 +703,7 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "7c0979f894804b30c9f482412dfcaca01caf214e42a3952be7545ce9691ca06c"
+content-hash = "4e77e08693124cfb4a0424ed014c08df37e3b4acf9b92cd865eef47a72a0b95d"
 
 [metadata.files]
 aiohttp = []
