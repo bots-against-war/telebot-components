@@ -10,6 +10,8 @@ ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
 TERMINATE_MENU_CALLBACK_DATA = CallbackData("id", prefix="terminator")
 INACTIVE_BUTTON_CALLBACK_DATA = CallbackData(prefix="inactive_button")
 
+logger = logging.getLogger(__name__)
+
 
 class MenuItem:
     def __init__(self, label: str, submenu: Optional["Menu"] = None, terminator: Optional[str] = None):
@@ -163,14 +165,11 @@ class MenuHandler:
         bot: AsyncTeleBot,
         on_terminal_menu_option_selected: Callable[[TerminatorContext], Coroutine[None, None, None]],
     ):
-        @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA)
+        @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA, auto_answer=True)
         async def handle_menu(call: tg.CallbackQuery):
             user = call.from_user
             data = ROUTE_MENU_CALLBACK_DATA.parse(call.data)
             route_to = data["route_to"]
-
-            await bot.answer_callback_query(call.id)
-
             menu = self.menu_by_id[route_to]
             await bot.edit_message_text(
                 text=menu.text,
@@ -179,11 +178,11 @@ class MenuHandler:
                 reply_markup=menu.get_keyboard_markup(),
             )
 
-        @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA)
+        @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA, auto_answer=True)
         async def handle_inactive_menu(call: tg.CallbackQuery):
-            await bot.answer_callback_query(call.id)
+            pass
 
-        @bot.callback_query_handler(callback_data=TERMINATE_MENU_CALLBACK_DATA)
+        @bot.callback_query_handler(callback_data=TERMINATE_MENU_CALLBACK_DATA, auto_answer=True)
         async def handle_terminator(call: tg.CallbackQuery):
             user = call.from_user
             data = TERMINATE_MENU_CALLBACK_DATA.parse(call.data)
@@ -192,14 +191,16 @@ class MenuHandler:
             selected_menu_item = self.menu_item_by_id[selected_menu_item_id]
             terminator = selected_menu_item.terminator
             if terminator is None:
-                raise RuntimeError("Got MenuItem that is not terminating item.")
-            current_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
+                logger.error(f"handle_terminator got non-terminating menu item: {selected_menu_item}")
+                return
+            try:
+                await on_terminal_menu_option_selected(TerminatorContext(bot, user, call.message, terminator))
+            except Exception:
+                logger.error("Unexpected error in on_terminal_menu_option_selected callback, ignoring")
 
-            await bot.answer_callback_query(call.id)
+            current_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
             await bot.edit_message_reply_markup(
                 chat_id=user.id,
                 message_id=call.message.id,
                 reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
             )
-
-            await on_terminal_menu_option_selected(TerminatorContext(bot, user, call.message, terminator))
