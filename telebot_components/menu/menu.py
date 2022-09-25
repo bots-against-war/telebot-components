@@ -4,6 +4,7 @@ from typing import Callable, Coroutine, Optional
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
+from telebot.api import ApiHTTPException
 from telebot.callback_data import CallbackData
 
 ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
@@ -171,12 +172,15 @@ class MenuHandler:
             data = ROUTE_MENU_CALLBACK_DATA.parse(call.data)
             route_to = data["route_to"]
             menu = self.menu_by_id[route_to]
-            await bot.edit_message_text(
-                text=menu.text,
-                chat_id=user.id,
-                message_id=call.message.id,
-                reply_markup=menu.get_keyboard_markup(),
-            )
+            try:
+                await bot.edit_message_text(
+                    text=menu.text,
+                    chat_id=user.id,
+                    message_id=call.message.id,
+                    reply_markup=menu.get_keyboard_markup(),
+                )
+            except ApiHTTPException as e:
+                logger.info(f"Error editing message text and reply markup: {e!r}")
 
         @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA, auto_answer=True)
         async def handle_inactive_menu(call: tg.CallbackQuery):
@@ -199,8 +203,11 @@ class MenuHandler:
                 logger.error("Unexpected error in on_terminal_menu_option_selected callback, ignoring")
 
             current_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
-            await bot.edit_message_reply_markup(
-                chat_id=user.id,
-                message_id=call.message.id,
-                reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
-            )
+            try:
+                await bot.edit_message_reply_markup(
+                    chat_id=user.id,
+                    message_id=call.message.id,
+                    reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
+                )
+            except ApiHTTPException as e:
+                logger.info(f"Error editing message reply markup: {e!r}")
