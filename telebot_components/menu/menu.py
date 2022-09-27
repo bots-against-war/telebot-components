@@ -11,8 +11,6 @@ ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
 TERMINATE_MENU_CALLBACK_DATA = CallbackData("id", prefix="terminator")
 INACTIVE_BUTTON_CALLBACK_DATA = CallbackData(prefix="inactive_button")
 
-logger = logging.getLogger(__name__)
-
 
 class MenuItem:
     def __init__(self, label: str, submenu: Optional["Menu"] = None, terminator: Optional[str] = None):
@@ -180,7 +178,7 @@ class MenuHandler:
                     reply_markup=menu.get_keyboard_markup(),
                 )
             except ApiHTTPException as e:
-                logger.info(f"Error editing message text and reply markup: {e!r}")
+                self.logger.info(f"Error editing message text and reply markup: {e!r}")
 
         @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA, auto_answer=True)
         async def handle_inactive_menu(call: tg.CallbackQuery):
@@ -195,12 +193,12 @@ class MenuHandler:
             selected_menu_item = self.menu_item_by_id[selected_menu_item_id]
             terminator = selected_menu_item.terminator
             if terminator is None:
-                logger.error(f"handle_terminator got non-terminating menu item: {selected_menu_item}")
+                self.logger.error(f"handle_terminator got non-terminating menu item: {selected_menu_item}")
                 return
             try:
                 await on_terminal_menu_option_selected(TerminatorContext(bot, user, call.message, terminator))
             except Exception:
-                logger.error("Unexpected error in on_terminal_menu_option_selected callback, ignoring")
+                self.logger.exception("Unexpected error in on_terminal_menu_option_selected callback, ignoring")
 
             current_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
             try:
@@ -210,4 +208,4 @@ class MenuHandler:
                     reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
                 )
             except ApiHTTPException as e:
-                logger.info(f"Error editing message reply markup: {e!r}")
+                self.logger.info(f"Error editing message reply markup: {e!r}")
