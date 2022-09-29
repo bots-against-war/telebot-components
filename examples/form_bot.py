@@ -16,6 +16,7 @@ from telebot_components.form.field import (
     NextFieldGetter,
     PlainTextField,
     SingleSelectField,
+    TelegramAttachment,
 )
 from telebot_components.form.form import Form
 from telebot_components.form.handler import (
@@ -25,6 +26,7 @@ from telebot_components.form.handler import (
 )
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.language import Language, LanguageStore
+from telebot_components.utils import send_attachment
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -179,8 +181,8 @@ university_program_field = PlainTextField(
 )
 
 
-photos_field = AttachmentsField(
-    name="photos",
+attachments_field = AttachmentsField(
+    name="attachments",
     required=True,
     query_message={Language.RU: "Прикрепите фотографии.", Language.EN: "Please attach photos."},
     echo_result_template=None,
@@ -196,21 +198,21 @@ photos_field = AttachmentsField(
         Language.RU: "Пожалуйста, прикрепляйте только фотографии с компрессией, не в в виде документов.",
         Language.EN: "Please attach only photos with compression, not as documents.",
     },
-    allowed_attachment_types={tgconst.MediaContentType.photo},
+    # allowed_attachment_types={tgconst.MediaContentType.photo},
     next_field_getter=NextFieldGetter.form_end(),
 )
 
 
 form = Form(
     fields=[
-        name_field,
-        age_field,
-        favorite_subject_field,
-        has_finished_school_field,
-        university_program_field,
-        photos_field,
+        # name_field,
+        # age_field,
+        # favorite_subject_field,
+        # has_finished_school_field,
+        # university_program_field,
+        attachments_field,
     ],
-    start_field=name_field,
+    start_field=attachments_field,
 )
 
 
@@ -328,18 +330,17 @@ def create_form_bot(redis: RedisInterface, token: str):
 
     async def on_form_completed(context: FormExitContext):
         result_to_dump = context.result.copy()
-        result_to_dump.pop("photos")
+        result_to_dump.pop("attachments")
         form_result_dump = pformat(result_to_dump, indent=2, width=70, sort_dicts=False)
         await bot.send_message(
             context.last_update.from_user.id,
             f"<pre>{html.escape(form_result_dump, quote=False)}</pre>",
             parse_mode="HTML",
         )
-        photos: list[list[tg.PhotoSize]] = context.result["photos"]
-        for photo in photos:
-            await bot.send_photo(
-                context.last_update.from_user.id, photo=photo[0].file_id, caption=photo[0].file_unique_id
-            )
+        attachments: list[TelegramAttachment] = context.result["attachments"]
+        if attachments is not None:
+            for attachment in attachments:
+                await send_attachment(bot, context.last_update.from_user.id, attachment)
 
     form_handler.setup(bot, on_form_completed=on_form_completed, on_form_cancelled=on_form_cancelled)
     language_store.setup(bot)
