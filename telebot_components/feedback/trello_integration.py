@@ -657,7 +657,7 @@ class TrelloIntegration:
     async def ensure_unanswered_label(self) -> trello.Label:
         existing_label_in_redis = await self.trello_label_data.load(self.TRELLO_LABEL_NEW_MESSAGE)
         if not existing_label_in_redis:
-            self.logger.info("Unread label in redis not found, generating new one")
+            self.logger.info("Unanswered label not found in storage, generating new one")
             return await self.create_unanswered_label()
 
         existing_labels_in_trello = self.board.get_labels(limit=100)
@@ -668,29 +668,35 @@ class TrelloIntegration:
 
         return existing_label_in_trello[0]
 
-    async def append_unanswered_label(self, trello_card: trello.Card):
+    async def append_unanswered_label(self, trello_card: trello.Card) -> None:
         if not self.unanswered_label:
-            return True
+            return
         loop = asyncio.get_running_loop()
         label = await self.ensure_unanswered_label()
         self.logger.debug(f"Append label {label.id} to card {trello_card.id}")
-        await loop.run_in_executor(
-            self.thread_pool,
-            trello_card.add_label,
-            label,
-        )
+        try:
+            await loop.run_in_executor(
+                self.thread_pool,
+                trello_card.add_label,
+                label,
+            )
+        except trello.ResourceUnavailable:
+            self.logger.debug(f"Error appending label {label.id} to card {trello_card.id}, ignoring", exc_info=True)
 
-    async def remove_unanswered_label(self, trello_card: trello.Card):
+    async def remove_unanswered_label(self, trello_card: trello.Card) -> None:
         if not self.unanswered_label:
-            return True
+            return
         loop = asyncio.get_running_loop()
         label = await self.ensure_unanswered_label()
         self.logger.debug(f"Remove label {label.id} from card {trello_card.id}")
-        await loop.run_in_executor(
-            self.thread_pool,
-            trello_card.remove_label,
-            label,
-        )
+        try:
+            await loop.run_in_executor(
+                self.thread_pool,
+                trello_card.remove_label,
+                label,
+            )
+        except trello.ResourceUnavailable:
+            self.logger.debug(f"Error removing label {label.id} from card {trello_card.id}, ignoring", exc_info=True)
 
 
 def safe_markdownify(html_text: str, fallback_text: str) -> str:

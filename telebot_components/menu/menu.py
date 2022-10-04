@@ -4,6 +4,7 @@ from typing import Callable, Coroutine, Optional
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
+from telebot.api import ApiHTTPException
 from telebot.callback_data import CallbackData
 
 ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
@@ -163,27 +164,27 @@ class MenuHandler:
         bot: AsyncTeleBot,
         on_terminal_menu_option_selected: Callable[[TerminatorContext], Coroutine[None, None, None]],
     ):
-        @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA)
+        @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA, auto_answer=True)
         async def handle_menu(call: tg.CallbackQuery):
             user = call.from_user
             data = ROUTE_MENU_CALLBACK_DATA.parse(call.data)
             route_to = data["route_to"]
-
-            await bot.answer_callback_query(call.id)
-
             menu = self.menu_by_id[route_to]
-            await bot.edit_message_text(
-                text=menu.text,
-                chat_id=user.id,
-                message_id=call.message.id,
-                reply_markup=menu.get_keyboard_markup(),
-            )
+            try:
+                await bot.edit_message_text(
+                    text=menu.text,
+                    chat_id=user.id,
+                    message_id=call.message.id,
+                    reply_markup=menu.get_keyboard_markup(),
+                )
+            except ApiHTTPException as e:
+                self.logger.info(f"Error editing message text and reply markup: {e!r}")
 
-        @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA)
+        @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA, auto_answer=True)
         async def handle_inactive_menu(call: tg.CallbackQuery):
-            await bot.answer_callback_query(call.id)
+            pass
 
-        @bot.callback_query_handler(callback_data=TERMINATE_MENU_CALLBACK_DATA)
+        @bot.callback_query_handler(callback_data=TERMINATE_MENU_CALLBACK_DATA, auto_answer=True)
         async def handle_terminator(call: tg.CallbackQuery):
             user = call.from_user
             data = TERMINATE_MENU_CALLBACK_DATA.parse(call.data)
@@ -192,14 +193,19 @@ class MenuHandler:
             selected_menu_item = self.menu_item_by_id[selected_menu_item_id]
             terminator = selected_menu_item.terminator
             if terminator is None:
-                raise RuntimeError("Got MenuItem that is not terminating item.")
+                self.logger.error(f"handle_terminator got non-terminating menu item: {selected_menu_item}")
+                return
+            try:
+                await on_terminal_menu_option_selected(TerminatorContext(bot, user, call.message, terminator))
+            except Exception:
+                self.logger.exception("Unexpected error in on_terminal_menu_option_selected callback, ignoring")
+
             current_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
-
-            await bot.answer_callback_query(call.id)
-            await bot.edit_message_reply_markup(
-                chat_id=user.id,
-                message_id=call.message.id,
-                reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
-            )
-
-            await on_terminal_menu_option_selected(TerminatorContext(bot, user, call.message, terminator))
+            try:
+                await bot.edit_message_reply_markup(
+                    chat_id=user.id,
+                    message_id=call.message.id,
+                    reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
+                )
+            except ApiHTTPException as e:
+                self.logger.info(f"Error editing message reply markup: {e!r}")
