@@ -156,15 +156,19 @@ async def send_attachment(
     if isinstance(attachment, list) and all(isinstance(att, tg.PhotoSize) for att in attachment):
         return await bot.send_photo(chat_id, photo=attachment[0].file_id, caption=caption)
     elif isinstance(attachment, tg.Document):
+        doc_to_send: Union[str, bytes]
+
         if (attachment.mime_type == "image/jpeg" or attachment.mime_type == "image/png") and remove_exif_data:
-            return await bot.send_document(
-                chat_id,
-                document=await remove_exif_data_from_photo_document(bot, attachment),
-                caption=caption,
-                visible_file_name=attachment.file_name,
-            )
+            doc_to_send = await remove_exif_data_from_photo_document(bot, attachment)
         else:
-            return await bot.send_document(chat_id, document=attachment.file_id, caption=caption)
+            doc_to_send = attachment.file_id
+
+        return await bot.send_document(
+            chat_id,
+            document=doc_to_send,
+            caption=caption,
+            visible_file_name=attachment.file_name,
+        )
     elif isinstance(attachment, tg.Video):
         return await bot.send_video(chat_id, video=attachment.file_id, caption=caption)
     elif isinstance(attachment, tg.Animation):
@@ -175,18 +179,22 @@ async def send_attachment(
         raise TypeError(f"Can not send attachment of type: {type(attachment)!r}.")
 
 
-async def remove_exif_data_from_photo_document(bot: AsyncTeleBot, document: tg.Document) -> bytes:
-    if document.mime_type != "image/jpeg" or document.mime_type != "image/png":
+async def remove_exif_data_from_photo_document(bot: AsyncTeleBot, document: tg.Document):
+    if document.mime_type != "image/jpeg" and document.mime_type != "image/png":
         raise TypeError(f"Must be jpeg/png document to delete its metadata, but got: {document.mime_type!r}.")
 
-    file = await bot.get_file(document.file_id)
-    file_content = await bot.download_file(file.file_path)
+    try:
+        file = await bot.get_file(document.file_id)
+        file_content = await bot.download_file(file.file_path)
 
-    image = Image.open(io.BytesIO(file_content))
-    buf = io.BytesIO()
-    image.save(buf, format=image.format)
+        image = Image.open(io.BytesIO(file_content))
+        buf = io.BytesIO()
+        image.save(buf, format=image.format)
 
-    return buf.getvalue()
+        return buf.getvalue()
+
+    except Exception:
+        return document.file_id
 
 
 AsyncFunctionT = TypeVar("AsyncFunctionT", bound=Callable[..., Awaitable])
