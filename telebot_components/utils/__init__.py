@@ -159,7 +159,7 @@ async def send_attachment(
         doc_to_send: Union[str, bytes]
 
         if (attachment.mime_type == "image/jpeg" or attachment.mime_type == "image/png") and remove_exif_data:
-            doc_to_send = await remove_exif_data_from_photo_document(bot, attachment)
+            doc_to_send = await download_photo_document_and_remove_metadata(bot, attachment)
         else:
             doc_to_send = attachment.file_id
 
@@ -179,7 +179,7 @@ async def send_attachment(
         raise TypeError(f"Can not send attachment of type: {type(attachment)!r}.")
 
 
-async def remove_exif_data_from_photo_document(bot: AsyncTeleBot, document: tg.Document):
+async def download_photo_document_and_remove_metadata(bot: AsyncTeleBot, document: tg.Document):
     if document.mime_type != "image/jpeg" and document.mime_type != "image/png":
         raise TypeError(f"Must be jpeg/png document to delete its metadata, but got: {document.mime_type!r}.")
 
