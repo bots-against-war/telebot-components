@@ -7,7 +7,7 @@ import string
 from typing import Any, Awaitable, Callable, Optional, TypeVar, Union
 from weakref import WeakValueDictionary
 
-import piexif
+from PIL import Image
 from ruamel.yaml import YAML  # type: ignore
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -156,7 +156,7 @@ async def send_attachment(
     if isinstance(attachment, list) and all(isinstance(att, tg.PhotoSize) for att in attachment):
         return await bot.send_photo(chat_id, photo=attachment[0].file_id, caption=caption)
     elif isinstance(attachment, tg.Document):
-        if attachment.mime_type == "image/jpeg" and remove_exif_data:
+        if (attachment.mime_type == "image/jpeg" or attachment.mime_type == "image/png") and remove_exif_data:
             return await bot.send_document(
                 chat_id,
                 document=await remove_exif_data_from_photo_document(bot, attachment),
@@ -175,17 +175,18 @@ async def send_attachment(
         raise TypeError(f"Can not send attachment of type: {type(attachment)!r}.")
 
 
-async def remove_exif_data_from_photo_document(bot: AsyncTeleBot, document: tg.Document) -> io.BytesIO:
-    if document.mime_type != "image/jpeg":
-        raise TypeError(f"Must be image document to process its EXIF, but got: {document.mime_type!r}.")
+async def remove_exif_data_from_photo_document(bot: AsyncTeleBot, document: tg.Document) -> bytes:
+    if document.mime_type != "image/jpeg" or document.mime_type != "image/png":
+        raise TypeError(f"Must be jpeg/png document to delete its metadata, but got: {document.mime_type!r}.")
 
     file = await bot.get_file(document.file_id)
     file_content = await bot.download_file(file.file_path)
 
-    cleared_image = io.BytesIO()
-    piexif.remove(file_content, cleared_image)
+    image = Image.open(io.BytesIO(file_content))
+    buf = io.BytesIO()
+    image.save(buf, format=image.format)
 
-    return cleared_image
+    return buf.getvalue()
 
 
 AsyncFunctionT = TypeVar("AsyncFunctionT", bound=Callable[..., Awaitable])

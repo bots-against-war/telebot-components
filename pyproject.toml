@@ -23,7 +23,7 @@ markdownify = "^0.11.2"
 pytest-mock = "^3.7.0"
 "ruamel.yaml" = "^0.17.21"
 pyairtable = "^1.3.0"
-piexif = "^1.1.3"
+Pillow = "^9.2.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.1.2"
