@@ -151,14 +151,14 @@ async def send_attachment(
     chat_id: Union[int, str],
     attachment: TelegramAttachment,
     caption: Optional[str] = None,
-    remove_exif_data: bool = True,
+    remove_metadata: bool = True,
 ):
     if isinstance(attachment, list) and all(isinstance(att, tg.PhotoSize) for att in attachment):
         return await bot.send_photo(chat_id, photo=attachment[0].file_id, caption=caption)
     elif isinstance(attachment, tg.Document):
         doc_to_send: Union[str, bytes]
 
-        if (attachment.mime_type == "image/jpeg" or attachment.mime_type == "image/png") and remove_exif_data:
+        if (attachment.mime_type == "image/jpeg" or attachment.mime_type == "image/png") and remove_metadata:
             doc_to_send = await download_photo_document_and_remove_metadata(bot, attachment)
         else:
             doc_to_send = attachment.file_id
@@ -179,9 +179,13 @@ async def send_attachment(
         raise TypeError(f"Can not send attachment of type: {type(attachment)!r}.")
 
 
-async def download_photo_document_and_remove_metadata(bot: AsyncTeleBot, document: tg.Document):
+async def download_photo_document_and_remove_metadata(bot: AsyncTeleBot, document: tg.Document) -> Union[bytes, str]:
     if document.mime_type != "image/jpeg" and document.mime_type != "image/png":
-        raise TypeError(f"Must be jpeg/png document to delete its metadata, but got: {document.mime_type!r}.")
+        logger.exception(
+            f"Failed to download document and delete metadata from it. Must be jpeg/png document to delete its "
+            f"metadata, but got: {document.mime_type!r}. "
+        )
+        return document.file_id
 
     try:
         file = await bot.get_file(document.file_id)
@@ -194,6 +198,7 @@ async def download_photo_document_and_remove_metadata(bot: AsyncTeleBot, documen
         return buf.getvalue()
 
     except Exception:
+        logger.exception(f"Failed to download document and delete metadata from it. Doc type: {document.mime_type}")
         return document.file_id
 
 
