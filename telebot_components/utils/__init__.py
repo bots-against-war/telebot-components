@@ -7,7 +7,7 @@ import string
 from typing import Any, Awaitable, Callable, Optional, TypeVar, Union
 from weakref import WeakValueDictionary
 
-from PIL import Image
+from PIL import Image  # type: ignore
 from ruamel.yaml import YAML  # type: ignore
 from telebot import AsyncTeleBot
 from telebot import types as tg
