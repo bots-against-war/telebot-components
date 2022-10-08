@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from enum import Enum, auto
 from typing import (
-    Any,
     Callable,
     Coroutine,
     Generic,
@@ -40,7 +39,7 @@ from telebot_components.stores.language import (
 from telebot_components.utils import from_yaml_unsafe, join_paragraphs, to_yaml_unsafe
 from telebot_components.utils.strings import telegram_html_escape
 
-FormResultT = TypeVar("FormResultT", bound=MutableMapping[str, Any], contravariant=True)
+FormResultT = TypeVar("FormResultT", bound=MutableMapping)
 
 
 logger = logging.getLogger(__name__)

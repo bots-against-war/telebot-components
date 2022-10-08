@@ -299,7 +299,7 @@ def create_form_bot(redis: RedisInterface, token: str):
     async def default_handler(message: tg.Message):
         await form_handler.start(bot, message.from_user)
 
-    async def on_form_cancelled(context: FormExitContext):
+    async def on_form_cancelled(context: FormExitContext[dict]):
         user = context.last_update.from_user
         language = await language_store.get_user_language(user)
         await bot.send_message(
@@ -309,7 +309,7 @@ def create_form_bot(redis: RedisInterface, token: str):
             ],
         )
 
-    async def on_form_completed(context: FormExitContext):
+    async def on_form_completed(context: FormExitContext[dict]):
         result_to_dump = context.result.copy()
         result_to_dump.pop("photos")
         form_result_dump = pformat(result_to_dump, indent=2, width=70, sort_dicts=False)
