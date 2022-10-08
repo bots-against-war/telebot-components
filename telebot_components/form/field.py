@@ -38,7 +38,6 @@ from telebot_components.stores.language import (
     any_text_to_str,
 )
 
-
 logger = logging.getLogger(__name__)
 
 FieldValueT = TypeVar("FieldValueT")
