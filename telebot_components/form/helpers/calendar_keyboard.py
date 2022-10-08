@@ -88,7 +88,7 @@ def calendar_keyboard(
     new_callback_data_with_payload: Callable[[str], str],
     config: CalendarKeyboardConfig = CalendarKeyboardConfig(),
     selected_date: Optional[datetime.date] = None,
-    now: Optional[datetime.datetime] = None
+    now: Optional[datetime.datetime] = None,
 ) -> tg.InlineKeyboardMarkup:
     def noop_button(label: str) -> tg.InlineKeyboardButton:
         return tg.InlineKeyboardButton(
