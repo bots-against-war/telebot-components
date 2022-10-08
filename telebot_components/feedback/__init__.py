@@ -449,6 +449,7 @@ class FeedbackHandler:
         attachment: Optional[TelegramAttachment] = None,
         no_response: bool = False,
         export_to_trello: bool = True,
+        remove_exif_data: bool = True,
         **send_message_kwargs,
     ) -> Optional[tg.Message]:
         """Sometimes we want FeedbackHandler to act like the user has sent us a message, but without actually
@@ -460,7 +461,7 @@ class FeedbackHandler:
             if attachment is None:
                 return await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
             else:
-                return await send_attachment(bot, self.admin_chat_id, attachment, text)
+                return await send_attachment(bot, self.admin_chat_id, attachment, text, remove_exif_data)
 
         async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> Optional[tg.Message]:
             if no_response:
