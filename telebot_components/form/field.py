@@ -39,8 +39,6 @@ from telebot_components.stores.language import (
 )
 
 
-from telebot_components.form.suggestions import ResponseSuggestionsConfig
-
 logger = logging.getLogger(__name__)
 
 FieldValueT = TypeVar("FieldValueT")
@@ -61,22 +59,12 @@ class NextFieldGetter(Generic[FieldValueT]):
     # filled on Form object initialization
     fields_by_name: Optional[Dict[str, "FormField"]] = None
 
-    # overriding alternative to next_field_name_getter, allowing for advanced use-cases like persistent
-    # storage lookup
-    _async_next_field_name_getter: Optional[Callable[[tg.User, Optional[FieldValueT]], Awaitable[Optional[str]]]] = None
-
     async def __call__(self, user: tg.User, value: Optional[FieldValueT]) -> Optional["FormField"]:
-        return await self.get_next_field(user, value)
-
-    async def get_next_field(self, user: tg.User, value: Optional[FieldValueT]) -> Optional["FormField"]:
         if self.fields_by_name is None:
             raise RuntimeError(
                 "Next field getter hasn't been properly initialized, did you forget to pass your fields in a Form object?"
             )
-        if self._async_next_field_name_getter is not None:
-            next_field_name = await self._async_next_field_name_getter(user, value)
-        else:
-            next_field_name = self.next_field_name_getter(user, value)
+        next_field_name = self.next_field_name_getter(user, value)
         if next_field_name is None:
             return None
         else:
@@ -117,7 +105,7 @@ class FormField(Generic[FieldValueT]):
     next_field_getter: NextFieldGetter[FieldValueT]
 
     def __post_init__(self):
-        self._response_suggestions_config: Optional[ResponseSuggestionsConfig] = None
+        pass  # future-proof
 
     async def process_message(
         self, message: tg.Message, language: MaybeLanguage
