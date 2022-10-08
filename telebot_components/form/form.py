@@ -11,8 +11,10 @@ FieldNameT = Optional[str]
 
 class Form:
     """Container for collection of fields linked together via next_field_getter attribute. Does not modify passed
-    objects, creates private copies. If allow_cyclic attribute is False (default) performs topological sort to
-    validate form acyclicity and cat print it's graph structure in ASCII with print_graph method.
+    objects, creates private copies.
+
+    If allow_cyclic param is False (default) performs topological sort to validate form acyclicity and can print
+    it's graph structure in ASCII with print_graph method.
     """
 
     def __init__(self, fields: list[FormField], start_field: FormField, allow_cyclic: bool = False):

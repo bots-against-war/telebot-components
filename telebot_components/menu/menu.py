@@ -20,7 +20,7 @@ class MenuItem:
 
         if not ((self.submenu is None) ^ (self.terminator is None)):
             raise RuntimeError(
-                "MenuItem is not configured correctly. Only submenu OR terminator can be specified in one MenuItem."
+                "MenuItem is not configured correctly. Either submenu or terminator must be specified in one MenuItem."
             )
 
         self._id: Optional[str] = None
@@ -69,16 +69,32 @@ class MenuItem:
         )
 
 
+@dataclass(frozen=True)
+class MenuConfig:
+    back_label: str
+
+
 class Menu:
     def __init__(
         self,
         text: str,
         menu_items: list[MenuItem],
+        config: Optional[MenuConfig] = None,
     ):
         self._id: Optional[str] = None
         self.parent_menu: Optional["Menu"] = None
         self.text = text
         self.menu_items = menu_items
+        self.config = config
+
+    @property
+    def effective_config(self) -> MenuConfig:
+        if self.config is not None:
+            return self.config
+        elif self.parent_menu is not None:
+            return self.parent_menu.effective_config
+        else:
+            return MenuConfig(back_label="back")  # backwards compatibility for pre-config code
 
     @property
     def id(self) -> str:
@@ -100,7 +116,9 @@ class Menu:
     def get_keyboard_markup(self):
         keyboard = [[menu_item.get_inline_button()] for menu_item in self.menu_items]
         if self.parent_menu is not None:
-            keyboard.append([MenuItem(label="back", submenu=self.parent_menu).get_inline_button()])
+            keyboard.append(
+                [MenuItem(label=self.effective_config.back_label, submenu=self.parent_menu).get_inline_button()]
+            )
         return tg.InlineKeyboardMarkup(keyboard=keyboard)
 
     def get_inactive_keyboard_markup(self, selected_item_id: str):

@@ -8,12 +8,29 @@ from dataclasses import fields as dataclass_fields
 from datetime import date, time, tzinfo
 from enum import Enum
 from hashlib import md5
-from typing import Callable, ClassVar, Dict, Generic, Optional, Type, TypeVar, Union
+from typing import (
+    Awaitable,
+    Callable,
+    ClassVar,
+    Dict,
+    Generic,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+    cast,
+)
 
 from telebot import types as tg
 from telebot.callback_data import CallbackData
 from telebot.types import constants as tgconst
 
+from telebot_components.form.helpers.calendar_keyboard import (
+    CalendarAction,
+    CalendarCallbackPayload,
+    CalendarKeyboardConfig,
+    calendar_keyboard,
+)
 from telebot_components.stores.language import (
     AnyText,
     Language,
@@ -41,13 +58,10 @@ class NextFieldGetter(Generic[FieldValueT]):
     # filled on Form object initialization
     fields_by_name: Optional[Dict[str, "FormField"]] = None
 
-    def __call__(self, user: tg.User, value: Optional[FieldValueT]) -> Optional["FormField"]:
-        return self.get_next_field(user, value)
-
-    def get_next_field(self, user: tg.User, value: Optional[FieldValueT]) -> Optional["FormField"]:
+    async def __call__(self, user: tg.User, value: Optional[FieldValueT]) -> Optional["FormField"]:
         if self.fields_by_name is None:
             raise RuntimeError(
-                "Next field getter hasn't been properly initialized, did you forget to wrap your fields in a Form object?"
+                "Next field getter hasn't been properly initialized, did you forget to pass your fields in a Form object?"
             )
         next_field_name = self.next_field_name_getter(user, value)
         if next_field_name is None:
@@ -88,6 +102,9 @@ class FormField(Generic[FieldValueT]):
     query_message: AnyText
     echo_result_template: Optional[AnyText]  # should contain 1 '{}' for field value
     next_field_getter: NextFieldGetter[FieldValueT]
+
+    def __post_init__(self):
+        pass  # future-proof
 
     async def process_message(
         self, message: tg.Message, language: MaybeLanguage
@@ -249,6 +266,7 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
     )
 
     def __post_init__(self):
+        super().__post_init__()
         self.logger = logging.getLogger(f"{__file__}.{self.__class__.__name__}(name={self.name!r})")
 
     def get_attachment(self, message: tg.Message) -> Optional[TelegramAttachment]:
@@ -421,7 +439,7 @@ class CallbackProcessingResult(Generic[FieldValueT]):
     response_to_user: Optional[str]
     updated_inline_markup: Optional[tg.InlineKeyboardMarkup]
     complete_field: bool
-    new_field_value: FieldValueT
+    new_field_value: Optional[FieldValueT]
 
 
 @dataclass
@@ -465,6 +483,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
     NOOP_PAYLOAD: ClassVar[str] = "noop"
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         self._option_by_hash = {self.option_hash(o): o for o in self.EnumClass}
 
     def option_hash(self, option: Enum) -> str:
@@ -595,3 +614,68 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                 )
             )
         return keyboard
+
+
+@dataclass
+class DateMenuField(StrictlyInlineFormField[date]):
+    calendar_keyboard_config: CalendarKeyboardConfig
+
+    async def process_callback_query(
+        self, callback_payload: str, current_value: Optional[date], language: MaybeLanguage
+    ) -> CallbackProcessingResult[date]:
+        payload = CalendarCallbackPayload.load(callback_payload)
+        if payload is None:
+            raise RuntimeError(f"Failed to parse CalendarCallbackPayload from {callback_payload!r}")
+        if payload.action is CalendarAction.NOOP:
+            return CallbackProcessingResult(
+                response_to_user=None,
+                updated_inline_markup=None,
+                complete_field=False,
+                new_field_value=None,
+            )
+        elif payload.action is CalendarAction.UPDATE:
+            return CallbackProcessingResult(
+                response_to_user=None,
+                updated_inline_markup=self._calendar_keyboard(
+                    year=payload.year,
+                    month=payload.month,
+                    selected_value=current_value,
+                ),
+                complete_field=False,
+                new_field_value=None,
+            )
+        elif payload.action is CalendarAction.SELECT:
+            # casts are for type system, runtime validation is performed in CalendarCallbackPayload
+            selected_date = date(cast(int, payload.year), cast(int, payload.month), cast(int, payload.day))
+            return CallbackProcessingResult(
+                response_to_user=(
+                    any_text_to_str(self.echo_result_template, language).format(selected_date)
+                    if self.echo_result_template
+                    else None
+                ),
+                updated_inline_markup=self._calendar_keyboard(
+                    selected_date.year,
+                    selected_date.month,
+                    selected_value=selected_date,
+                ),
+                complete_field=True,
+                new_field_value=selected_date,
+            )
+
+    def _calendar_keyboard(
+        self, year: Optional[int], month: Optional[int], selected_value: Optional[date]
+    ) -> tg.InlineKeyboardMarkup:
+        return calendar_keyboard(
+            year=year,
+            month=month,
+            new_callback_data_with_payload=self.new_callback_data,
+            config=self.calendar_keyboard_config,
+            selected_date=selected_value,
+        )
+
+    def get_reply_markup(self, language: MaybeLanguage, current_value: Optional[date] = None) -> tg.ReplyMarkup:
+        return self._calendar_keyboard(
+            year=current_value.year if current_value else None,
+            month=current_value.month if current_value else None,
+            selected_value=current_value,
+        )

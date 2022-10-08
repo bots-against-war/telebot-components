@@ -53,3 +53,7 @@ asyncio_mode = "auto"
 markers = [
     'integration: requires a real bot to run',
 ]
+
+[tool.mypy]
+incremental = false
+files = '.'

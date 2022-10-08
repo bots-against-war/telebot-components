@@ -11,6 +11,8 @@ from telebot.types import constants as tgconst
 
 from telebot_components.form.field import (
     AttachmentsField,
+    CalendarKeyboardConfig,
+    DateMenuField,
     IntegerField,
     MultipleSelectField,
     NextFieldGetter,
@@ -41,7 +43,31 @@ name_field = PlainTextField(
         Language.RU: "Имя не может быть пустым.",
         Language.EN: "The name cannot be empty",
     },
+    next_field_getter=NextFieldGetter.by_name("some-date"),
+)
+
+
+date_field = DateMenuField(
+    name="some-date",
+    required=True,
+    query_message={
+        Language.RU: "Выберите дату.",
+        Language.EN: "Please select the preferred date.",
+    },
+    echo_result_template={
+        Language.RU: "Выбранная дата: {}.",
+        Language.EN: "You shose the following date: {}.",
+    },
     next_field_getter=NextFieldGetter.by_name("age"),
+    please_use_inline_menu={
+        Language.RU: "Пожалуйста, используйте меню.",
+        Language.EN: "Please use inline menu.",
+    },
+    calendar_keyboard_config=CalendarKeyboardConfig(
+        prev_month_button="⬅️",
+        next_month_button="➡️",
+        future_only=False,
+    ),
 )
 
 
@@ -204,6 +230,7 @@ photos_field = AttachmentsField(
 form = Form(
     fields=[
         name_field,
+        date_field,
         age_field,
         favorite_subject_field,
         has_finished_school_field,
@@ -212,50 +239,6 @@ form = Form(
     ],
     start_field=name_field,
 )
-
-
-form.print_graph()
-# ┌─────────────────────┐
-# │        name         │
-# └─────────────────────┘
-#            |
-#            V
-# ┌─────────────────────┐
-# │         age         │
-# │                     │────────┐
-# │                     │────┐   |
-# └─────────────────────┘    |   |
-#            |               |   |
-#            V               |   |
-# ┌─────────────────────┐    |   |
-# │ has_finished_school │    |   |
-# │                     │──┐ |   |
-# └─────────────────────┘  | |   |
-#            |             | |   |
-#            V             | |   |
-# ┌─────────────────────┐  | |   |
-# │                     │<─|─┘   |
-# │  favorite_subject   │  |     |
-# │                     │──|───┐ |
-# └─────────────────────┘  |   | |
-#                          |   | |
-#                          |   | |
-# ┌─────────────────────┐  |   | |
-# │                     │<─┘   | |
-# │                     │<─────|─┘
-# │ university_program  │      |
-# └─────────────────────┘      |
-#            |                 |
-#            V                 |
-# ┌─────────────────────┐      |
-# │                     │<─────┘
-# │       photos        │
-# └─────────────────────┘
-#            |
-#            V
-# ┌─────────────────────┐
-# │         END         │
-# └─────────────────────┘
 
 
 def create_form_bot(redis: RedisInterface, token: str):
@@ -316,7 +299,7 @@ def create_form_bot(redis: RedisInterface, token: str):
     async def default_handler(message: tg.Message):
         await form_handler.start(bot, message.from_user)
 
-    async def on_form_cancelled(context: FormExitContext):
+    async def on_form_cancelled(context: FormExitContext[dict]):
         user = context.last_update.from_user
         language = await language_store.get_user_language(user)
         await bot.send_message(
@@ -326,7 +309,7 @@ def create_form_bot(redis: RedisInterface, token: str):
             ],
         )
 
-    async def on_form_completed(context: FormExitContext):
+    async def on_form_completed(context: FormExitContext[dict]):
         result_to_dump = context.result.copy()
         result_to_dump.pop("photos")
         form_result_dump = pformat(result_to_dump, indent=2, width=70, sort_dicts=False)
@@ -368,4 +351,9 @@ if __name__ == "__main__":
         redis=redis,
         token=os.environ["TOKEN"],
     )
-    asyncio.run(bot_runner.run_polling())
+
+    async def main():
+        print(await bot_runner.bot.get_me())
+        await bot_runner.run_polling()
+
+    asyncio.run(main())
