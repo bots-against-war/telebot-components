@@ -36,6 +36,7 @@ def test_calendar_keyboard():
         month=9,
         new_callback_data_with_payload=lambda x: x,
         config=CalendarKeyboardConfig(),
+        now=datetime.datetime(2022, 9, 17),
     ).to_dict()["inline_keyboard"] == [
         [{"text": "September 2022", "callback_data": "noop"}],
         [
@@ -90,6 +91,7 @@ def test_calendar_keyboard():
             selected_transform=lambda x: f"xXx__{x}__xXx",
         ),
         selected_date=datetime.date(2020, 2, 16),
+        now=datetime.datetime(2022, 9, 17),
     ).to_dict()["inline_keyboard"] == [
         [{"text": "February 2020", "callback_data": "noop"}],
         [

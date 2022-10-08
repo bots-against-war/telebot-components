@@ -88,6 +88,7 @@ def calendar_keyboard(
     new_callback_data_with_payload: Callable[[str], str],
     config: CalendarKeyboardConfig = CalendarKeyboardConfig(),
     selected_date: Optional[datetime.date] = None,
+    now: Optional[datetime.datetime] = None
 ) -> tg.InlineKeyboardMarkup:
     def noop_button(label: str) -> tg.InlineKeyboardButton:
         return tg.InlineKeyboardButton(
@@ -95,12 +96,12 @@ def calendar_keyboard(
             callback_data=new_callback_data_with_payload(CalendarCallbackPayload(CalendarAction.NOOP).dump()),
         )
 
-    now = datetime.datetime.now()
+    now_datetime = now or datetime.datetime.now()
     if year is None:
-        year = now.year
+        year = now_datetime.year
     if month is None:
-        month = now.month
-    is_current_month = (month == now.month) and (year == now.year)
+        month = now_datetime.month
+    is_current_month = (month == now_datetime.month) and (year == now_datetime.year)
     keyboard = []
     keyboard.append([noop_button(f"{calendar.month_name[month]} {str(year)}")])
     keyboard.append([noop_button(weekday_name) for weekday_name in config.weekday_names])
@@ -112,7 +113,7 @@ def calendar_keyboard(
         for day in week:
             ignore_day = day == 0  # i.e. day is outside this month
             if config.future_only:
-                ignore_day = ignore_day or (is_current_month and day < now.day)
+                ignore_day = ignore_day or (is_current_month and day < now_datetime.day)
 
             if ignore_day:
                 row.append(noop_button(" "))
@@ -121,7 +122,7 @@ def calendar_keyboard(
                 day_label = str(day)
                 if selected_date is not None and datetime.date(year, month, day) == selected_date:
                     day_label = config.selected_transform(day_label)
-                elif is_current_month and day == now.day:
+                elif is_current_month and day == now_datetime.day:
                     day_label = config.today_transform(day_label)
                 row.append(
                     tg.InlineKeyboardButton(
