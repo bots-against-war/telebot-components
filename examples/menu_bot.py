@@ -4,7 +4,13 @@ from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.runner import BotRunner
 
-from telebot_components.menu.menu import Menu, MenuHandler, MenuItem, TerminatorContext
+from telebot_components.menu.menu import (
+    Menu,
+    MenuConfig,
+    MenuHandler,
+    MenuItem,
+    TerminatorContext,
+)
 
 FIRST_TERMINATOR = "first"
 SECOND_TERMINATOR = "second"
@@ -17,23 +23,27 @@ def create_menu_bot(token: str):
     logging.basicConfig(level=logging.DEBUG)
 
     menu_tree = Menu(
-        "Main menu:",
-        [
+        text="Main menu:",
+        config=MenuConfig(
+            back_label="<<<<<",
+            lock_after_termination=False,
+        ),
+        menu_items=[
             MenuItem(
                 label="option 1",
                 submenu=Menu(
                     "Submenu 1:",
                     [
                         MenuItem(
-                            label="option 1",
+                            label="suboption 1.1",
                             terminator=FIRST_TERMINATOR,
                         ),
                         MenuItem(
-                            label="option 2",
+                            label="suboption 1.2",
                             terminator=SECOND_TERMINATOR,
                         ),
                         MenuItem(
-                            label="option 3",
+                            label="suboption 1.3",
                             terminator=THIRD_TERMINATOR,
                         ),
                     ],
@@ -45,15 +55,15 @@ def create_menu_bot(token: str):
                     "Submenu 2:",
                     [
                         MenuItem(
-                            label="option 1",
+                            label="suboption 2.1",
+                            terminator=FIRST_TERMINATOR,
+                        ),
+                        MenuItem(
+                            label="suboption 2.2",
                             terminator=SECOND_TERMINATOR,
                         ),
                         MenuItem(
-                            label="option 2",
-                            terminator=SECOND_TERMINATOR,
-                        ),
-                        MenuItem(
-                            label="option 3",
+                            label="suboption 2.3",
                             terminator=THIRD_TERMINATOR,
                         ),
                     ],

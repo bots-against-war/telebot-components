@@ -13,14 +13,24 @@ INACTIVE_BUTTON_CALLBACK_DATA = CallbackData(prefix="inactive_button")
 
 
 class MenuItem:
-    def __init__(self, label: str, submenu: Optional["Menu"] = None, terminator: Optional[str] = None):
+    def __init__(
+        self,
+        label: str,
+        submenu: Optional["Menu"] = None,
+        terminator: Optional[str] = None,
+        link_url: Optional[str] = None,
+    ):
         self.label = label
+
         self.submenu = submenu
         self.terminator = terminator
+        self.link_url = link_url
 
-        if not ((self.submenu is None) ^ (self.terminator is None)):
-            raise RuntimeError(
-                "MenuItem is not configured correctly. Either submenu or terminator must be specified in one MenuItem."
+        specified_options_count = sum([int(opt is not None) for opt in [self.submenu, self.terminator, self.link_url]])
+        if specified_options_count != 1:
+            raise ValueError(
+                "Exactly one of the arguments must be set to non-None value: submenu, terminator, or link_url, "
+                + f"but {submenu = }, {terminator = }, {link_url = }"
             )
 
         self._id: Optional[str] = None
@@ -48,10 +58,14 @@ class MenuItem:
 
     def get_inline_button(self):
         if self.submenu is not None:
-
             return tg.InlineKeyboardButton(
                 text=self.label,
                 callback_data=ROUTE_MENU_CALLBACK_DATA.new(self.submenu.id),
+            )
+        elif self.link_url is not None:
+            return tg.InlineKeyboardButton(
+                text=self.label,
+                url=self.link_url,
             )
         else:
             return tg.InlineKeyboardButton(
@@ -59,7 +73,7 @@ class MenuItem:
                 callback_data=TERMINATE_MENU_CALLBACK_DATA.new(self.id),
             )
 
-    def get_blocked_inline_button(self, selected_item_id: str):
+    def get_inactive_inline_button(self, selected_item_id: str):
         button_text = self.label
         if self.id == selected_item_id:
             button_text = "✅ " + button_text
@@ -72,6 +86,7 @@ class MenuItem:
 @dataclass(frozen=True)
 class MenuConfig:
     back_label: str
+    lock_after_termination: bool
 
 
 class Menu:
@@ -85,16 +100,19 @@ class Menu:
         self.parent_menu: Optional["Menu"] = None
         self.text = text
         self.menu_items = menu_items
-        self.config = config
+        self._explicit_config = config
 
     @property
-    def effective_config(self) -> MenuConfig:
-        if self.config is not None:
-            return self.config
+    def config(self) -> MenuConfig:
+        if self._explicit_config is not None:
+            return self._explicit_config
         elif self.parent_menu is not None:
-            return self.parent_menu.effective_config
+            return self.parent_menu.config
         else:
-            return MenuConfig(back_label="back")  # backwards compatibility for pre-config code
+            return MenuConfig(
+                back_label="back",
+                lock_after_termination=True,
+            )  # backwards compatibility for pre-config code
 
     @property
     def id(self) -> str:
@@ -116,14 +134,12 @@ class Menu:
     def get_keyboard_markup(self):
         keyboard = [[menu_item.get_inline_button()] for menu_item in self.menu_items]
         if self.parent_menu is not None:
-            keyboard.append(
-                [MenuItem(label=self.effective_config.back_label, submenu=self.parent_menu).get_inline_button()]
-            )
+            keyboard.append([MenuItem(label=self.config.back_label, submenu=self.parent_menu).get_inline_button()])
         return tg.InlineKeyboardMarkup(keyboard=keyboard)
 
     def get_inactive_keyboard_markup(self, selected_item_id: str):
         return tg.InlineKeyboardMarkup(
-            keyboard=[[menu_item.get_blocked_inline_button(selected_item_id)] for menu_item in self.menu_items]
+            keyboard=[[menu_item.get_inactive_inline_button(selected_item_id)] for menu_item in self.menu_items]
         )
 
 
@@ -219,11 +235,12 @@ class MenuHandler:
                 self.logger.exception("Unexpected error in on_terminal_menu_option_selected callback, ignoring")
 
             current_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
-            try:
-                await bot.edit_message_reply_markup(
-                    chat_id=user.id,
-                    message_id=call.message.id,
-                    reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
-                )
-            except ApiHTTPException as e:
-                self.logger.info(f"Error editing message reply markup: {e!r}")
+            if current_menu.config.lock_after_termination:
+                try:
+                    await bot.edit_message_reply_markup(
+                        chat_id=user.id,
+                        message_id=call.message.id,
+                        reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
+                    )
+                except ApiHTTPException as e:
+                    self.logger.info(f"Error editing message reply markup: {e!r}")
