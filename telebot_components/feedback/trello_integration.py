@@ -130,6 +130,8 @@ class TrelloIntegration:
         # used to sign trello cards with anonymized user id hash (unique for a user and a bot prefix)
         #                        user id, bot prefix
         user_id_hash_func: Callable[[int, str], str] = emoji_hash,
+        # if set to False, exported messages do not have a backlink to the admin chat
+        admin_chat_backlink: bool = True,
     ):
         self.bot = bot
         self.redis = redis
@@ -140,6 +142,7 @@ class TrelloIntegration:
         self.reply_with_card_comments = reply_with_card_comments
         self.unanswered_label_config = unanswered_label_config
         self.user_id_hash_func = user_id_hash_func
+        self.admin_chat_backlink = admin_chat_backlink
 
         self.trello_card_data_for_user = KeyValueStore[TrelloCardData](
             name="trello-card-data",
@@ -526,7 +529,7 @@ class TrelloIntegration:
         forwarded_message: tg.Message,
         category: Optional[Category] = None,
         postprocess_card_description: Callable[[str], str] = lambda s: s,
-        add_admin_chat_link: bool = True,
+        add_admin_chat_link: Optional[bool] = None,
     ) -> None:
         self.ensure_initialized()
         if category is None:
@@ -546,7 +549,7 @@ class TrelloIntegration:
         card_content = await self._card_content_from_message(forwarded_message, user.id, include_attachments=True)
         self.logger.debug(f"Card content: {card_content}")
         card_content.description = postprocess_card_description(card_content.description)
-        if add_admin_chat_link:
+        if add_admin_chat_link if add_admin_chat_link is not None else self.admin_chat_backlink:
             card_content.description = self._add_admin_chat_link(card_content.description, to_message=forwarded_message)
         card_content.description = "👤: " + card_content.description
 
