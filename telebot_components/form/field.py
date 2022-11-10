@@ -299,7 +299,7 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
             return False
 
     def value_to_str(self, value: list[TelegramAttachment], language: MaybeLanguage) -> str:
-        return str(len(value))
+        return f"{len(value)} attachments"
 
     async def process_message(
         self, message: tg.Message, language: MaybeLanguage

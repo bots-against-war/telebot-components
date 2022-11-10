@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from enum import Enum, auto
+from itertools import chain
 from typing import (
     Any,
     Callable,
@@ -49,19 +50,46 @@ logger = logging.getLogger(__name__)
 @dataclass
 class FormHandlerConfig:
     echo_filled_field: bool
+
+    # e.g. "Please enter the correct value."
     retry_field_msg: AnyText
-    # should have placeholder for available commands
+
+    # should have placeholder for available commands, e.g. "Unknown command! Available commands are: {}."
     unsupported_cmd_error_template: AnyText
-    # should have placeholder for error
+
+    # should have placeholder for error, e.g. "Something went wrong but we're working on it (details: {})."
     cancelling_because_of_error_template: AnyText
-    # should have placeholder for cancel commands
+
+    # should have placeholder for cancel commands, e.g. "Welcome to my awesome form! To cancel, use {}."
     form_starting_template: AnyText
-    # should have placeholder for skip command
+
+    # should have placeholder for skip command, e.g. "Use {} to skip this field."
     can_skip_field_template: AnyText
+    # e.g. "This field can not be skipped!"
     cant_skip_field_msg: AnyText
+
     cancel_cmd: str = "/cancel"
     cancel_aliases: list[str] = dataclass_field(default_factory=list)
     skip_cmd: str = "/skip"
+
+    # if set to any text value and any field already has results present (from initial_form_result or
+    # because of circular form structure), this is added to the field query
+    # should have 2 placeholders, e.g. "To keep existing value {}, use {}"
+    keep_existing_field_value_template: Optional[AnyText] = None
+    keep_cmd: str = "/keep"
+
+    def texts(self) -> list[AnyText]:
+        res = [
+            self.retry_field_msg,
+            self.cancelling_because_of_error_template,
+            self.form_starting_template,
+            self.can_skip_field_template,
+            self.cant_skip_field_msg,
+            self.unsupported_cmd_error_template,
+        ]
+        if self.keep_existing_field_value_template is not None:
+            res.append(self.keep_existing_field_value_template)
+        return res
 
     @property
     def cancel_cmds(self) -> list[str]:
@@ -69,10 +97,22 @@ class FormHandlerConfig:
 
     @property
     def available_cmds(self) -> list[str]:
-        return [self.skip_cmd] + self.cancel_cmds
+        cmds = [self.skip_cmd] + self.cancel_cmds
+        if self.is_keeping_existing_field_value():
+            cmds.append(self.keep_cmd)
+        return cmds
+
+    def is_keeping_existing_field_value(self) -> bool:
+        return self.keep_existing_field_value_template is not None
 
     def can_skip_field_msg(self, language: MaybeLanguage) -> str:
         return any_text_to_str(self.can_skip_field_template, language).format(self.skip_cmd)
+
+    def keep_existing_field_value_msg(self, value_dump: str, language: MaybeLanguage) -> Optional[str]:
+        if self.keep_existing_field_value_template is None:
+            return None
+        else:
+            return any_text_to_str(self.keep_existing_field_value_template, language).format(value_dump, self.keep_cmd)
 
     def form_starting_msg(self, language: MaybeLanguage) -> str:
         return any_text_to_str(self.form_starting_template, language).format(", ".join(self.cancel_cmds))
@@ -133,11 +173,20 @@ class FormState(Generic[FormResultT]):
 
     async def _full_query_message(
         self, field: FormField, user: tg.User, language: MaybeLanguage, form_handler_config: FormHandlerConfig
-    ):
-        query_text = any_text_to_str(await field.get_query_message(user), language)
+    ) -> str:
+        sentences = [any_text_to_str(await field.get_query_message(user), language)]
         if not field.required:
-            query_text += " " + form_handler_config.can_skip_field_msg(language)
-        return query_text
+            sentences.append(form_handler_config.can_skip_field_msg(language))
+        existing_field_value = self.result_so_far.get(field.name)
+        if existing_field_value is not None:
+            keep_existing_field_value_sentence = form_handler_config.keep_existing_field_value_msg(
+                field.value_to_str(existing_field_value, language),
+                language,
+            )
+            if keep_existing_field_value_sentence is not None:
+                sentences.append(keep_existing_field_value_sentence)
+
+        return " ".join(sentences)
 
     def get_current_reply_markup(self, language: MaybeLanguage):
         return self.current_field.get_reply_markup(
@@ -153,18 +202,28 @@ class FormState(Generic[FormResultT]):
     ) -> _FormStateUpdateEffect:
         reply_paragraphs: list[str] = []
 
+        save_field_value: bool = True
+        value: Optional[Any] = None
+        result_msg: Optional[str] = None
+
         message_cmd = message.text_content.strip() if message.content_type == "text" else None
         if message_cmd is not None and message_cmd.startswith("/"):
             if message_cmd in form_handler_config.cancel_cmds:
                 return _FormStateUpdateEffect(_FormAction.CANCEL)
             elif message_cmd == form_handler_config.skip_cmd:
                 if not self.current_field.required:
-                    value = None
-                    result_msg = None
                     field_ok = True
                 else:
-                    value = None
                     result_msg = any_text_to_str(form_handler_config.cant_skip_field_msg, language)
+                    field_ok = False
+            elif message_cmd == form_handler_config.keep_cmd:
+                if (
+                    form_handler_config.is_keeping_existing_field_value()
+                    and self.current_field.name in self.result_so_far
+                ):
+                    field_ok = True
+                    save_field_value = False
+                else:
                     field_ok = False
             else:
                 return _FormStateUpdateEffect(
@@ -176,9 +235,9 @@ class FormState(Generic[FormResultT]):
                 )
         else:
             result = await self.current_field.process_message(message, language)
-            field_ok = result.parsed_value is not None
-            result_msg = result.response_to_user
             value = result.parsed_value
+            result_msg = result.response_to_user
+            field_ok = result.parsed_value is not None
             if result.no_form_state_mutation:
                 return _FormStateUpdateEffect(
                     _FormAction.KEEP_GOING,
@@ -197,7 +256,9 @@ class FormState(Generic[FormResultT]):
                 ),
             )
 
-        self.result_so_far[self.current_field.name] = value
+        if save_field_value:
+            self.result_so_far[self.current_field.name] = value
+
         if form_handler_config.echo_filled_field and result_msg is not None:
             reply_paragraphs.append(result_msg)
 
@@ -302,22 +363,11 @@ class FormHandler(Generic[FormResultT]):
 
         self.language_store = language_store
 
-        form_related_texts = [
-            self.config.retry_field_msg,
-            self.config.cancelling_because_of_error_template,
-            self.config.form_starting_template,
-            self.config.can_skip_field_template,
-            self.config.cant_skip_field_msg,
-            self.config.unsupported_cmd_error_template,
-        ]
-        for field in self.form.fields:
-            form_related_texts.extend(field.texts())
-
-        for text in form_related_texts:
+        for any_text in chain.from_iterable([self.config.texts()] + [f.texts() for f in self.form.fields]):
             if self.language_store is not None:
-                self.language_store.validate_multilang(text)
+                self.language_store.validate_multilang(any_text)
             else:
-                vaildate_singlelang_text(text)
+                vaildate_singlelang_text(any_text)
 
     async def get_maybe_language(self, user: tg.User) -> MaybeLanguage:
         if self.language_store is None:
