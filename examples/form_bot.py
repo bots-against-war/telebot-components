@@ -72,13 +72,15 @@ date_field = DateMenuField(
 
 
 def after_age_field(u: tg.User, v: Any) -> str:
-    v = cast(int, v)
-    if v < 16:
-        return "favorite_subject"
-    elif v < 18:
-        return "has_finished_school"
+    if isinstance(v, int):
+        if v < 16:
+            return "favorite_subject"
+        elif v < 18:
+            return "has_finished_school"
+        else:
+            return "university_program"
     else:
-        return "university_program"
+        return "has_finished_school"
 
 
 age_field = IntegerField(
@@ -291,13 +293,27 @@ def create_form_bot(redis: RedisInterface, token: str):
             cancel_cmd="/cancel",
             cancel_aliases=["/stop", "/menu"],
             skip_cmd="/skip",
+            keep_existing_field_value_template={
+                Language.RU: "Текущее значение: {}; {} - оставить его.",
+                Language.EN: "Current value: {}; use {} to keep it.",
+            },
+            keep_cmd="/keep",
         ),
         language_store=language_store,
     )
 
     @bot.message_handler()
     async def default_handler(message: tg.Message):
-        await form_handler.start(bot, message.from_user)
+        await form_handler.start(
+            bot,
+            message.from_user,
+            # these are used as "current values" or "defaults" and can be kept with /keep cmd
+            initial_form_result={
+                "university_program": "Mathematics",
+                "has_finished_school": YesNo.YES,
+                "favorite_subject": {SchoolSubject.SCIENCE, SchoolSubject.PE},
+            },
+        )
 
     async def on_form_cancelled(context: FormExitContext[dict]):
         user = context.last_update.from_user
