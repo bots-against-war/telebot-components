@@ -235,12 +235,11 @@ photos_field = AttachmentsField(
 class FormResultT(TypedDict, total=False):
     """Typing form results can be done through TypedDict with some caveats:
 
-    - keys and their types must be in sync with form field names and values types; this can't be
-      checked by mypy, but can be validated at runtime with TBD (experimental)
-    - not required fields in the form must be marked as Optional (None value in the result means
-      that the form has been skipped)
-    - to specify some of the fields in the initial form result, set total=False in the TypedDict
-      inheritance param
+    - Keys and types must correspond to the form field names and value types; this can't be checked by mypy, but can
+      be validated at runtime with Formt.validate_result_type method (experimental)
+    - Not required fields must be typed as Optional[<actual-value-type>] - None value means the field has been skipped
+    - To specify some of the fields in the initial form result, set total=False in the TypedDict inheritance param
+    - The source code for the typed dict can be generated with Form.generate_result_type method (extremely experimental)
     """
 
     name: str
