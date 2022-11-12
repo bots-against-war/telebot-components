@@ -119,7 +119,10 @@ class Form:
         if isinstance(fvt, GenericAlias):
             return repr(fvt)  # generic aliases are nicely formatted for printing and include type args
         else:
-            return fvt.__name__
+            try:
+                return fvt.__name__
+            except Exception:
+                return str(fvt)
 
     def validate_result_type(self, typed_dict_type: Type[Mapping]):
         if not isinstance(typed_dict_type, _TypedDictMeta):
@@ -134,7 +137,10 @@ class Form:
                 expected_value_type = Optional[expected_value_type]  # type: ignore
             if actual_value_type != expected_value_type:
                 raise TypeError(
-                    f"Invalid result type: {field.name!r} must be typed as {self._field_value_type_to_string(expected_value_type)}"
+                    f"Invalid result type: {field.name!r} must be typed "
+                    + f"as {self._field_value_type_to_string(expected_value_type)}, not "
+                    + f"{self._field_value_type_to_string(actual_value_type)}"
+                    + (" (Optional reflects the fact that the field is not required)" if not field.required else "")
                 )
 
     def generate_result_type(self) -> str:
@@ -144,7 +150,10 @@ class Form:
         if self.topologically_sorted_field_names is not None:
             fields.sort(key=lambda ff: self.topologically_sorted_field_names.index(ff.name))  # type: ignore
         for field in fields:
-            lines.append(indent + f"{field.name}: {self._field_value_type_to_string(self._field_value_type(field))}")
+            field_type_str = self._field_value_type_to_string(self._field_value_type(field))
+            if not field.required:
+                field_type_str = f"Optional[{field_type_str}]"
+            lines.append(indent + f"{field.name}: {field_type_str}")
         return "\n".join(lines)
 
     def print_graph(self):
