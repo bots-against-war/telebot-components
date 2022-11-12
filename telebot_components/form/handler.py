@@ -11,7 +11,7 @@ from typing import (
     Callable,
     Coroutine,
     Generic,
-    MutableMapping,
+    Mapping,
     Optional,
     TypeVar,
     Union,
@@ -41,7 +41,7 @@ from telebot_components.stores.language import (
 from telebot_components.utils import from_yaml_unsafe, join_paragraphs, to_yaml_unsafe
 from telebot_components.utils.strings import telegram_html_escape
 
-FormResultT = TypeVar("FormResultT", bound=MutableMapping[str, Any])
+FormResultT = TypeVar("FormResultT", bound=Mapping[str, Any])
 
 
 logger = logging.getLogger(__name__)
@@ -257,7 +257,8 @@ class FormState(Generic[FormResultT]):
             )
 
         if save_field_value:
-            self.result_so_far[self.current_field.name] = value
+            # result_so_far is typed as immutable Mapping to allow TypedDict's, but here we actually construct it
+            self.result_so_far[self.current_field.name] = value  # type: ignore
 
         if form_handler_config.echo_filled_field and result_msg is not None:
             reply_paragraphs.append(result_msg)
@@ -299,7 +300,8 @@ class FormState(Generic[FormResultT]):
             language=language,
         )
         if field_result.new_field_value is not None:
-            self.result_so_far[self.current_field.name] = field_result.new_field_value
+            # result_so_far is typed as immutable Mapping to allow TypedDict's, but here we actually construct it
+            self.result_so_far[self.current_field.name] = field_result.new_field_value  # type: ignore
         paragraphs: list[str] = []
         if field_result.response_to_user:
             paragraphs.append(field_result.response_to_user)
