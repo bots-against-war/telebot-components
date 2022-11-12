@@ -1,8 +1,9 @@
+import datetime
 import html
 import logging
 from enum import Enum
 from pprint import pformat
-from typing import Any, cast
+from typing import Any, Optional, TypedDict
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -18,6 +19,7 @@ from telebot_components.form.field import (
     NextFieldGetter,
     PlainTextField,
     SingleSelectField,
+    TelegramAttachment,
 )
 from telebot_components.form.form import Form
 from telebot_components.form.handler import (
@@ -27,6 +29,7 @@ from telebot_components.form.handler import (
 )
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.language import Language, LanguageStore
+from telebot_components.utils import send_attachment
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -43,12 +46,12 @@ name_field = PlainTextField(
         Language.RU: "Имя не может быть пустым.",
         Language.EN: "The name cannot be empty",
     },
-    next_field_getter=NextFieldGetter.by_name("some-date"),
+    next_field_getter=NextFieldGetter.by_name("date"),
 )
 
 
 date_field = DateMenuField(
-    name="some-date",
+    name="date",
     required=True,
     query_message={
         Language.RU: "Выберите дату.",
@@ -229,6 +232,25 @@ photos_field = AttachmentsField(
 )
 
 
+class FormResultT(TypedDict, total=False):
+    """Typing form results can be done through TypedDict with some caveats:
+
+    - Keys and types must correspond to the form field names and value types; this can't be checked by mypy, but can
+      be validated at runtime with Formt.validate_result_type method (experimental)
+    - Not required fields must be typed as Optional[<actual-value-type>] - None value means the field has been skipped
+    - To specify some of the fields in the initial form result, set total=False in the TypedDict inheritance param
+    - The source code for the typed dict can be generated with Form.generate_result_type method (extremely experimental)
+    """
+
+    name: str
+    date: datetime.date
+    age: Optional[int]
+    favorite_subject: set[SchoolSubject]
+    has_finished_school: YesNo
+    university_program: str
+    photos: list[TelegramAttachment]
+
+
 form = Form(
     fields=[
         name_field,
@@ -241,6 +263,10 @@ form = Form(
     ],
     start_field=name_field,
 )
+
+form.validate_result_type(FormResultT)
+
+print(form.generate_result_type())
 
 
 def create_form_bot(redis: RedisInterface, token: str):
@@ -259,7 +285,7 @@ def create_form_bot(redis: RedisInterface, token: str):
             reply_markup=(await language_store.markup_for_user(message.from_user)),
         )
 
-    form_handler = FormHandler[dict](
+    form_handler = FormHandler[FormResultT](
         redis=redis,
         bot_prefix=bot_prefix,
         name="example",
@@ -315,7 +341,7 @@ def create_form_bot(redis: RedisInterface, token: str):
             },
         )
 
-    async def on_form_cancelled(context: FormExitContext[dict]):
+    async def on_form_cancelled(context: FormExitContext[FormResultT]):
         user = context.last_update.from_user
         language = await language_store.get_user_language(user)
         await bot.send_message(
@@ -325,7 +351,7 @@ def create_form_bot(redis: RedisInterface, token: str):
             ],
         )
 
-    async def on_form_completed(context: FormExitContext[dict]):
+    async def on_form_completed(context: FormExitContext[FormResultT]):
         result_to_dump = context.result.copy()
         result_to_dump.pop("photos")
         form_result_dump = pformat(result_to_dump, indent=2, width=70, sort_dicts=False)
@@ -334,11 +360,8 @@ def create_form_bot(redis: RedisInterface, token: str):
             f"<pre>{html.escape(form_result_dump, quote=False)}</pre>",
             parse_mode="HTML",
         )
-        photos: list[list[tg.PhotoSize]] = context.result["photos"]
-        for photo in photos:
-            await bot.send_photo(
-                context.last_update.from_user.id, photo=photo[0].file_id, caption=photo[0].file_unique_id
-            )
+        for photo in context.result["photos"]:
+            await send_attachment(bot, context.last_update.from_user.id, attachment=photo)
 
     form_handler.setup(bot, on_form_completed=on_form_completed, on_form_cancelled=on_form_cancelled)
     language_store.setup(bot)

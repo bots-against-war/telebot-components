@@ -9,7 +9,6 @@ from datetime import date, time, tzinfo
 from enum import Enum
 from hashlib import md5
 from typing import (
-    Awaitable,
     Callable,
     ClassVar,
     Dict,
@@ -105,6 +104,16 @@ class FormField(Generic[FieldValueT]):
 
     def __post_init__(self):
         pass  # future-proof
+
+    def custom_value_type(self) -> Optional[Type]:
+        """Used for runtime form result type validation (see Form.validate_result_type). In trivial cases
+        like PlainTextField field value type is obtained from introspection, but sometimes this is
+        impossible (e.g. in MultipleSelectField), and this method is used.
+
+        If your custom FormField subclass has a complex dynamic value type, override this method and
+        return this type.
+        """
+        return None
 
     async def process_message(
         self, message: tg.Message, language: MaybeLanguage
@@ -399,6 +408,9 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
     invalid_enum_value_error_msg: AnyText
     menu_row_width: int = 2
 
+    def custom_value_type(self) -> Type:
+        return self.EnumClass
+
     def value_to_str(self, value: Enum, language: MaybeLanguage) -> str:
         return any_text_to_str(value.value, language)
 
@@ -485,6 +497,9 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
     def __post_init__(self) -> None:
         super().__post_init__()
         self._option_by_hash = {self.option_hash(o): o for o in self.EnumClass}
+
+    def custom_value_type(self) -> Type:
+        return set[self.EnumClass]  # type: ignore
 
     def option_hash(self, option: Enum) -> str:
         if isinstance(option.value, str):
