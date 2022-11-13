@@ -256,7 +256,11 @@ def test_html_link(href: str, text: str, expected: str):
 @pytest.mark.parametrize(
     "description, user_id, expected_card_title",
     [
-        pytest.param("hello world", 123, "🈹🤧🙀🟧: hello world"),
+        pytest.param(
+            "hello world",
+            123,
+            "🈹🤧🙀🟧: hello world",
+        ),
         pytest.param(
             "helloooooooooooooooooooooooooooooooooooo wooooooooooooooooooorld",
             1312,
@@ -271,6 +275,11 @@ def test_html_link(href: str, text: str, expected: str):
             "                           some poorly\n\n\n\n\n\nformatted\n\n\t\t\t\ttext with\n * bullet\n * points\n * list",
             69,
             "🕟🪪🍚🙅: some poorly formatted text with bullet points...",
+        ),
+        pytest.param(
+            "# header1 escaped\\_underscores and ```code```",
+            10000,
+            "🌭🦺🐄🤼: header1 escaped_underscores and code",
         ),
     ],
 )
