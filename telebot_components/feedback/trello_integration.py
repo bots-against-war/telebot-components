@@ -1,7 +1,6 @@
 import asyncio
-import hashlib
-import json
 import logging
+import re
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -40,6 +39,7 @@ from telebot_components.utils import (
     telegram_message_url,
     trim_with_ellipsis,
 )
+from telebot_components.utils.strings import strip_markdown
 
 TrelloLabelColor = Literal["yellow", "purple", "blue", "red", "green", "orange", "black", "sky", "pink", "lime"]
 
@@ -634,7 +634,13 @@ class TrelloIntegration:
             self.logger.exception(f"Error exporting admin message #{message}, ignoring")
 
     def _title_with_user_hash(self, user_id: int, description: str) -> str:
-        return f"{self.user_id_hash_func(user_id, self.bot_prefix)}: {trim_with_ellipsis(description, target_len=40)}"
+        title = description
+        title = strip_markdown(title)
+        title = trim_with_ellipsis(title, target_len=40)
+        title = re.sub(r"\s+", " ", title)
+        title = title.strip()
+        user_hash_prefix = self.user_id_hash_func(user_id, self.bot_prefix)
+        return f"{user_hash_prefix}: {title}"
 
     async def create_unanswered_label(self) -> trello.Label:
         loop = asyncio.get_running_loop()

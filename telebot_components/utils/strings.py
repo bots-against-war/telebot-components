@@ -1,6 +1,9 @@
 import math
 import re
 
+import markdown  # type: ignore
+from bs4 import BeautifulSoup  # type: ignore
+
 
 def mask(string: str, open_ratio: float) -> str:
     """some-very-secret-string -> some-ver****************"""
@@ -29,3 +32,9 @@ def remove_command_prefix(message_text: str) -> str:
 
 def html_link(href: str, text: str) -> str:
     return f'<a href="{href}">{text}</a>'
+
+
+def strip_markdown(md: str) -> str:
+    html = markdown.markdown(md)
+    soup = BeautifulSoup(html, features="html.parser")
+    return soup.get_text()
