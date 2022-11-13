@@ -15,7 +15,7 @@ dirty = true
 style="semver"
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = "^3.10"
 telebot-against-war = "^0.5.4"
 redis = "^4.3.1"
 py-trello = "^0.18.0"
