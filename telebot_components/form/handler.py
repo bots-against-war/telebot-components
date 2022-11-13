@@ -171,16 +171,16 @@ class FormState(Generic[FormResultT]):
             logger.exception("Error loading form state from persistent storage")
             return None
 
-    async def _full_query_message(
-        self, field: FormField, user: tg.User, language: MaybeLanguage, form_handler_config: FormHandlerConfig
+    async def get_current_query_message(
+        self, user: tg.User, language: MaybeLanguage, form_handler_config: FormHandlerConfig
     ) -> str:
-        sentences = [any_text_to_str(await field.get_query_message(user), language)]
-        if not field.required:
+        sentences = [any_text_to_str(await self.current_field.get_query_message(user), language)]
+        if not self.current_field.required:
             sentences.append(form_handler_config.can_skip_field_msg(language))
-        existing_field_value = self.result_so_far.get(field.name)
+        existing_field_value = self.result_so_far.get(self.current_field.name)
         if existing_field_value is not None:
             keep_existing_field_value_sentence = form_handler_config.keep_existing_field_value_msg(
-                field.value_to_str(existing_field_value, language),
+                self.current_field.value_to_str(existing_field_value, language),
                 language,
             )
             if keep_existing_field_value_sentence is not None:
@@ -188,7 +188,7 @@ class FormState(Generic[FormResultT]):
 
         return " ".join(sentences)
 
-    def get_current_reply_markup(self, language: MaybeLanguage):
+    def get_current_reply_markup(self, language: MaybeLanguage) -> tg.ReplyMarkup:
         return self.current_field.get_reply_markup(
             language,
             current_value=self.result_so_far.get(self.current_field.name),
@@ -271,10 +271,8 @@ class FormState(Generic[FormResultT]):
                     _UserAction(send_message_html=join_paragraphs(reply_paragraphs)) if reply_paragraphs else None
                 ),
             )
-        reply_paragraphs.append(
-            await self._full_query_message(next_field, message.from_user, language, form_handler_config)
-        )
         self.current_field = next_field
+        reply_paragraphs.append(await self.get_current_query_message(message.from_user, language, form_handler_config))
         return _FormStateUpdateEffect(
             _FormAction.KEEP_GOING,
             user_action=_UserAction(
@@ -315,11 +313,9 @@ class FormState(Generic[FormResultT]):
             if next_field is None:
                 form_action = _FormAction.COMPLETE
             else:
-                paragraphs.append(
-                    await self._full_query_message(next_field, call.from_user, language, form_handler_config)
-                )
-                send_reply_keyboard = next_field.get_reply_markup(language)
                 self.current_field = next_field
+                paragraphs.append(await self.get_current_query_message(call.from_user, language, form_handler_config))
+                send_reply_keyboard = self.get_current_reply_markup(language)
 
         return _FormStateUpdateEffect(
             form_action=form_action,
@@ -492,7 +488,7 @@ class FormHandler(Generic[FormResultT]):
             text=join_paragraphs(
                 [
                     self.config.form_starting_msg(language),
-                    any_text_to_str((await self.form.start_field.get_query_message(user)), language),
+                    await initial_form_state.get_current_query_message(user, language, self.config),
                 ]
             ),
             reply_markup=initial_form_state.get_current_reply_markup(language),
