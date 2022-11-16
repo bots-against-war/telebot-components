@@ -278,7 +278,10 @@ simple_sequential_form = Form(
             empty_text_error_msg="Foo must be a string!",
         ),
         PlainTextField(
-            name="bar", required=False, query_message="Enter bar...", empty_text_error_msg="Bar must be a string!"
+            name="bar",
+            required=False,
+            query_message="Enter bar...",
+            empty_text_error_msg="Bar must be a string!",
         ),
     ]
 )
