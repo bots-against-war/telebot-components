@@ -269,6 +269,24 @@ form.validate_result_type(FormResultT)
 print(form.generate_result_type())
 
 
+simple_sequential_form = Form(
+    fields=[
+        PlainTextField(
+            name="foo",
+            required=True,
+            query_message="Enter foo...",
+            empty_text_error_msg="Foo must be a string!",
+        ),
+        PlainTextField(
+            name="bar",
+            required=False,
+            query_message="Enter bar...",
+            empty_text_error_msg="Bar must be a string!",
+        ),
+    ]
+)
+
+
 def create_form_bot(redis: RedisInterface, token: str):
     bot = AsyncTeleBot(token)
     bot_prefix = "example-form-bot"
@@ -328,6 +346,26 @@ def create_form_bot(redis: RedisInterface, token: str):
         language_store=language_store,
     )
 
+    aux_form_handler = FormHandler[dict](
+        redis=redis,
+        bot_prefix=bot_prefix,
+        name="simple-aux-form",
+        form=simple_sequential_form,
+        config=FormHandlerConfig(
+            echo_filled_field=False,
+            retry_field_msg="Enter the correct value...",
+            unsupported_cmd_error_template="Available commands are: {}",
+            cancelling_because_of_error_template="Unexpected error: {}",
+            form_starting_template="Example of the simplified form API",
+            can_skip_field_template="{} - skip.",
+            cant_skip_field_msg="This field is required.",
+        ),
+    )
+
+    @bot.message_handler(commands=["aux_form"])
+    async def aux_form_start(message: tg.Message):
+        await aux_form_handler.start(bot, message.from_user)
+
     @bot.message_handler()
     async def default_handler(message: tg.Message):
         await form_handler.start(
@@ -363,8 +401,13 @@ def create_form_bot(redis: RedisInterface, token: str):
         for photo in context.result["photos"]:
             await send_attachment(bot, context.last_update.from_user.id, attachment=photo)
 
-    form_handler.setup(bot, on_form_completed=on_form_completed, on_form_cancelled=on_form_cancelled)
+    form_handler.setup(bot, on_form_completed, on_form_cancelled)
     language_store.setup(bot)
+
+    async def on_aux_form_completed(context: FormExitContext[dict]):
+        await bot.send_message(context.last_update.from_user.id, "Success! Thank you :)")
+
+    aux_form_handler.setup(bot, on_aux_form_completed)
 
     return BotRunner(
         bot_prefix="example-form-bot",

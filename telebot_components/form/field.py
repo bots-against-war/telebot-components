@@ -99,11 +99,23 @@ class FormField(Generic[FieldValueT]):
     name: str
     required: bool
     query_message: AnyText
-    echo_result_template: Optional[AnyText]  # should contain 1 '{}' for field value
-    next_field_getter: NextFieldGetter[FieldValueT]
+
+    # should contain 1 '{}' for field value
+    echo_result_template: Optional[AnyText] = dataclass_field(default=None, kw_only=True)
+
+    # None (default) means sequential form flow
+    next_field_getter: Optional[NextFieldGetter[FieldValueT]] = dataclass_field(default=None, kw_only=True)
 
     def __post_init__(self):
         pass  # future-proof
+
+    def get_next_field_getter(self) -> NextFieldGetter[FieldValueT]:
+        if self.next_field_getter is None:
+            raise RuntimeError(
+                f"{self}: next field getter wasn't properly initialized; "
+                + "either specify it directly or wrap the field in the Form to use sequential structure"
+            )
+        return self.next_field_getter
 
     def custom_value_type(self) -> Optional[Type]:
         """Used for runtime form result type validation (see Form.validate_result_type). In trivial cases
