@@ -18,6 +18,7 @@ from telebot_components.form.field import (
     MultipleSelectField,
     NextFieldGetter,
     PlainTextField,
+    SelectableDates,
     SingleSelectField,
     TelegramAttachment,
 )
@@ -69,7 +70,8 @@ date_field = DateMenuField(
     calendar_keyboard_config=CalendarKeyboardConfig(
         prev_month_button="⬅️",
         next_month_button="➡️",
-        future_only=False,
+        # in this example, the user can choose past and future dates, but now the current one
+        selectable_dates=SelectableDates.PAST | SelectableDates.FUTURE,
     ),
 )
 

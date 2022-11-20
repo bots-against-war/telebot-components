@@ -28,6 +28,7 @@ from telebot_components.form.helpers.calendar_keyboard import (
     CalendarAction,
     CalendarCallbackPayload,
     CalendarKeyboardConfig,
+    SelectableDates,
     calendar_keyboard,
 )
 from telebot_components.stores.language import (
@@ -645,7 +646,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
 
 @dataclass
 class DateMenuField(StrictlyInlineFormField[date]):
-    calendar_keyboard_config: CalendarKeyboardConfig
+    calendar_keyboard_config: CalendarKeyboardConfig = CalendarKeyboardConfig(selectable_dates=SelectableDates.all())
 
     async def process_callback_query(
         self, callback_payload: str, current_value: Optional[date], language: MaybeLanguage
