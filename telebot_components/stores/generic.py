@@ -18,7 +18,7 @@ class str_able(Protocol):
 
 @dataclass
 class GenericStore(Generic[T]):
-    name: str  # used to identifiy a particular store
+    name: str  # used to identify a particular store
     prefix: str  # used to identify bot that uses the store
     redis: RedisInterface
     expiration_time: Optional[timedelta] = MONTH
