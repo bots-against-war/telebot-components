@@ -74,7 +74,6 @@ class HashtagMessageData(TypedDict):
     hashtags: list[str]  # NOTE: '#' prefixes are not stored here, only hashtag body
 
 
-@dataclass
 class CopiedMessageToUserData(TypedDict):
     origin_chat_id: int
     sent_message_id: int
@@ -228,9 +227,9 @@ class FeedbackHandler:
             else None
         )
 
-        # copied to user ok msg id/message to copy id -> origin chat id (user id) + sent message id;
+        # copied to user ok msg id/admin response msg -> origin chat id (user id) + sent message id;
         # used to undo sent message if needed
-        self.copied_to_user_data_store = KeyValueStore[HashtagMessageData](
+        self.copied_to_user_data_store = KeyValueStore[CopiedMessageToUserData](
             name="copied-to-user-ok",
             prefix=bot_prefix,
             redis=redis,
@@ -569,19 +568,20 @@ class FeedbackHandler:
         )
         async def admin_undo_forwarded_message(message: tg.Message):
             replied_to_message = message.reply_to_message
-            if replied_to_message is None:  # how to skip this check?
+            if replied_to_message is None:
                 return
             copied_message_data = await self.copied_to_user_data_store.load(replied_to_message.id)
             if copied_message_data is None:
                 await bot.reply_to(message, "sorry, we can no longer delete the message :(")
                 return
-            origin_chat_id = copied_message_data["message_id"]
-            sent_message_id = int(copied_message_data["hashtags"][0])
+            origin_chat_id = copied_message_data["origin_chat_id"]
+            sent_message_id = copied_message_data["sent_message_id"]
             try:
                 await bot.delete_message(origin_chat_id, sent_message_id)
                 await bot.reply_to(message, "Message was successfully removed from users private chat")
                 await self.copied_to_user_data_store.drop(replied_to_message.id)
-            except ApiHTTPException as e:
+            except Exception as e:
+                self.logger.exception("error deleting message")
                 await bot.reply_to(message, "sorry, we can no longer delete the message for some reason :(")
 
         @bot.message_handler(
@@ -660,12 +660,23 @@ class FeedbackHandler:
                         copied_to_user_ok_message = await bot.reply_to(message, self.service_messages.copied_to_user_ok)
                         await self.copied_to_user_data_store.save(
                             copied_to_user_ok_message.id,
-                            HashtagMessageData(message_id=origin_chat_id, hashtags=[str(copied_message_id.message_id)]),
+                            CopiedMessageToUserData(
+                                origin_chat_id=origin_chat_id, sent_message_id=int(copied_message_id.message_id)
+                            ),
                         )
+                        await self.copied_to_user_data_store.save(
+                            message.id,
+                            CopiedMessageToUserData(
+                                origin_chat_id=origin_chat_id, sent_message_id=int(copied_message_id.message_id)
+                            ),
+                        )
+
                     else:
                         await self.copied_to_user_data_store.save(
                             message.id,
-                            HashtagMessageData(message_id=origin_chat_id, hashtags=[str(copied_message_id.message_id)]),
+                            CopiedMessageToUserData(
+                                origin_chat_id=origin_chat_id, sent_message_id=int(copied_message_id.message_id)
+                            ),
                         )
 
                     if self.config.hashtags_in_admin_chat:
