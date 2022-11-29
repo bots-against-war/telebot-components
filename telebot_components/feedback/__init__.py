@@ -563,7 +563,6 @@ class FeedbackHandler:
         @bot.message_handler(
             chat_id=[self.admin_chat_id],
             is_reply=True,
-            # chat_types=[tg_constants.ChatType.supergroup],
             commands=["undo"],
         )
         async def admin_undo_forwarded_message(message: tg.Message):
@@ -656,24 +655,16 @@ class FeedbackHandler:
                         return
                     await self.message_log_store.push(origin_chat_id, message.id)
 
+                    await self.copied_to_user_data_store.save(
+                        message.id,
+                        CopiedMessageToUserData(
+                            origin_chat_id=origin_chat_id, sent_message_id=int(copied_message_id.message_id)
+                        ),
+                    )
                     if self.service_messages.copied_to_user_ok is not None:
                         copied_to_user_ok_message = await bot.reply_to(message, self.service_messages.copied_to_user_ok)
                         await self.copied_to_user_data_store.save(
                             copied_to_user_ok_message.id,
-                            CopiedMessageToUserData(
-                                origin_chat_id=origin_chat_id, sent_message_id=int(copied_message_id.message_id)
-                            ),
-                        )
-                        await self.copied_to_user_data_store.save(
-                            message.id,
-                            CopiedMessageToUserData(
-                                origin_chat_id=origin_chat_id, sent_message_id=int(copied_message_id.message_id)
-                            ),
-                        )
-
-                    else:
-                        await self.copied_to_user_data_store.save(
-                            message.id,
                             CopiedMessageToUserData(
                                 origin_chat_id=origin_chat_id, sent_message_id=int(copied_message_id.message_id)
                             ),
