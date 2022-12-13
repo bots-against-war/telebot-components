@@ -53,6 +53,10 @@ class ServiceMessages:
     # messages in admin chat (not localised!)
     # e.g. "Скопировано в чат с пользовател_ьницей!"
     copied_to_user_ok: Optional[str] = None
+    # e.g. "Невозможно удалить сообщение."
+    can_not_delete_message: Optional[str] = None
+    # e.g. "Сообщение успешно удалено!"
+    deleted_message_ok: Optional[str] = None
 
     @property
     def user_facing(self) -> list[Optional[AnyText]]:
@@ -571,17 +575,20 @@ class FeedbackHandler:
                 return
             copied_message_data = await self.copied_to_user_data_store.load(replied_to_message.id)
             if copied_message_data is None:
-                await bot.reply_to(message, "sorry, we can no longer delete the message :(")
+                if self.service_messages.can_not_delete_message is not None:
+                    await bot.reply_to(message, self.service_messages.can_not_delete_message)
                 return
             origin_chat_id = copied_message_data["origin_chat_id"]
             sent_message_id = copied_message_data["sent_message_id"]
             try:
                 await bot.delete_message(origin_chat_id, sent_message_id)
-                await bot.reply_to(message, "Message was successfully removed from users private chat")
+                if self.service_messages.deleted_message_ok is not None:
+                    await bot.reply_to(message, self.service_messages.deleted_message_ok)
                 await self.copied_to_user_data_store.drop(replied_to_message.id)
             except Exception as e:
                 self.logger.exception("error deleting message")
-                await bot.reply_to(message, "sorry, we can no longer delete the message for some reason :(")
+                if self.service_messages.can_not_delete_message is not None:
+                    await bot.reply_to(message, self.service_messages.can_not_delete_message)
 
         @bot.message_handler(
             chat_id=[self.admin_chat_id],
