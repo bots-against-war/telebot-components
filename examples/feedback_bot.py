@@ -130,6 +130,8 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
                 Language.EN: "Please send no more than {} messages in {}.",
             },
             copied_to_user_ok="Скопировано в чат с пользовател_ьницей ✨",
+            can_not_delete_message="Невозможно удалить сообщение.",
+            deleted_message_ok="Сообщение успешно удалено!",
         ),
         banned_users_store=banned_store,
         language_store=language_store,
