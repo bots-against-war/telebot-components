@@ -636,9 +636,9 @@ class TrelloIntegration:
     def _title_with_user_hash(self, user_id: int, description: str) -> str:
         title = description
         title = strip_markdown(title)
-        title = trim_with_ellipsis(title, target_len=40)
-        title = re.sub(r"\s+", " ", title)
         title = title.strip()
+        title = re.sub(r"\s+", " ", title)
+        title = trim_with_ellipsis(title, target_len=40)
         user_hash_prefix = self.user_id_hash_func(user_id, self.bot_prefix)
         return f"{user_hash_prefix}: {title}"
 
