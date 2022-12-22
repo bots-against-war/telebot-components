@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from typing import Callable, Coroutine, Optional
+from typing import Awaitable, Callable, Coroutine, Optional
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -173,6 +173,13 @@ class TerminatorContext:
     terminator: str
 
 
+@dataclass
+class TerminatorResult:
+    menu_message_text_update: str
+    parse_mode: Optional[str] = None
+    lock_menu: Optional[bool] = None  # if set, overrides the default lock_after_termination value in Menu config
+
+
 class MenuHandler:
     def __init__(
         self,
@@ -237,7 +244,7 @@ class MenuHandler:
     def setup(
         self,
         bot: AsyncTeleBot,
-        on_terminal_menu_option_selected: Callable[[TerminatorContext], Coroutine[None, None, None]],
+        on_terminal_menu_option_selected: Callable[[TerminatorContext], Awaitable[Optional[TerminatorResult]]],
     ):
         @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA, auto_answer=True)
         async def handle_menu(call: tg.CallbackQuery):
@@ -275,17 +282,39 @@ class MenuHandler:
                 await self.category_store.save_user_category(user, selected_menu_item.bound_category)
 
             try:
-                await on_terminal_menu_option_selected(TerminatorContext(bot, user, call.message, terminator))
+                terminator_callback_result = await on_terminal_menu_option_selected(
+                    TerminatorContext(bot, user, call.message, terminator)
+                )
             except Exception:
                 self.logger.exception("Unexpected error in on_terminal_menu_option_selected callback, ignoring")
+                terminator_callback_result = None
+
+            if terminator_callback_result is not None:
+                try:
+                    await bot.edit_message_text(
+                        terminator_callback_result.menu_message_text_update,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.id,
+                        parse_mode=terminator_callback_result.parse_mode,
+                    )
+                except Exception:
+                    self.logger.info(
+                        f"Eror editing menu message with callback returned value {terminator_callback_result!r}",
+                        exc_info=True,
+                    )
 
             current_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
-            if current_menu.config.lock_after_termination:
+            lock_menu = (
+                terminator_callback_result.lock_menu
+                if terminator_callback_result is not None and terminator_callback_result.lock_menu is not None
+                else current_menu.config.lock_after_termination
+            )
+            if lock_menu:
                 try:
                     await bot.edit_message_reply_markup(
                         chat_id=user.id,
                         message_id=call.message.id,
                         reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
                     )
-                except ApiHTTPException as e:
-                    self.logger.info(f"Error editing message reply markup: {e!r}")
+                except ApiHTTPException:
+                    self.logger.info(f"Error editing message reply markup", exc_info=True)
