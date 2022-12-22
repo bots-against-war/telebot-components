@@ -1,7 +1,7 @@
 import copy
 from collections import defaultdict
 from dataclasses import dataclass
-from itertools import chain
+from itertools import chain, zip_longest
 from types import GenericAlias
 from typing import (  # type: ignore
     Any,
@@ -18,16 +18,30 @@ FieldNameT = Optional[str]
 
 
 class Form:
-    """Container for collection of fields linked together via next_field_getter attribute. Does not modify passed
+    """Container for collection of fields linked together via get_next_field_getter() attribute. Does not modify passed
     objects, creates private copies.
 
     If allow_cyclic param is False (default), performs topological sort to validate form acyclicity and can print
     it's graph structure in ASCII with print_graph method.
     """
 
-    def __init__(self, fields: list[FormField], start_field: FormField, allow_cyclic: bool = False):
-        self.fields = [copy.deepcopy(f) for f in fields]  # copying fields to avoid modifying user's objects
+    def __init__(self, fields: list[FormField], start_field: Optional[FormField] = None, allow_cyclic: bool = False):
+        if not fields:
+            raise ValueError("Fields list can't be empty")
+
+        # copying fields to avoid modifying user's objects
+        self.fields = [copy.deepcopy(f) for f in fields]
+        if start_field is None:
+            start_field = fields[0]
         self.start_field = copy.deepcopy(start_field)
+
+        # if any field has the next field getter omitted, use default sequential connection
+        for field, next_field in zip_longest(self.fields, self.fields[1:]):
+            if field.next_field_getter is None:
+                if isinstance(next_field, FormField):
+                    field.next_field_getter = NextFieldGetter.by_name(next_field.name)
+                else:
+                    field.next_field_getter = NextFieldGetter.form_end()
 
         # validating field name uniqueness
         field_names = [f.name for f in self.fields]
@@ -38,12 +52,11 @@ class Form:
         # binding next field getters so that they can look up next form field by its name
         fields_by_name = {f.name: f for f in self.fields}
         for f in self.fields:
-            if isinstance(f.next_field_getter, NextFieldGetter):
-                f.next_field_getter.fields_by_name = fields_by_name
+            f.get_next_field_getter().fields_by_name = fields_by_name
 
         # validating that field graph is connected and that the start field has no incoming edges
         reachable_field_names = set(
-            chain.from_iterable(f.next_field_getter.possible_next_field_names for f in self.fields)
+            chain.from_iterable(f.get_next_field_getter().possible_next_field_names for f in self.fields)
         )
         if not allow_cyclic and self.start_field.name in reachable_field_names:
             raise ValueError(
@@ -70,7 +83,7 @@ class Form:
         # topological sort to validate acyclicity + for nice rendering
         if not allow_cyclic:
             next_field_names: dict[FieldNameT, set[FieldNameT]] = {
-                f.name: set(f.next_field_getter.possible_next_field_names) for f in self.fields
+                f.name: set(f.get_next_field_getter().possible_next_field_names) for f in self.fields
             }
             prev_field_names: dict[FieldNameT, set[FieldNameT]] = defaultdict(set)
             for field_name, nexts in next_field_names.items():
@@ -177,7 +190,7 @@ class Form:
 
         edges: set[tuple[str, str]] = set()
         for f in self.fields:
-            for next_field_name in f.next_field_getter.possible_next_field_names:
+            for next_field_name in f.get_next_field_getter().possible_next_field_names:
                 edges.add((to_print(f.name), to_print(next_field_name)))
 
         is_vert_connected_to_next: list[bool] = []

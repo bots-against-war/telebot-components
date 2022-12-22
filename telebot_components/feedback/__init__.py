@@ -53,6 +53,10 @@ class ServiceMessages:
     # messages in admin chat (not localised!)
     # e.g. "Скопировано в чат с пользовател_ьницей!"
     copied_to_user_ok: Optional[str] = None
+    # e.g. "Невозможно удалить сообщение."
+    can_not_delete_message: Optional[str] = None
+    # e.g. "Сообщение успешно удалено!"
+    deleted_message_ok: Optional[str] = None
 
     @property
     def user_facing(self) -> list[Optional[AnyText]]:
@@ -72,6 +76,11 @@ class HashtagMessageData(TypedDict):
 
     message_id: int
     hashtags: list[str]  # NOTE: '#' prefixes are not stored here, only hashtag body
+
+
+class CopiedMessageToUserData(TypedDict):
+    origin_chat_id: int
+    sent_message_id: int
 
 
 class AdminChatActionCallback(Protocol):
@@ -222,6 +231,15 @@ class FeedbackHandler:
             else None
         )
 
+        # copied to user ok msg id/admin response msg -> origin chat id (user id) + sent message id;
+        # used to undo sent message if needed
+        self.copied_to_user_data_store = KeyValueStore[CopiedMessageToUserData](
+            name="copied-to-user-ok",
+            prefix=bot_prefix,
+            redis=redis,
+            expiration_time=times.FIVE_MINUTES,
+        )
+
     def validate_service_messages(self):
         if self.config.force_category_selection and self.service_messages.you_must_select_category is None:
             raise ValueError("force_category_selection is True, you_must_select_category message must be set")
@@ -252,7 +270,9 @@ class FeedbackHandler:
             "💬 <i>Основное</i>\n"
             + "· Сюда бот пересылает все сообщения (кроме специальных случаев вроде /команд), которые ему "
             + "пишут в личку.\n"
-            + "· Если в этом чате ответить на сообщение, бот скопирует ответ в чат с пользовател_ьницей."
+            + "· Если в этом чате ответить на сообщение, бот скопирует ответ в чат с пользовател_ьницей.\n"
+            + "· Чтобы отменить отправку сообщения пользовател_ьнице - отправьте реплай с командой /undo на ваше "
+            + "сообщение или на подтверждение отправки бота (доступно в течение 5 минут)"
         )
         if self.category_store is not None:
             categories_help = (
@@ -274,13 +294,13 @@ class FeedbackHandler:
             "🛡️ <i>Защита и безопасность</i>\n"
             + "· Бот никак не выдаёт, кто отвечает пользовател_ьнице из этого чата. Насколько возможно судить, "
             + "никакого способа взломать бота нет. Однако всё, что вы отвечаете через бота, сразу пересылается человеку "
-            + "на другом конце, и на данный момент удалить отправленное сообщение нельзя, поэтому будьте внимательны!"
+            + "на другом конце, и отменить отправку можно лишь в течении первых 5 минут, поэтому будьте внимательны!"
         )
         if isinstance(self.anti_spam, AntiSpam):
             security_help += (
                 "\n"
-                + "· Бот автоматически ограничивает число сообщений, прислыаемых ему в единицу времени. "
-                + f"Конфигруация на данный момент: не больше {self.anti_spam.config.throttle_after_messages} сообщений за "
+                + "· Бот автоматически ограничивает число сообщений, присылаемых ему в единицу времени. "
+                + f"Конфигурация на данный момент: не больше {self.anti_spam.config.throttle_after_messages} сообщений за "
                 + f"{self.anti_spam.config.throttle_duration}. При необходимости её можно изменять."
             )
         if self.banned_users_store is not None:
@@ -549,6 +569,32 @@ class FeedbackHandler:
         @bot.message_handler(
             chat_id=[self.admin_chat_id],
             is_reply=True,
+            commands=["undo"],
+        )
+        async def admin_undo_forwarded_message(message: tg.Message):
+            replied_to_message = message.reply_to_message
+            if replied_to_message is None:
+                return
+            copied_message_data = await self.copied_to_user_data_store.load(replied_to_message.id)
+            if copied_message_data is None:
+                if self.service_messages.can_not_delete_message is not None:
+                    await bot.reply_to(message, self.service_messages.can_not_delete_message)
+                return
+            origin_chat_id = copied_message_data["origin_chat_id"]
+            sent_message_id = copied_message_data["sent_message_id"]
+            try:
+                await bot.delete_message(origin_chat_id, sent_message_id)
+                if self.service_messages.deleted_message_ok is not None:
+                    await bot.reply_to(message, self.service_messages.deleted_message_ok)
+                await self.copied_to_user_data_store.drop(replied_to_message.id)
+            except Exception as e:
+                self.logger.exception("error deleting message")
+                if self.service_messages.can_not_delete_message is not None:
+                    await bot.reply_to(message, self.service_messages.can_not_delete_message)
+
+        @bot.message_handler(
+            chat_id=[self.admin_chat_id],
+            is_reply=True,
             content_types=list(tg_constants.MediaContentType),
         )
         async def admin_to_bot(message: tg.Message):
@@ -586,16 +632,16 @@ class FeedbackHandler:
                         )
                         for message_id in log_message_ids:
                             try:
-                                log_mesage = await bot.forward_message(
+                                log_message = await bot.forward_message(
                                     chat_id=log_destination_chat_id,
                                     from_chat_id=self.admin_chat_id,
                                     message_id=message_id,
                                 )
                                 if self.config.message_log_to_admin_chat:
                                     # to be able to reply to them as to normal forwarded messages...
-                                    await self.origin_chat_id_store.save(log_mesage.id, origin_chat_id)
+                                    await self.origin_chat_id_store.save(log_message.id, origin_chat_id)
                                     # ... and to delete them in case of user ban
-                                    await self.user_related_messages_store.add(origin_chat_id, log_mesage.id)
+                                    await self.user_related_messages_store.add(origin_chat_id, log_message.id)
                             except Exception:
                                 pass
                     else:
@@ -608,7 +654,7 @@ class FeedbackHandler:
                 else:
                     # actual response to the user
                     try:
-                        await bot.copy_message(
+                        copied_message_id = await bot.copy_message(
                             chat_id=origin_chat_id, from_chat_id=self.admin_chat_id, message_id=message.id
                         )
                     except ApiHTTPException as e:
@@ -616,10 +662,23 @@ class FeedbackHandler:
                         self.logger.info(f"Error copying message to user chat. {e!r}")
                         await bot.reply_to(message, str(e))
                         return
-                    # TODO: save copied message id to allow 'undo send' command
                     await self.message_log_store.push(origin_chat_id, message.id)
+
+                    await self.copied_to_user_data_store.save(
+                        message.id,
+                        CopiedMessageToUserData(
+                            origin_chat_id=origin_chat_id, sent_message_id=int(copied_message_id.message_id)
+                        ),
+                    )
                     if self.service_messages.copied_to_user_ok is not None:
-                        await bot.reply_to(message, self.service_messages.copied_to_user_ok)
+                        copied_to_user_ok_message = await bot.reply_to(message, self.service_messages.copied_to_user_ok)
+                        await self.copied_to_user_data_store.save(
+                            copied_to_user_ok_message.id,
+                            CopiedMessageToUserData(
+                                origin_chat_id=origin_chat_id, sent_message_id=int(copied_message_id.message_id)
+                            ),
+                        )
+
                     if self.config.hashtags_in_admin_chat:
                         await _remove_unanswered_hashtag(forwarded_msg.id)
                     if self.trello_integration is not None:
