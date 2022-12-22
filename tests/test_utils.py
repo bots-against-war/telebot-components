@@ -8,6 +8,10 @@ from typing import Any, Coroutine, Optional, Union
 
 import pytest
 
+from telebot_components.feedback.trello_integration import (
+    TrelloIntegration,
+    TrelloIntegrationCredentials,
+)
 from telebot_components.utils import (
     LockRegistry,
     emoji_hash,
@@ -247,3 +251,47 @@ def test_remove_command_prefix(original: str, expected: str):
 )
 def test_html_link(href: str, text: str, expected: str):
     assert html_link(href, text) == expected
+
+
+@pytest.mark.parametrize(
+    "description, user_id, expected_card_title",
+    [
+        pytest.param(
+            "hello world",
+            123,
+            "🈹🤧🙀🟧: hello world",
+        ),
+        pytest.param(
+            "helloooooooooooooooooooooooooooooooooooo wooooooooooooooooooorld",
+            1312,
+            "😈⚽🎟👆: helloooooooooooooooooooooooooooooooooooo...",
+        ),
+        pytest.param(
+            "**intricate** __markdown__ [content](https://very-interesting-link.com)",
+            420,
+            "🪝☄🌀🎄: intricate markdown content",
+        ),
+        pytest.param(
+            "                           some poorly\n\n\n\n\n\nformatted\n\n\t\t\t\ttext with\n * bullet\n * points\n * list",
+            69,
+            "🕟🪪🍚🙅: some poorly formatted text with bullet points...",
+        ),
+        pytest.param(
+            "# header1 escaped\\_underscores and ```code```",
+            10000,
+            "🌭🦺🐄🤼: header1 escaped_underscores and code",
+        ),
+    ],
+)
+def test_trello_card_title(description: str, user_id: int, expected_card_title: str):
+    ti = TrelloIntegration(
+        bot=None,  # type: ignore
+        redis=None,  # type: ignore
+        bot_prefix="testing",
+        admin_chat_id=1,
+        credentials=TrelloIntegrationCredentials("", "", "", ""),
+        reply_with_card_comments=False,
+    )  # type: ignore
+
+    title = ti._title_with_user_hash(user_id, description)
+    assert title == expected_card_title
