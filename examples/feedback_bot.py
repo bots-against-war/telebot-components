@@ -147,7 +147,7 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
     async def on_category_selected(bot: AsyncTeleBot, menu_message: tg.Message, user: tg.User, new_option: Category):
         language = await language_store.get_user_language(user)
         await bot.send_message(
-            user.id, ON_CATEGORY_SELECTED_MESSAGE[language].format(any_text_to_str(new_option.button_caption, language))
+            user.id, ON_CATEGORY_SELECTED_MESSAGE[language].format(new_option.get_localized_button_caption(language))
         )
 
     category_store.setup(bot, on_category_selected=on_category_selected)
