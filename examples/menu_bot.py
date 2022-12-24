@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -10,61 +11,96 @@ from telebot_components.menu.menu import (
     MenuHandler,
     MenuItem,
     TerminatorContext,
+    TerminatorResult,
 )
-
-FIRST_TERMINATOR = "first"
-SECOND_TERMINATOR = "second"
-THIRD_TERMINATOR = "third"
+from telebot_components.redis_utils.emulation import RedisEmulation
+from telebot_components.stores.category import (
+    Category,
+    CategorySelectedContext,
+    CategoryStore,
+)
 
 
 def create_menu_bot(token: str):
     bot_prefix = "example-menu-bot"
     bot = AsyncTeleBot(token)
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
+
+    good = Category("good")
+    bad = Category("bad")
+    ugly = Category("ugly")
+
+    async def on_category_selected(context: CategorySelectedContext):
+        await bot.send_message(
+            context.user.id, f"By the way, according to our records you are: {context.category.name!r}"
+        )
+
+    category_store = CategoryStore(
+        bot_prefix=bot_prefix,
+        redis=RedisEmulation(),
+        categories=[good, bad, ugly],
+        category_expiration_time=None,
+        on_category_selected=on_category_selected,
+    )
 
     menu_tree = Menu(
-        text="Main menu:",
+        text="Hi! What survey do you want to take?",
         config=MenuConfig(
-            back_label="<<<<<",
+            back_label="<-",
             lock_after_termination=False,
         ),
         menu_items=[
             MenuItem(
-                label="option 1",
+                label="Programming language",
                 submenu=Menu(
-                    "Submenu 1:",
+                    "Please choose your programming language",
                     [
                         MenuItem(
-                            label="suboption 1.1",
-                            terminator=FIRST_TERMINATOR,
+                            label="APL",
+                            terminator="APL",
+                            bound_category=good,
                         ),
                         MenuItem(
-                            label="suboption 1.2",
-                            terminator=SECOND_TERMINATOR,
+                            label="PROLOG",
+                            terminator="PROLOG",
                         ),
                         MenuItem(
-                            label="suboption 1.3",
-                            terminator=THIRD_TERMINATOR,
+                            label="Haskell",
+                            terminator="Haskell",
+                        ),
+                        MenuItem(
+                            label="C family",
+                            submenu=Menu(
+                                "Which C family language do you use?",
+                                menu_items=[
+                                    MenuItem(label="C", terminator="C", bound_category=good),
+                                    MenuItem(label="C++", terminator="C++"),
+                                    MenuItem(label="C#", terminator="C#"),
+                                ],
+                            ),
                         ),
                     ],
                 ),
             ),
             MenuItem(
-                label="option 2",
+                label="Operating system",
                 submenu=Menu(
-                    "Submenu 2:",
+                    "Please choose your operating system",
                     [
                         MenuItem(
-                            label="suboption 2.1",
-                            terminator=FIRST_TERMINATOR,
+                            label="Windows",
+                            terminator="windows",
+                            bound_category=ugly,
                         ),
                         MenuItem(
-                            label="suboption 2.2",
-                            terminator=SECOND_TERMINATOR,
+                            label="Linux",
+                            terminator="linux",
+                            bound_category=good,
                         ),
                         MenuItem(
-                            label="suboption 2.3",
-                            terminator=THIRD_TERMINATOR,
+                            label="MacOS",
+                            terminator="mac",
+                            bound_category=bad,
                         ),
                     ],
                 ),
@@ -72,24 +108,17 @@ def create_menu_bot(token: str):
         ],
     )
 
-    async def on_terminal_menu_option_selected(terminator_context: TerminatorContext) -> None:
-        if terminator_context.terminator == FIRST_TERMINATOR:
-            await bot.send_message(
-                terminator_context.user.id,
-                "do what you need to do with this terminator " + FIRST_TERMINATOR,
+    async def on_terminal_menu_option_selected(terminator_context: TerminatorContext) -> Optional[TerminatorResult]:
+        await bot.send_message(terminator_context.user.id, f"You have selected: {terminator_context.terminator!r}")
+        if terminator_context.terminator == "C":
+            return TerminatorResult(
+                menu_message_text_update="Segmentation fault (core dumped)",
+                lock_menu=True,
             )
-        elif terminator_context.terminator == SECOND_TERMINATOR:
-            await bot.send_message(
-                terminator_context.user.id,
-                "do what you need to do with this terminator " + SECOND_TERMINATOR,
-            )
-        elif terminator_context.terminator == THIRD_TERMINATOR:
-            await bot.send_message(
-                terminator_context.user.id,
-                "do what you need to do with this terminator " + THIRD_TERMINATOR,
-            )
+        else:
+            return None
 
-    menu_handler = MenuHandler(bot_prefix, menu_tree)
+    menu_handler = MenuHandler(bot_prefix, menu_tree, category_store=category_store)
     menu_handler.setup(bot, on_terminal_menu_option_selected)
 
     @bot.message_handler(commands=["start", "help"])
@@ -99,6 +128,16 @@ def create_menu_bot(token: str):
             message.from_user.id,
             main_menu.text,
             reply_markup=(main_menu.get_keyboard_markup()),
+        )
+
+    category_store.setup(bot)
+
+    @bot.message_handler(commands=["whoami"])
+    async def whoami_handler(message: tg.Message):
+        category = await category_store.get_user_category(message.from_user)
+        await bot.send_message(
+            message.from_user.id,
+            f"You are: {category.name}" if category is not None else "We don't yet know who you are :(",
         )
 
     return BotRunner(

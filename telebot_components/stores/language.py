@@ -38,7 +38,7 @@ class Language(Enum):
         return known_emoji.get(self, str(self).upper())
 
 
-MaybeLanguage = Optional[Language]  # None = multilang mode is of, using normal strings
+MaybeLanguage = Optional[Language]  # None = multilang mode is off, using regular strings
 
 
 MultilangText = dict[Language, str]

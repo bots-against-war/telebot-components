@@ -1,11 +1,13 @@
 import logging
 from dataclasses import dataclass
-from typing import Callable, Coroutine, Optional
+from typing import Awaitable, Callable, Coroutine, Optional
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.api import ApiHTTPException
 from telebot.callback_data import CallbackData
+
+from telebot_components.stores.category import Category, CategoryStore
 
 ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
 TERMINATE_MENU_CALLBACK_DATA = CallbackData("id", prefix="terminator")
@@ -19,8 +21,10 @@ class MenuItem:
         submenu: Optional["Menu"] = None,
         terminator: Optional[str] = None,
         link_url: Optional[str] = None,
+        bound_category: Optional[Category] = None,
     ):
         self.label = label
+        self.bound_category = bound_category
 
         self.submenu = submenu
         self.terminator = terminator
@@ -33,8 +37,26 @@ class MenuItem:
                 + f"but {submenu = }, {terminator = }, {link_url = }"
             )
 
+        if self.bound_category is not None and self.terminator is None:
+            raise ValueError("A category can only be bound to terminal menu items")
+
         self._id: Optional[str] = None
         self._parent_menu: Optional["Menu"] = None
+
+    def __str__(self) -> str:
+        res = f"MenuItem({self.label!r}"
+        if self.terminator:
+            res += f", terminator={self.terminator!r}"
+            if self.bound_category:
+                res += f", bound_category={self.bound_category}"
+        elif self.submenu:
+            res += f", submeny={self.submenu}"
+        elif self.link_url:
+            res += f", link_url={self.link_url!r}"
+        res += ")"
+        return res
+
+    __repr__ = __str__
 
     @property
     def id(self) -> str:
@@ -151,12 +173,21 @@ class TerminatorContext:
     terminator: str
 
 
+@dataclass
+class TerminatorResult:
+    menu_message_text_update: str
+    parse_mode: Optional[str] = None
+    lock_menu: Optional[bool] = None  # if set, overrides the default lock_after_termination value in Menu config
+
+
 class MenuHandler:
     def __init__(
         self,
         bot_prefix: str,
         menu_tree: Menu,
+        category_store: Optional[CategoryStore] = None,
     ):
+        self.category_store = category_store
         self.menus_list: list[Menu] = [menu_tree]
         self.menus_list.extend(menu_tree.descendants())
 
@@ -166,6 +197,23 @@ class MenuHandler:
         self.menu_by_id: dict[str, Menu] = {m.id: m for m in self.menus_list}
 
         self.menu_items_list = self.init_item_ids_and_get_item_list()
+        menu_items_with_bound_categories = [mi for mi in self.menu_items_list if mi.bound_category is not None]
+        if menu_items_with_bound_categories:
+            if self.category_store is None:
+                raise ValueError(
+                    f"Menu items have bound categories, but category store is not passed to MenuHandler: {menu_items_with_bound_categories}"
+                )
+            menu_items_with_non_storable_categories = [
+                mi
+                for mi in menu_items_with_bound_categories
+                if mi.bound_category and not self.category_store.is_storable(mi.bound_category)
+            ]
+            if menu_items_with_non_storable_categories:
+                raise ValueError(
+                    "Some categories bound to menu items are not storable "
+                    + f"with the passed category store: {menu_items_with_non_storable_categories}"
+                )
+
         self.menu_item_by_id: dict[str, MenuItem] = {mi.id: mi for mi in self.menu_items_list}
 
         self.logger = logging.getLogger(f"{__name__}.{bot_prefix}")
@@ -196,7 +244,7 @@ class MenuHandler:
     def setup(
         self,
         bot: AsyncTeleBot,
-        on_terminal_menu_option_selected: Callable[[TerminatorContext], Coroutine[None, None, None]],
+        on_terminal_menu_option_selected: Callable[[TerminatorContext], Awaitable[Optional[TerminatorResult]]],
     ):
         @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA, auto_answer=True)
         async def handle_menu(call: tg.CallbackQuery):
@@ -229,18 +277,44 @@ class MenuHandler:
             if terminator is None:
                 self.logger.error(f"handle_terminator got non-terminating menu item: {selected_menu_item}")
                 return
+
+            if selected_menu_item.bound_category is not None and self.category_store is not None:
+                await self.category_store.save_user_category(user, selected_menu_item.bound_category)
+
             try:
-                await on_terminal_menu_option_selected(TerminatorContext(bot, user, call.message, terminator))
+                terminator_callback_result = await on_terminal_menu_option_selected(
+                    TerminatorContext(bot, user, call.message, terminator)
+                )
             except Exception:
                 self.logger.exception("Unexpected error in on_terminal_menu_option_selected callback, ignoring")
+                terminator_callback_result = None
+
+            if terminator_callback_result is not None:
+                try:
+                    await bot.edit_message_text(
+                        terminator_callback_result.menu_message_text_update,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.id,
+                        parse_mode=terminator_callback_result.parse_mode,
+                    )
+                except Exception:
+                    self.logger.info(
+                        f"Eror editing menu message with callback returned value {terminator_callback_result!r}",
+                        exc_info=True,
+                    )
 
             current_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
-            if current_menu.config.lock_after_termination:
+            lock_menu = (
+                terminator_callback_result.lock_menu
+                if terminator_callback_result is not None and terminator_callback_result.lock_menu is not None
+                else current_menu.config.lock_after_termination
+            )
+            if lock_menu:
                 try:
                     await bot.edit_message_reply_markup(
                         chat_id=user.id,
                         message_id=call.message.id,
                         reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
                     )
-                except ApiHTTPException as e:
-                    self.logger.info(f"Error editing message reply markup: {e!r}")
+                except ApiHTTPException:
+                    self.logger.info(f"Error editing message reply markup", exc_info=True)
