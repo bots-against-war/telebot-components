@@ -191,7 +191,7 @@ class TrelloIntegration:
         if self.thread_pool is None:
             self.thread_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="trello-integration")
 
-        self.logger = logging.getLogger(f"{__name__}.{bot_prefix}")
+        self.logger = logging.getLogger(f"{__name__}[{bot_prefix}]")
 
         self.on_message_replied_from_trello: Optional[OnMessageRepliedFromTrello] = None
         self.initialized = False

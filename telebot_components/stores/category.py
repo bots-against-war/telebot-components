@@ -53,7 +53,7 @@ class CategoryStore:
         mark_selected: Callable[[str], str] = lambda caption: "✅ " + caption,
         on_category_selected: Optional[Callable[[CategorySelectedContext], Awaitable[None]]] = None,
     ):
-        self.logger = logging.getLogger(f"{__name__}.{bot_prefix}")
+        self.logger = logging.getLogger(f"{__name__}[{bot_prefix}]")
         self.categories = categories
         self.default_category = default_category
         if self.default_category is not None:

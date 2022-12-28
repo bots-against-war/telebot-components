@@ -216,7 +216,7 @@ class MenuHandler:
 
         self.menu_item_by_id: dict[str, MenuItem] = {mi.id: mi for mi in self.menu_items_list}
 
-        self.logger = logging.getLogger(f"{__name__}.{bot_prefix}")
+        self.logger = logging.getLogger(f"{__name__}[{bot_prefix}]")
 
     def init_item_ids_and_get_item_list(self) -> list[MenuItem]:
         item_list: list[MenuItem] = []
