@@ -289,7 +289,7 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
 
     def __post_init__(self):
         super().__post_init__()
-        self.logger = logging.getLogger(f"{__file__}.{self.__class__.__name__}(name={self.name!r})")
+        self.logger = logging.getLogger(f"{__file__}[{self.__class__.__name__}(name={self.name!r})]")
 
     def get_attachment(self, message: tg.Message) -> Optional[TelegramAttachment]:
         if message.photo is not None:

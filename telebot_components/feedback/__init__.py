@@ -168,7 +168,7 @@ class FeedbackHandler:
                 )
             )
         self.admin_chat_response_action_by_command = {aca.command: aca for aca in self.admin_chat_response_actions}
-        self.logger = logging.getLogger(f"{__name__}.{self.bot_prefix}")
+        self.logger = logging.getLogger(f"{__name__}[{self.bot_prefix}]")
 
         # === stores used by the handler ===
 
