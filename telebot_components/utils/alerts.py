@@ -37,9 +37,13 @@ class TelegramAlertsHandler(logging.Handler):
                 await self.bot.send_document(self.channel_id, body, visible_file_name=filename)
             except Exception as e:
                 print(f"Error sending alert to Telegram channel: {e!r}")
-                await self.bot.send_message(
-                    self.channel_id, self.message_prefix + "⚠️ Failed to send alert, see application logs"
-                )
+                try:
+                    await self.bot.send_message(
+                        self.channel_id,
+                        self.message_prefix + "⚠️ Failed to send alert, see application logs",
+                    )
+                except Exception:
+                    pass
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
