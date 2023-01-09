@@ -100,8 +100,25 @@ class TrelloIntegrationCredentialsError(RuntimeError):
 class TrelloIntegrationCredentials:
     user_api_key: str  # not secret, first value in https://trello.com/app-key
     user_token: str  # secret, generated when clicking Token link on the page
-    organization_name: str  # just human-readable name
-    board_name: str  # again, human-readable board name
+
+    # legacy name-based board lookup
+    organization_name: Optional[str] = None  # just a human-readable name
+    board_name: Optional[str] = None  # again, human-readable board name
+
+    # Trello board url has form https://trello.com/b/<board-id>/some-human-readable-name
+    board_id: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.board_id is not None:
+            if not (self.organization_name is None and self.board_name is None):
+                raise ValueError(
+                    "Legacy Trello board lookup config (organization and board name) can't be used together with board id"
+                )
+        else:
+            if self.organization_name is None or self.board_name is None:
+                raise ValueError(
+                    "At least one board lookup name must be specified: board id or organization and board name (legacy)"
+                )
 
 
 class TrelloIntegration:
@@ -209,25 +226,37 @@ class TrelloIntegration:
         """Must be run on bot runner setup"""
         self.logger.info("Initializing Trello integration")
         loop = asyncio.get_running_loop()
-        all_organizations = await loop.run_in_executor(self.thread_pool, self.trello_client.list_organizations)
-        matching_organizations = [o for o in all_organizations if o.name == self.credentials.organization_name]
-        if not matching_organizations:
-            raise TrelloIntegrationCredentialsError(f"Organization not found: '{self.credentials.organization_name}'")
-        if len(matching_organizations) > 1:
-            raise TrelloIntegrationCredentialsError(
-                f"Ambiguous organization name, several organizations found: {matching_organizations}"
-            )
-        self.organization = matching_organizations[0]
 
-        all_boards = await loop.run_in_executor(self.thread_pool, self.organization.all_boards)
-        matching_boards = [b for b in all_boards if b.name == self.credentials.board_name]
-        if not matching_boards:
-            raise TrelloIntegrationCredentialsError(
-                f"Board not found in the {self.organization.name!r} organization: {self.credentials.board_name!r}"
+        if self.credentials.board_id is not None:
+            # self.logger.info("Looking up target board by id")
+            self.board = await loop.run_in_executor(
+                self.thread_pool, self.trello_client.get_board, self.credentials.board_id
             )
-        if len(matching_boards) > 1:
-            raise TrelloIntegrationCredentialsError(f"Ambiguous board name, several found: {matching_boards}")
-        self.board = matching_boards[0]
+        else:
+            self.logger.info("Looking up target board by organization and board names")
+            if self.credentials.organization_name is None or self.credentials.board_name is None:
+                raise ValueError("Invalid credentials")
+            all_organizations = await loop.run_in_executor(self.thread_pool, self.trello_client.list_organizations)
+            matching_organizations = [o for o in all_organizations if o.name == self.credentials.organization_name]
+            if not matching_organizations:
+                raise TrelloIntegrationCredentialsError(
+                    f"Organization not found: '{self.credentials.organization_name}'"
+                )
+            if len(matching_organizations) > 1:
+                raise TrelloIntegrationCredentialsError(
+                    f"Ambiguous organization name, several organizations found: {matching_organizations}"
+                )
+            organization = matching_organizations[0]
+
+            all_boards = await loop.run_in_executor(self.thread_pool, organization.all_boards)
+            matching_boards = [b for b in all_boards if b.name == self.credentials.board_name]
+            if not matching_boards:
+                raise TrelloIntegrationCredentialsError(
+                    f"Board not found in the {organization.name!r} organization: {self.credentials.board_name!r}"
+                )
+            if len(matching_boards) > 1:
+                raise TrelloIntegrationCredentialsError(f"Ambiguous board name, several found: {matching_boards}")
+            self.board = matching_boards[0]
 
         lists_on_board = await loop.run_in_executor(self.thread_pool, self.board.all_lists)
         lists_by_name: dict[str, trello.List] = {l.name: l for l in lists_on_board}
@@ -443,10 +472,10 @@ class TrelloIntegration:
             attachment_content=attachment_content,
         )
 
-    def _add_admin_chat_link(self, description: str, to_message: tg.Message) -> str:
+    def _add_admin_chat_link(self, description: str, to_message_id: int) -> str:
         # i.e. this is a Telegram supergroup and allows direct msg links
         if str(self.admin_chat_id).startswith("-100"):
-            return f"{description}\n" + markdown_link(telegram_message_url(self.admin_chat_id, to_message.id), "💬")
+            return f"{description}\n" + markdown_link(telegram_message_url(self.admin_chat_id, to_message_id), "💬")
         else:
             return description
 
@@ -526,7 +555,8 @@ class TrelloIntegration:
     async def export_user_message(
         self,
         user: tg.User,
-        forwarded_message: tg.Message,
+        content_message: tg.Message,
+        admin_chat_message_id: int,
         category: Optional[Category] = None,
         postprocess_card_description: Callable[[str], str] = lambda s: s,
         add_admin_chat_link: Optional[bool] = None,
@@ -546,11 +576,13 @@ class TrelloIntegration:
 
         loop = asyncio.get_running_loop()
 
-        card_content = await self._card_content_from_message(forwarded_message, user.id, include_attachments=True)
+        card_content = await self._card_content_from_message(content_message, user.id, include_attachments=True)
         self.logger.debug(f"Card content: {card_content}")
         card_content.description = postprocess_card_description(card_content.description)
         if add_admin_chat_link if add_admin_chat_link is not None else self.admin_chat_backlink:
-            card_content.description = self._add_admin_chat_link(card_content.description, to_message=forwarded_message)
+            card_content.description = self._add_admin_chat_link(
+                card_content.description, to_message_id=admin_chat_message_id
+            )
         card_content.description = "👤: " + card_content.description
 
         existing_trello_card_data = await self.trello_card_data_for_user.load(user.id)
@@ -595,7 +627,7 @@ class TrelloIntegration:
         await self.origin_message_data_for_trello_card_id.save(
             trello_card.id,
             OriginMessageData(
-                forwarded_message_id=forwarded_message.id,
+                forwarded_message_id=admin_chat_message_id,
                 origin_chat_id=user.id,
             ),
         )
@@ -620,7 +652,8 @@ class TrelloIntegration:
             self.logger.info("Not exporting admin message as it responds to a cardless user")
             return
         card_content = await self._card_content_from_message(message, to_user_id, include_attachments=False)
-        card_content.description = self._add_admin_chat_link(card_content.description, to_message=message)
+        if self.admin_chat_backlink:
+            card_content.description = self._add_admin_chat_link(card_content.description, to_message_id=message.id)
         card_content.description = self._add_admin_reply_prefix(card_content.description)
         try:
             trello_card = await self._append_card_content(

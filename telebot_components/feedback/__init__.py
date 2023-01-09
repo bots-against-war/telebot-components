@@ -51,7 +51,7 @@ class ServiceMessages:
     throttling_template: Optional[AnyText] = None
 
     # messages in admin chat (not localised!)
-    # e.g. "Скопировано в чат с пользовател_ьницей!"
+    # e.g. "Скопировано в чат с пользователь_ницей!"
     copied_to_user_ok: Optional[str] = None
     # e.g. "Невозможно удалить сообщение."
     can_not_delete_message: Optional[str] = None
@@ -258,11 +258,11 @@ class FeedbackHandler:
         if self.banned_users_store is not None:
             await self.banned_users_store.ban_user(origin_chat_id)
 
-    async def save_message_from_user(self, author: tg.User, forwarded_message: tg.Message):
+    async def save_message_from_user(self, author: tg.User, forwarded_message_id: int):
         origin_chat_id = author.id
-        await self.origin_chat_id_store.save(forwarded_message.id, origin_chat_id)
-        await self.user_related_messages_store.add(origin_chat_id, forwarded_message.id, reset_ttl=True)
-        await self.message_log_store.push(origin_chat_id, forwarded_message.id, reset_ttl=True)
+        await self.origin_chat_id_store.save(forwarded_message_id, origin_chat_id)
+        await self.user_related_messages_store.add(origin_chat_id, forwarded_message_id, reset_ttl=True)
+        await self.message_log_store.push(origin_chat_id, forwarded_message_id, reset_ttl=True)
 
     def _admin_help_message(self) -> str:
         paragraphs = ["<b>Справка-памятка для админского чата</b>"]
@@ -270,21 +270,21 @@ class FeedbackHandler:
             "💬 <i>Основное</i>\n"
             + "· Сюда бот пересылает все сообщения (кроме специальных случаев вроде /команд), которые ему "
             + "пишут в личку.\n"
-            + "· Если в этом чате ответить на сообщение, бот скопирует ответ в чат с пользовател_ьницей.\n"
-            + "· Чтобы отменить отправку сообщения пользовател_ьнице - отправьте реплай с командой /undo на ваше "
+            + "· Если в этом чате ответить на сообщение, бот скопирует ответ в чат с пользователь_ницей.\n"
+            + "· Чтобы отменить отправку сообщения пользователь_нице - отправьте реплай с командой /undo на ваше "
             + "сообщение или на подтверждение отправки бота (доступно в течение 5 минут)"
         )
         if self.category_store is not None:
             categories_help = (
                 "📊 <i>Категории сообщений</i>\n"
-                + "· Каждо_й пользовател_ьнице предлагается выбрать одну из категорий: "
+                + "· Каждо_й пользователь_нице предлагается выбрать одну из категорий: "
                 + ", ".join(
                     [f"<b>{c.name}</b> (# {c.hashtag})" for c in self.category_store.categories if not c.hidden]
                 )
                 + "\n"
             )
             if self.config.force_category_selection:
-                categories_help += "· Выбор категории обязателен для пользовател_ьниц."
+                categories_help += "· Выбор категории обязателен для пользователь_ниц."
             else:
                 categories_help += "· Выбор категории необязателен, боту можно написать и без него."
 
@@ -292,7 +292,7 @@ class FeedbackHandler:
 
         security_help = (
             "🛡️ <i>Защита и безопасность</i>\n"
-            + "· Бот никак не выдаёт, кто отвечает пользовател_ьнице из этого чата. Насколько возможно судить, "
+            + "· Бот никак не выдаёт, кто отвечает пользователь_нице из этого чата. Насколько возможно судить, "
             + "никакого способа взломать бота нет. Однако всё, что вы отвечаете через бота, сразу пересылается человеку "
             + "на другом конце, и отменить отправку можно лишь в течении первых 5 минут, поэтому будьте внимательны!"
         )
@@ -306,7 +306,7 @@ class FeedbackHandler:
         if self.banned_users_store is not None:
             security_help += (
                 "\n· Если ответить на пересланное сообщение командой /ban, "
-                + "пользовател_ьница будет заблокирован_а, а все сообщения от них в чате — удалены"
+                + "пользователь_ница будет заблокирован_а, а все сообщения от них в чате — удалены"
             )
         paragraphs.append(security_help)
 
@@ -314,7 +314,7 @@ class FeedbackHandler:
             "📋 <i>История сообщений</i>\n"
             + "· Через бота может быть неудобно вести несколько длительных переписок — все они мешаются в одном чате.\n"
             + "· Если ответить на пересланное сообщение командой /log, бот перешлёт всю историю переписки с "
-            + "пользовател_ьницей "
+            + "пользователь_ницей "
             + (
                 "в этот чат. Можно настроить бота так, чтобы бот пересылал историю не сюда, а "
                 + "в диалог с администратор_кой, которая её запросила."
@@ -338,7 +338,7 @@ class FeedbackHandler:
                     "\n"
                     + "· Через комментарии к карточке можно ответить на сообщение в боте: "
                     + "комментарий «/reply текст ответа» значит, что бот отправит «текст ответа» в чат с "
-                    + "пользовател_ьницей, а также напишет уведомление сюда."
+                    + "пользователь_ницей, а также напишет уведомление сюда."
                 )
             paragraphs.append(trello_help)
 
@@ -359,10 +359,12 @@ class FeedbackHandler:
         self,
         bot: AsyncTeleBot,
         user: tg.User,
-        message_forwarder: Callable[[], Coroutine[None, None, tg.Message]],
+        message_forwarder: Callable[
+            [], Coroutine[None, None, tuple[int, tg.Message]]
+        ],  # returns id of the message in admin chat and a Message object for the message contents
         user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
         export_to_trello: bool = True,
-    ) -> Optional[tg.Message]:
+    ) -> Optional[int]:
         if self.banned_users_store is not None and await self.banned_users_store.is_banned(user.id):
             return None
         anti_spam_status = await self.anti_spam.status(user)
@@ -416,18 +418,18 @@ class FeedbackHandler:
         if self.config.before_forwarding is not None:
             preforwarded_msg = await self.config.before_forwarding(user)
             if isinstance(preforwarded_msg, tg.Message):
-                await self.save_message_from_user(user, preforwarded_msg)
+                await self.save_message_from_user(user, preforwarded_msg.id)
 
-        forwarded_msg = await message_forwarder()
-        await self.save_message_from_user(user, forwarded_msg)
+        admin_chat_forwarded_msg_id, user_content_message = await message_forwarder()
+        await self.save_message_from_user(user, admin_chat_forwarded_msg_id)
         postforwarded_msg = None
         if self.config.after_forwarding is not None:
             postforwarded_msg = await self.config.after_forwarding(user)
             if isinstance(postforwarded_msg, tg.Message):
-                await self.save_message_from_user(user, postforwarded_msg)
+                await self.save_message_from_user(user, postforwarded_msg.id)
 
         if self.config.hashtags_in_admin_chat:
-            await self.hashtag_message_for_forwarded_message_store.save(forwarded_msg.id, hashtag_msg_data)  # type: ignore
+            await self.hashtag_message_for_forwarded_message_store.save(admin_chat_forwarded_msg_id, hashtag_msg_data)  # type: ignore
 
         if self.service_messages.forwarded_to_admin_ok is not None:
             if self.recently_sent_confirmation_flag_store is not None:
@@ -455,11 +457,12 @@ class FeedbackHandler:
 
             await self.trello_integration.export_user_message(
                 user=user,
-                forwarded_message=forwarded_msg,
+                content_message=user_content_message,
+                admin_chat_message_id=admin_chat_forwarded_msg_id,
                 category=category,
                 postprocess_card_description=postprocess_card_description,
             )
-        return forwarded_msg
+        return admin_chat_forwarded_msg_id
 
     async def emulate_user_message(
         self,
@@ -471,17 +474,20 @@ class FeedbackHandler:
         export_to_trello: bool = True,
         remove_exif_data: bool = True,
         **send_message_kwargs,
-    ) -> Optional[tg.Message]:
+    ) -> Optional[int]:
         """Sometimes we want FeedbackHandler to act like the user has sent us a message, but without actually
         a message there (they might have pressed a button or interacted with the bot in some other way). This
         method can be used in such cases.
+
+        If the message has been successfully sent to the admin chat, this method returns its id.
         """
 
-        async def message_forwarder() -> tg.Message:
+        async def message_forwarder() -> tuple[int, tg.Message]:
             if attachment is None:
-                return await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
+                sent_msg = await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
             else:
-                return await send_attachment(bot, self.admin_chat_id, attachment, text, remove_exif_data)
+                sent_msg = await send_attachment(bot, self.admin_chat_id, attachment, text, remove_exif_data)
+            return sent_msg.id, sent_msg
 
         async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> Optional[tg.Message]:
             if no_response:
@@ -505,10 +511,11 @@ class FeedbackHandler:
             priority=-100,  # lower priority to process the rest of the handlers first
         )
         async def user_to_bot(message: tg.Message):
-            async def message_forwarder() -> tg.Message:
-                return await bot.forward_message(
+            async def message_forwarder() -> tuple[int, tg.Message]:
+                forwarded_message = await bot.forward_message(
                     self.admin_chat_id, from_chat_id=message.chat.id, message_id=message.id
                 )
+                return forwarded_message.id, forwarded_message
 
             async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> tg.Message:
                 return await bot.reply_to(message, text, reply_markup=reply_markup)
