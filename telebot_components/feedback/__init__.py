@@ -1,4 +1,5 @@
 import logging
+import random
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Callable, Coroutine, Optional, Protocol, TypedDict, cast
@@ -132,17 +133,19 @@ class FeedbackConfig:
     user_id_hash_func: Callable[[int, str], str] = emoji_hash
 
 
-DUMMY_EXPIRATION_TIME = timedelta(seconds=1312)  # used for stores unused by runtime settings
+DUMMY_EXPIRATION_TIME = timedelta(seconds=1312)  # for stores unused based on runtime settings
 
 
 class FeedbackHandler:
     """
     A class incapsulating the following workflow:
      - people write messages to the bot
-     - the bot forwards messages to admin chat
+     - the bot forwards/copies messages to admin chat
      - admins reply
      - the bot copies messages back to the user
     """
+
+    CONST_KEY = "const"
 
     def __init__(
         self,
@@ -245,6 +248,15 @@ class FeedbackHandler:
             expiration_time=times.FIVE_MINUTES,
         )
 
+        self.last_sent_user_id_hash_store = KeyValueStore[str](
+            name="last-sent-user-id-hash",
+            prefix=bot_prefix,
+            redis=redis,
+            expiration_time=timedelta(hours=12),
+            loader=str,
+            dumper=str,
+        )
+
     def validate_service_messages(self):
         if self.config.force_category_selection and self.service_messages.you_must_select_category is None:
             raise ValueError("force_category_selection is True, you_must_select_category message must be set")
@@ -270,11 +282,23 @@ class FeedbackHandler:
         await self.message_log_store.push(origin_chat_id, forwarded_message_id, reset_ttl=True)
 
     def _admin_help_message(self) -> str:
-        paragraphs = ["<b>Справка-памятка для админского чата</b>"]
+        paragraphs = [
+            "<b>Справка-памятка для админского чата</b>",
+            "<i>Сообщение сгенерировано автоматически по команде /help</i>",
+        ]
+        copies_or_forwards = "пересылает" if not self.config.full_user_anonymization else "копирует"
         paragraphs.append(
             "💬 <i>Основное</i>\n"
-            + "· Сюда бот пересылает все сообщения (кроме специальных случаев вроде /команд), которые ему "
+            + f"· В этот чат бот {copies_or_forwards} все сообщения (кроме специальных случаев вроде /команд), которые ему "
             + "пишут в личку.\n"
+            + (
+                (
+                    "· Перед скопированным сообщением бот указывает анонимизированный идентификатор пользователь_ницы, "
+                    + f"например такой: «{self.config.user_id_hash_func(random.randint(1, 1000), self.bot_prefix)}»\n"
+                )
+                if self.config.full_user_anonymization
+                else ""
+            )
             + "· Если в этом чате ответить на сообщение, бот скопирует ответ в чат с пользователь_ницей.\n"
             + "· Чтобы отменить отправку сообщения пользователь_нице - отправьте реплай с командой /undo на ваше "
             + "сообщение или на подтверждение отправки бота (доступно в течение 5 минут)"
@@ -471,6 +495,16 @@ class FeedbackHandler:
             )
         return admin_chat_forwarded_msg_id
 
+    async def _send_user_id_hash_message(self, bot: AsyncTeleBot, user_id: int) -> Optional[int]:
+        user_id_hash = self.config.user_id_hash_func(user_id, self.bot_prefix)
+        last_sent_user_id_hash = await self.last_sent_user_id_hash_store.load(self.CONST_KEY)
+        if last_sent_user_id_hash is None or last_sent_user_id_hash != user_id_hash:
+            user_id_hash_msg = await bot.send_message(self.admin_chat_id, user_id_hash)
+            await self.last_sent_user_id_hash_store.save(self.CONST_KEY, user_id_hash)
+            return user_id_hash_msg.id
+        else:
+            return None
+
     async def emulate_user_message(
         self,
         bot: AsyncTeleBot,
@@ -480,6 +514,7 @@ class FeedbackHandler:
         no_response: bool = False,
         export_to_trello: bool = True,
         remove_exif_data: bool = True,
+        send_user_id_hash_message: bool = False,
         **send_message_kwargs,
     ) -> Optional[int]:
         """Sometimes we want FeedbackHandler to act like the user has sent us a message, but without actually
@@ -490,11 +525,16 @@ class FeedbackHandler:
         """
 
         async def message_forwarder() -> tuple[list[int], tg.Message]:
+            if send_user_id_hash_message:
+                admin_chat_message_ids = [await self._send_user_id_hash_message(bot, user.id)]
+            else:
+                admin_chat_message_ids = []
             if attachment is None:
                 sent_msg = await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
             else:
                 sent_msg = await send_attachment(bot, self.admin_chat_id, attachment, text, remove_exif_data)
-            return [sent_msg.id], sent_msg
+            admin_chat_message_ids.append(sent_msg.id)
+            return [mid for mid in admin_chat_message_ids if mid is not None], sent_msg
 
         async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> Optional[tg.Message]:
             if no_response:
@@ -520,16 +560,14 @@ class FeedbackHandler:
         async def user_to_bot(message: tg.Message):
             async def message_forwarder() -> tuple[list[int], tg.Message]:
                 if self.config.full_user_anonymization:
-                    user_id_msg = await bot.send_message(
-                        chat_id=self.admin_chat_id,
-                        text=self.config.user_id_hash_func(message.from_user.id, self.bot_prefix),
-                    )
+                    user_id_msg_id = await self._send_user_id_hash_message(bot, message.from_user.id)
                     copied_message_id = await bot.copy_message(
                         chat_id=self.admin_chat_id,
                         from_chat_id=message.chat.id,
                         message_id=message.id,
                     )
-                    return [user_id_msg.id, copied_message_id.message_id], message
+                    maybe_message_ids = [user_id_msg_id, copied_message_id.message_id]
+                    return [mid for mid in maybe_message_ids if mid is not None], message
                 else:
                     forwarded_message = await bot.forward_message(
                         self.admin_chat_id, from_chat_id=message.chat.id, message_id=message.id
