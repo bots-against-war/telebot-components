@@ -475,6 +475,9 @@ class FeedbackHandler:
             if self.config.confirm_forwarded_to_admin_rarer_than is not None:
                 await self.recently_sent_confirmation_flag_store.set_flag(user.id)
 
+        # HACK: we are assuming that the list of forwarded message ids contains "service" ids first and the main message last,
+        # so here we use (and return) the last one
+        main_admin_chat_forwarded_msg_id = admin_chat_forwarded_msg_ids[-1]
         if self.trello_integration is not None and export_to_trello:
             category = await self.category_store.get_user_category(user) if self.category_store else None
 
@@ -489,11 +492,11 @@ class FeedbackHandler:
             await self.trello_integration.export_user_message(
                 user=user,
                 content_message=user_content_message,
-                admin_chat_message_id=admin_chat_forwarded_msg_id,
+                admin_chat_message_id=main_admin_chat_forwarded_msg_id,
                 category=category,
                 postprocess_card_description=postprocess_card_description,
             )
-        return admin_chat_forwarded_msg_id
+        return main_admin_chat_forwarded_msg_id
 
     async def _send_user_id_hash_message(self, bot: AsyncTeleBot, user_id: int) -> Optional[int]:
         user_id_hash = self.config.user_id_hash_func(user_id, self.bot_prefix)
