@@ -8,6 +8,10 @@ from telebot.types import constants as tg_constants
 from telebot_components.constants import times
 from telebot_components.feedback import FeedbackConfig, FeedbackHandler, ServiceMessages
 from telebot_components.feedback.anti_spam import AntiSpam, AntiSpamConfig
+from telebot_components.feedback.trello_integration import (
+    TrelloIntegration,
+    TrelloIntegrationCredentials,
+)
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
 from telebot_components.stores.category import Category, CategoryStore
@@ -15,7 +19,6 @@ from telebot_components.stores.language import (
     Language,
     LanguageSelectionMenuConfig,
     LanguageStore,
-    any_text_to_str,
 )
 
 
@@ -94,6 +97,24 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
             reply_markup=(await language_store.markup_for_user(message.from_user)),
         )
 
+    try:
+        trello_integration = TrelloIntegration(
+            bot=bot,
+            redis=redis,
+            bot_prefix=bot_prefix,
+            admin_chat_id=admin_chat_id,
+            credentials=TrelloIntegrationCredentials(
+                os.environ["TRELLO_USER_API_KEY"],
+                os.environ["TRELLO_USER_TOKEN"],
+                board_id=os.environ["TRELLO_BOARD_ID"],
+            ),
+            reply_with_card_comments=False,
+            categories=category_store.categories,
+        )
+    except Exception:
+        logging.info("Running example bot without Trello integration", exc_info=True)
+        trello_integration = None
+
     feedback_handler = FeedbackHandler(
         admin_chat_id,
         redis,
@@ -137,7 +158,7 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
         banned_users_store=banned_store,
         language_store=language_store,
         category_store=category_store,
-        # trello_integration=TBD
+        trello_integration=trello_integration,
     )
 
     async def on_language_selected(bot: AsyncTeleBot, menu_message: tg.Message, user: tg.User, new_option: Language):
@@ -158,6 +179,7 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
     return BotRunner(
         bot_prefix=bot_prefix,
         bot=bot,
+        background_jobs=[trello_integration.initialize()] if trello_integration is not None else [],
     )
 
 
