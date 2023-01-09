@@ -477,6 +477,8 @@ class FeedbackHandler:
 
         # HACK: we are assuming that the list of forwarded message ids contains "service" ids first and the main message last,
         # so here we use (and return) the last one
+        if not admin_chat_forwarded_msg_ids:
+            return None
         main_admin_chat_forwarded_msg_id = admin_chat_forwarded_msg_ids[-1]
         if self.trello_integration is not None and export_to_trello:
             category = await self.category_store.get_user_category(user) if self.category_store else None
