@@ -1,4 +1,5 @@
 import logging
+import random
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Callable, Coroutine, Optional, Protocol, TypedDict, cast
@@ -37,7 +38,7 @@ from telebot_components.stores.language import (
     any_text_to_str,
     vaildate_singlelang_text,
 )
-from telebot_components.utils import html_link, send_attachment
+from telebot_components.utils import emoji_hash, html_link, send_attachment
 
 
 @dataclass
@@ -51,7 +52,7 @@ class ServiceMessages:
     throttling_template: Optional[AnyText] = None
 
     # messages in admin chat (not localised!)
-    # e.g. "Скопировано в чат с пользовател_ьницей!"
+    # e.g. "Скопировано в чат с пользователь_ницей!"
     copied_to_user_ok: Optional[str] = None
     # e.g. "Невозможно удалить сообщение."
     can_not_delete_message: Optional[str] = None
@@ -99,33 +100,52 @@ class AdminChatAction:
 class FeedbackConfig:
     # if False, message log is sent to PM with the admin that has invoked the '/log' cmd
     message_log_to_admin_chat: bool
+
     # if True, user's messages are not forwarded until they select a category
     force_category_selection: bool
+
     # if True, hashtag messages is sent before the actual forwarded message to the admin chat
     hashtags_in_admin_chat: bool
+
     # if hashtags_in_admin_chat is True, this specifies how often to send hashtag message
     hashtag_message_rarer_than: Optional[timedelta]
+
     # e.g. 'new' to mark all unanswered messages with '#new'; specify None to disable unanswered
     unanswered_hashtag: Optional[str]
-    # when users sent a lot of messages, they can grow tired of constant confirmations
+
+    # when users send a lot of messages, they can grow tired of constant confirmations
     # this parameter allows to limit confirmations to user to one per a specified time
     confirm_forwarded_to_admin_rarer_than: Optional[timedelta] = None
+
     # custom filters and hooks
     custom_user_message_filter: Optional[Callable[[tg.Message], Coroutine[None, None, bool]]] = None
     before_forwarding: Optional[Callable[[tg.User], Coroutine[None, None, Optional[tg.Message]]]] = None
     after_forwarding: Optional[Callable[[tg.User], Coroutine[None, None, Optional[tg.Message]]]] = None
+
     # appended to admin chat help under "Other" section; Supports HTML markup
     admin_chat_help_extra: Optional[str] = None
+
+    # if True, user messages are not forwarded but copied to admin chat without any back
+    # link to the user account; before the message, user id hash is sent for identification
+    full_user_anonymization: bool = False
+    # function used to generate user id hash for a particular bot; if full_user_anonymization is False,
+    # it is ignored
+    user_id_hash_func: Callable[[int, str], str] = emoji_hash
+
+
+DUMMY_EXPIRATION_TIME = timedelta(seconds=1312)  # for stores unused based on runtime settings
 
 
 class FeedbackHandler:
     """
     A class incapsulating the following workflow:
      - people write messages to the bot
-     - the bot forwards messages to admin chat
+     - the bot forwards/copies messages to admin chat
      - admins reply
      - the bot copies messages back to the user
     """
+
+    CONST_KEY = "const"
 
     def __init__(
         self,
@@ -140,7 +160,7 @@ class FeedbackHandler:
         category_store: Optional[CategoryStore] = None,
         trello_integration: Optional[TrelloIntegration] = None,
         admin_chat_response_actions: Optional[list[AdminChatAction]] = None,
-    ):
+    ) -> None:
         self.bot_prefix = bot_prefix
         self.admin_chat_id = admin_chat_id
         self.config = config
@@ -197,38 +217,26 @@ class FeedbackHandler:
         )
         # [optional] user id -> flag if the "forwarded to admin" confirmation has recently been
         # sent to them
-        self.recently_sent_confirmation_flag_store = (
-            KeyFlagStore(
-                name="recently-sent-confirmation-to",
-                prefix=bot_prefix,
-                redis=redis,
-                expiration_time=self.config.confirm_forwarded_to_admin_rarer_than,
-            )
-            if self.config.confirm_forwarded_to_admin_rarer_than is not None
-            else None
+        self.recently_sent_confirmation_flag_store = KeyFlagStore(
+            name="recently-sent-confirmation-to",
+            prefix=bot_prefix,
+            redis=redis,
+            expiration_time=self.config.confirm_forwarded_to_admin_rarer_than or DUMMY_EXPIRATION_TIME,
         )
         # [optional] hashtag-related stores
         # user id -> hashtag message data; used to avoid sending hashtags too frequently
-        self.recent_hashtag_message_for_user_store = (
-            KeyValueStore[HashtagMessageData](
-                name="recent-hashtag-message-for",
-                prefix=bot_prefix,
-                redis=redis,
-                expiration_time=self.config.hashtag_message_rarer_than,
-            )
-            if self.config.hashtags_in_admin_chat
-            else None
+        self.recent_hashtag_message_for_user_store = KeyValueStore[HashtagMessageData](
+            name="recent-hashtag-message-for",
+            prefix=bot_prefix,
+            redis=redis,
+            expiration_time=self.config.hashtag_message_rarer_than or DUMMY_EXPIRATION_TIME,
         )
         # forwarded msg id -> hashtag message id; used to update hashtag message on forwarded msg action
-        self.hashtag_message_for_forwarded_message_store = (
-            KeyValueStore[HashtagMessageData](
-                name="hashtag-msg-for-fwd",
-                prefix=bot_prefix,
-                redis=redis,
-                expiration_time=times.MONTH,
-            )
-            if self.config.hashtags_in_admin_chat
-            else None
+        self.hashtag_message_for_forwarded_message_store = KeyValueStore[HashtagMessageData](
+            name="hashtag-msg-for-fwd",
+            prefix=bot_prefix,
+            redis=redis,
+            expiration_time=times.MONTH,
         )
 
         # copied to user ok msg id/admin response msg -> origin chat id (user id) + sent message id;
@@ -238,6 +246,15 @@ class FeedbackHandler:
             prefix=bot_prefix,
             redis=redis,
             expiration_time=times.FIVE_MINUTES,
+        )
+
+        self.last_sent_user_id_hash_store = KeyValueStore[str](
+            name="last-sent-user-id-hash",
+            prefix=bot_prefix,
+            redis=redis,
+            expiration_time=timedelta(hours=12),
+            loader=str,
+            dumper=str,
         )
 
     def validate_service_messages(self):
@@ -258,33 +275,45 @@ class FeedbackHandler:
         if self.banned_users_store is not None:
             await self.banned_users_store.ban_user(origin_chat_id)
 
-    async def save_message_from_user(self, author: tg.User, forwarded_message: tg.Message):
+    async def save_message_from_user(self, author: tg.User, forwarded_message_id: int):
         origin_chat_id = author.id
-        await self.origin_chat_id_store.save(forwarded_message.id, origin_chat_id)
-        await self.user_related_messages_store.add(origin_chat_id, forwarded_message.id, reset_ttl=True)
-        await self.message_log_store.push(origin_chat_id, forwarded_message.id, reset_ttl=True)
+        await self.origin_chat_id_store.save(forwarded_message_id, origin_chat_id)
+        await self.user_related_messages_store.add(origin_chat_id, forwarded_message_id, reset_ttl=True)
+        await self.message_log_store.push(origin_chat_id, forwarded_message_id, reset_ttl=True)
 
     def _admin_help_message(self) -> str:
-        paragraphs = ["<b>Справка-памятка для админского чата</b>"]
+        paragraphs = [
+            "<b>Справка-памятка для админского чата</b>",
+            "<i>Сообщение сгенерировано автоматически по команде /help</i>",
+        ]
+        copies_or_forwards = "пересылает" if not self.config.full_user_anonymization else "копирует"
         paragraphs.append(
             "💬 <i>Основное</i>\n"
-            + "· Сюда бот пересылает все сообщения (кроме специальных случаев вроде /команд), которые ему "
+            + f"· В этот чат бот {copies_or_forwards} все сообщения (кроме специальных случаев вроде /команд), которые ему "
             + "пишут в личку.\n"
-            + "· Если в этом чате ответить на сообщение, бот скопирует ответ в чат с пользовател_ьницей.\n"
-            + "· Чтобы отменить отправку сообщения пользовател_ьнице - отправьте реплай с командой /undo на ваше "
+            + (
+                (
+                    "· Перед скопированным сообщением бот указывает анонимизированный идентификатор пользователь_ницы, "
+                    + f"например такой: «{self.config.user_id_hash_func(random.randint(1, 1000), self.bot_prefix)}»\n"
+                )
+                if self.config.full_user_anonymization
+                else ""
+            )
+            + "· Если в этом чате ответить на сообщение, бот скопирует ответ в чат с пользователь_ницей.\n"
+            + "· Чтобы отменить отправку сообщения пользователь_нице - отправьте реплай с командой /undo на ваше "
             + "сообщение или на подтверждение отправки бота (доступно в течение 5 минут)"
         )
         if self.category_store is not None:
             categories_help = (
                 "📊 <i>Категории сообщений</i>\n"
-                + "· Каждо_й пользовател_ьнице предлагается выбрать одну из категорий: "
+                + "· Каждо_й пользователь_нице предлагается выбрать одну из категорий: "
                 + ", ".join(
                     [f"<b>{c.name}</b> (# {c.hashtag})" for c in self.category_store.categories if not c.hidden]
                 )
                 + "\n"
             )
             if self.config.force_category_selection:
-                categories_help += "· Выбор категории обязателен для пользовател_ьниц."
+                categories_help += "· Выбор категории обязателен для пользователь_ниц."
             else:
                 categories_help += "· Выбор категории необязателен, боту можно написать и без него."
 
@@ -292,7 +321,7 @@ class FeedbackHandler:
 
         security_help = (
             "🛡️ <i>Защита и безопасность</i>\n"
-            + "· Бот никак не выдаёт, кто отвечает пользовател_ьнице из этого чата. Насколько возможно судить, "
+            + "· Бот никак не выдаёт, кто отвечает пользователь_нице из этого чата. Насколько возможно судить, "
             + "никакого способа взломать бота нет. Однако всё, что вы отвечаете через бота, сразу пересылается человеку "
             + "на другом конце, и отменить отправку можно лишь в течении первых 5 минут, поэтому будьте внимательны!"
         )
@@ -306,7 +335,7 @@ class FeedbackHandler:
         if self.banned_users_store is not None:
             security_help += (
                 "\n· Если ответить на пересланное сообщение командой /ban, "
-                + "пользовател_ьница будет заблокирован_а, а все сообщения от них в чате — удалены"
+                + "пользователь_ница будет заблокирован_а, а все сообщения от них в чате — удалены"
             )
         paragraphs.append(security_help)
 
@@ -314,7 +343,7 @@ class FeedbackHandler:
             "📋 <i>История сообщений</i>\n"
             + "· Через бота может быть неудобно вести несколько длительных переписок — все они мешаются в одном чате.\n"
             + "· Если ответить на пересланное сообщение командой /log, бот перешлёт всю историю переписки с "
-            + "пользовател_ьницей "
+            + "пользователь_ницей "
             + (
                 "в этот чат. Можно настроить бота так, чтобы бот пересылал историю не сюда, а "
                 + "в диалог с администратор_кой, которая её запросила."
@@ -338,7 +367,7 @@ class FeedbackHandler:
                     "\n"
                     + "· Через комментарии к карточке можно ответить на сообщение в боте: "
                     + "комментарий «/reply текст ответа» значит, что бот отправит «текст ответа» в чат с "
-                    + "пользовател_ьницей, а также напишет уведомление сюда."
+                    + "пользователь_ницей, а также напишет уведомление сюда."
                 )
             paragraphs.append(trello_help)
 
@@ -359,10 +388,11 @@ class FeedbackHandler:
         self,
         bot: AsyncTeleBot,
         user: tg.User,
-        message_forwarder: Callable[[], Coroutine[None, None, tg.Message]],
+        # message forwarder returns ids of messages in admin chat and a Message object with the message contents
+        message_forwarder: Callable[[], Coroutine[None, None, tuple[list[int], tg.Message]]],
         user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
         export_to_trello: bool = True,
-    ) -> Optional[tg.Message]:
+    ) -> Optional[int]:
         if self.banned_users_store is not None and await self.banned_users_store.is_banned(user.id):
             return None
         anti_spam_status = await self.anti_spam.status(user)
@@ -378,6 +408,7 @@ class FeedbackHandler:
             await user_replier(self.service_messages.throttling(anti_spam.config, language), None)
             return None
 
+        hashtag_msg_data: Optional[HashtagMessageData] = None
         if self.config.hashtags_in_admin_chat:
             category_hashtag = None  # sentinel
             if self.category_store is not None:
@@ -395,7 +426,7 @@ class FeedbackHandler:
                     category_hashtag = category.hashtag
 
             # see runtime check for the hashtags_in_admin_chat flag and creation of the store
-            hashtag_msg_data = await self.recent_hashtag_message_for_user_store.load(user.id)  # type: ignore
+            hashtag_msg_data = await self.recent_hashtag_message_for_user_store.load(user.id)
             if hashtag_msg_data is None or (
                 category_hashtag is not None and category_hashtag not in hashtag_msg_data["hashtags"]
             ):
@@ -410,38 +441,45 @@ class FeedbackHandler:
                 hashtag_msg = await bot.send_message(self.admin_chat_id, _join_hashtags(hashtags))
                 await self.user_related_messages_store.add(user.id, hashtag_msg.id, reset_ttl=False)
                 hashtag_msg_data = HashtagMessageData(message_id=hashtag_msg.id, hashtags=hashtags)
-                await self.recent_hashtag_message_for_user_store.save(user.id, hashtag_msg_data)  # type: ignore
+                await self.recent_hashtag_message_for_user_store.save(user.id, hashtag_msg_data)
 
         preforwarded_msg = None
         if self.config.before_forwarding is not None:
             preforwarded_msg = await self.config.before_forwarding(user)
             if isinstance(preforwarded_msg, tg.Message):
-                await self.save_message_from_user(user, preforwarded_msg)
+                await self.save_message_from_user(user, preforwarded_msg.id)
 
-        forwarded_msg = await message_forwarder()
-        await self.save_message_from_user(user, forwarded_msg)
+        admin_chat_forwarded_msg_ids, user_content_message = await message_forwarder()
+        for admin_chat_forwarded_msg_id in admin_chat_forwarded_msg_ids:
+            await self.save_message_from_user(user, admin_chat_forwarded_msg_id)
         postforwarded_msg = None
         if self.config.after_forwarding is not None:
             postforwarded_msg = await self.config.after_forwarding(user)
             if isinstance(postforwarded_msg, tg.Message):
-                await self.save_message_from_user(user, postforwarded_msg)
+                await self.save_message_from_user(user, postforwarded_msg.id)
 
-        if self.config.hashtags_in_admin_chat:
-            await self.hashtag_message_for_forwarded_message_store.save(forwarded_msg.id, hashtag_msg_data)  # type: ignore
-
-        if self.service_messages.forwarded_to_admin_ok is not None:
-            if self.recently_sent_confirmation_flag_store is not None:
-                confirmation_recently_sent = await self.recently_sent_confirmation_flag_store.is_flag_set(user.id)
-            else:
-                confirmation_recently_sent = False
-            if not confirmation_recently_sent:
-                await user_replier(
-                    any_text_to_str(self.service_messages.forwarded_to_admin_ok, language),
-                    None,
+        if self.config.hashtags_in_admin_chat and hashtag_msg_data is not None:
+            for admin_chat_forwarded_msg_id in admin_chat_forwarded_msg_ids:
+                await self.hashtag_message_for_forwarded_message_store.save(
+                    admin_chat_forwarded_msg_id, hashtag_msg_data
                 )
-                if self.recently_sent_confirmation_flag_store is not None:
-                    await self.recently_sent_confirmation_flag_store.set_flag(user.id)
 
+        if self.service_messages.forwarded_to_admin_ok is not None and (
+            self.config.confirm_forwarded_to_admin_rarer_than is None
+            or not await self.recently_sent_confirmation_flag_store.is_flag_set(user.id)
+        ):
+            await user_replier(
+                any_text_to_str(self.service_messages.forwarded_to_admin_ok, language),
+                None,
+            )
+            if self.config.confirm_forwarded_to_admin_rarer_than is not None:
+                await self.recently_sent_confirmation_flag_store.set_flag(user.id)
+
+        # HACK: we are assuming that the list of forwarded message ids contains "service" ids first and the main message last,
+        # so here we use (and return) the last one
+        if not admin_chat_forwarded_msg_ids:
+            return None
+        main_admin_chat_forwarded_msg_id = admin_chat_forwarded_msg_ids[-1]
         if self.trello_integration is not None and export_to_trello:
             category = await self.category_store.get_user_category(user) if self.category_store else None
 
@@ -455,11 +493,22 @@ class FeedbackHandler:
 
             await self.trello_integration.export_user_message(
                 user=user,
-                forwarded_message=forwarded_msg,
+                content_message=user_content_message,
+                admin_chat_message_id=main_admin_chat_forwarded_msg_id,
                 category=category,
                 postprocess_card_description=postprocess_card_description,
             )
-        return forwarded_msg
+        return main_admin_chat_forwarded_msg_id
+
+    async def _send_user_id_hash_message(self, bot: AsyncTeleBot, user_id: int) -> Optional[int]:
+        user_id_hash = self.config.user_id_hash_func(user_id, self.bot_prefix)
+        last_sent_user_id_hash = await self.last_sent_user_id_hash_store.load(self.CONST_KEY)
+        if last_sent_user_id_hash is None or last_sent_user_id_hash != user_id_hash:
+            user_id_hash_msg = await bot.send_message(self.admin_chat_id, user_id_hash)
+            await self.last_sent_user_id_hash_store.save(self.CONST_KEY, user_id_hash)
+            return user_id_hash_msg.id
+        else:
+            return None
 
     async def emulate_user_message(
         self,
@@ -470,18 +519,27 @@ class FeedbackHandler:
         no_response: bool = False,
         export_to_trello: bool = True,
         remove_exif_data: bool = True,
+        send_user_id_hash_message: bool = False,
         **send_message_kwargs,
-    ) -> Optional[tg.Message]:
+    ) -> Optional[int]:
         """Sometimes we want FeedbackHandler to act like the user has sent us a message, but without actually
         a message there (they might have pressed a button or interacted with the bot in some other way). This
         method can be used in such cases.
+
+        If the message has been successfully sent to the admin chat, this method returns its id.
         """
 
-        async def message_forwarder() -> tg.Message:
-            if attachment is None:
-                return await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
+        async def message_forwarder() -> tuple[list[int], tg.Message]:
+            if send_user_id_hash_message:
+                admin_chat_message_ids = [await self._send_user_id_hash_message(bot, user.id)]
             else:
-                return await send_attachment(bot, self.admin_chat_id, attachment, text, remove_exif_data)
+                admin_chat_message_ids = []
+            if attachment is None:
+                sent_msg = await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
+            else:
+                sent_msg = await send_attachment(bot, self.admin_chat_id, attachment, text, remove_exif_data)
+            admin_chat_message_ids.append(sent_msg.id)
+            return [mid for mid in admin_chat_message_ids if mid is not None], sent_msg
 
         async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> Optional[tg.Message]:
             if no_response:
@@ -505,10 +563,21 @@ class FeedbackHandler:
             priority=-100,  # lower priority to process the rest of the handlers first
         )
         async def user_to_bot(message: tg.Message):
-            async def message_forwarder() -> tg.Message:
-                return await bot.forward_message(
-                    self.admin_chat_id, from_chat_id=message.chat.id, message_id=message.id
-                )
+            async def message_forwarder() -> tuple[list[int], tg.Message]:
+                if self.config.full_user_anonymization:
+                    user_id_msg_id = await self._send_user_id_hash_message(bot, message.from_user.id)
+                    copied_message_id = await bot.copy_message(
+                        chat_id=self.admin_chat_id,
+                        from_chat_id=message.chat.id,
+                        message_id=message.id,
+                    )
+                    maybe_message_ids = [user_id_msg_id, copied_message_id.message_id]
+                    return [mid for mid in maybe_message_ids if mid is not None], message
+                else:
+                    forwarded_message = await bot.forward_message(
+                        self.admin_chat_id, from_chat_id=message.chat.id, message_id=message.id
+                    )
+                    return [forwarded_message.id], forwarded_message
 
             async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> tg.Message:
                 return await bot.reply_to(message, text, reply_markup=reply_markup)
