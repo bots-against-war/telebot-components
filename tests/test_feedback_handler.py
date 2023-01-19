@@ -238,7 +238,8 @@ async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
     ]
     bot.method_calls.clear()
 
-    await _send_message_to_bot(in_admin_chat=True, text="/log 5", reply_to_message_id=26)
+    # admin requests message log page 5 by answering to another message
+    await _send_message_to_bot(in_admin_chat=True, text="/log 5", reply_to_message_id=4)
     assert set(bot.method_calls.keys()) == {"send_message", "forward_message"}
     assert [mc.full_kwargs for mc in bot.method_calls["send_message"]] == [{"chat_id": 111, "text": "📜 Log page 5 / 6"}]
     assert [mc.full_kwargs for mc in bot.method_calls["forward_message"]] == [
