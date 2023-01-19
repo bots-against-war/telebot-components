@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import math
 import random
 from dataclasses import dataclass
 from datetime import timedelta
@@ -9,6 +11,7 @@ from telebot import types as tg
 from telebot.api import ApiHTTPException
 from telebot.types import constants as tg_constants
 from telebot.types.service import FilterFunc
+from telebot.util import extract_arguments
 
 from telebot_components.constants import times
 from telebot_components.feedback.anti_spam import (
@@ -131,6 +134,9 @@ class FeedbackConfig:
     # function used to generate user id hash for a particular bot; if full_user_anonymization is False,
     # it is ignored
     user_id_hash_func: Callable[[int, str], str] = emoji_hash
+
+    # how many messages to forward in one go on /log command
+    message_log_page_size: int = 30
 
 
 DUMMY_EXPIRATION_TIME = timedelta(seconds=1312)  # for stores unused based on runtime settings
@@ -342,7 +348,7 @@ class FeedbackHandler:
         paragraphs.append(
             "📋 <i>История сообщений</i>\n"
             + "· Через бота может быть неудобно вести несколько длительных переписок — все они мешаются в одном чате.\n"
-            + "· Если ответить на пересланное сообщение командой /log, бот перешлёт всю историю переписки с "
+            + "· Если ответить на пересланное сообщение командой /log, бот перешлёт историю переписки с "
             + "пользователь_ницей "
             + (
                 "в этот чат. Можно настроить бота так, чтобы бот пересылал историю не сюда, а "
@@ -351,6 +357,8 @@ class FeedbackHandler:
                 else "вам в личку (для этого вы должны хотя бы раз что-то ему написать). Можно настроить бота так, "
                 + "чтобы чтобы бот пересылал историю сообщений не в личку, а прямо в этот чат."
             )
+            + f"\n· По умолчанию бот пересылает первые {self.config.message_log_page_size} сообщений, дальше можно листать "
+            + "по страницам: «/log 2», «/log 3», и так далее"
         )
         if self.trello_integration is not None:
             trello_help = "🗂️ <i>Интеграция с Trello</i>\n"
@@ -691,15 +699,44 @@ class FeedbackHandler:
                                     pass
                             await self.user_related_messages_store.drop(origin_chat_id)
                             await self.message_log_store.drop(origin_chat_id)
-                    elif message.text == "/log":
+                    elif message.text_content.startswith("/log"):
+                        try:
+                            page_str = extract_arguments(message.text_content) or "1"
+                            page = int(page_str)
+                            if page > 0:
+                                page -= 1  # one based to zero based
+                        except Exception:
+                            await bot.reply_to(
+                                message, f"Bad command, expected format is '/log' or '/log <page number>'"
+                            )
+                            return
                         log_message_ids = await self.message_log_store.all(origin_chat_id)
-                        if not log_message_ids:
-                            await bot.reply_to(message, "Message log with this user is not available :(")
+                        total_pages = int(math.ceil(len(log_message_ids) / self.config.message_log_page_size))
+                        if page < 0:
+                            page = page % total_pages  # wrapping so that -1 = last, -2 = second to last, etc
+                        start_idx = self.config.message_log_page_size * page
+                        end_idx = self.config.message_log_page_size * (page + 1)
+                        log_message_ids_page = log_message_ids[start_idx:end_idx]
+                        self.logger.info(
+                            f"Forwarding log page {page} / {total_pages} (from {message.text_content!r}) received for origin chat id "
+                            + f"{origin_chat_id}, total messages: {len(log_message_ids)}, on current page: {len(log_message_ids_page)}"
+                        )
+                        if not log_message_ids_page:
+                            if page == 0:
+                                await bot.reply_to(message, "Message log with this user is not available :(")
+                            else:
+                                await bot.reply_to(
+                                    message,
+                                    f"Only {len(log_message_ids)} messages are available in log, not enough messages for page {page}",
+                                )
                             return
                         log_destination_chat_id = (
                             self.admin_chat_id if self.config.message_log_to_admin_chat else message.from_user.id
                         )
-                        for message_id in log_message_ids:
+                        await bot.send_message(
+                            chat_id=log_destination_chat_id, text=f"📜 Log page {page + 1} / {total_pages}"
+                        )
+                        for message_id in log_message_ids_page:
                             try:
                                 log_message = await bot.forward_message(
                                     chat_id=log_destination_chat_id,
@@ -711,6 +748,7 @@ class FeedbackHandler:
                                     await self.origin_chat_id_store.save(log_message.id, origin_chat_id)
                                     # ... and to delete them in case of user ban
                                     await self.user_related_messages_store.add(origin_chat_id, log_message.id)
+                                await asyncio.sleep(0.5)  # soft rate limit prevention
                             except Exception:
                                 pass
                     else:
