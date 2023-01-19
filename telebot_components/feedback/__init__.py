@@ -734,7 +734,8 @@ class FeedbackHandler:
                             self.admin_chat_id if self.config.message_log_to_admin_chat else message.from_user.id
                         )
                         await bot.send_message(
-                            chat_id=log_destination_chat_id, text=f"📜 Log page {page + 1} / {total_pages}"
+                            chat_id=log_destination_chat_id,
+                            text=f"📜 Log page {page + 1} / {total_pages}",
                         )
                         for message_id in log_message_ids_page:
                             try:

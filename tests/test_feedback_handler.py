@@ -246,3 +246,12 @@ async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
         {"chat_id": 111, "from_chat_id": 111, "message_id": message_id} for message_id in range(44, 53, 2)
     ]
     bot.method_calls.clear()
+
+    # admin requests message log on the last page (with only 1 message) by answering on a log message
+    await _send_message_to_bot(in_admin_chat=True, text="/log -1", reply_to_message_id=44)
+    assert set(bot.method_calls.keys()) == {"send_message", "forward_message"}
+    assert [mc.full_kwargs for mc in bot.method_calls["send_message"]] == [{"chat_id": 111, "text": "📜 Log page 6 / 6"}]
+    assert [mc.full_kwargs for mc in bot.method_calls["forward_message"]] == [
+        {"chat_id": 111, "from_chat_id": 111, "message_id": 54}
+    ]
+    bot.method_calls.clear()
