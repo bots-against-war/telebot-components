@@ -20,14 +20,15 @@ from telebot_components.feedback.anti_spam import (
     AntiSpamInterface,
     AntiSpamStatus,
 )
-from telebot_components.feedback.trello_integration import (
-    MessageRepliedFromTrelloContext,
-    TrelloIntegration,
+from telebot_components.feedback.integration.interface import (
+    FeedbackHandlerIntegration,
+    MessageRepliedFromIntegrationContext,
 )
+from telebot_components.feedback.integration.trello import TrelloIntegration
 from telebot_components.form.field import TelegramAttachment
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
-from telebot_components.stores.category import CategoryStore
+from telebot_components.stores.category import Category, CategoryStore
 from telebot_components.stores.generic import (
     KeyFlagStore,
     KeyListStore,
@@ -41,7 +42,12 @@ from telebot_components.stores.language import (
     any_text_to_str,
     vaildate_singlelang_text,
 )
-from telebot_components.utils import emoji_hash, html_link, send_attachment
+from telebot_components.utils import (
+    emoji_hash,
+    html_link,
+    send_attachment,
+    telegram_html_escape,
+)
 
 
 @dataclass
@@ -165,9 +171,12 @@ class FeedbackHandler:
         language_store: Optional[LanguageStore] = None,
         category_store: Optional[CategoryStore] = None,
         trello_integration: Optional[TrelloIntegration] = None,
+        integrations: Optional[list[FeedbackHandlerIntegration]] = None,
         admin_chat_response_actions: Optional[list[AdminChatAction]] = None,
     ) -> None:
         self.bot_prefix = bot_prefix
+        self.logger = logging.getLogger(f"{__name__}[{self.bot_prefix}]")
+
         self.admin_chat_id = admin_chat_id
         self.config = config
 
@@ -175,7 +184,12 @@ class FeedbackHandler:
         self.banned_users_store = banned_users_store
         self.language_store = language_store
         self.category_store = category_store
-        self.trello_integration = trello_integration
+
+        integrations_ = integrations or []
+        if trello_integration is not None:
+            self.logger.warning("'trello_integration' argument is deprecated, please use 'integrations' instead")
+            integrations_.append(trello_integration)
+        self.integrations = integrations_
 
         self.service_messages = service_messages
         self.validate_service_messages()
@@ -194,7 +208,6 @@ class FeedbackHandler:
                 )
             )
         self.admin_chat_response_action_by_command = {aca.command: aca for aca in self.admin_chat_response_actions}
-        self.logger = logging.getLogger(f"{__name__}[{self.bot_prefix}]")
 
         # === stores used by the handler ===
 
@@ -360,24 +373,9 @@ class FeedbackHandler:
             + f"\n· По умолчанию бот пересылает первые {self.config.message_log_page_size} сообщений, дальше можно листать "
             + "по страницам: «/log 2», «/log 3», и так далее"
         )
-        if self.trello_integration is not None:
-            trello_help = "🗂️ <i>Интеграция с Trello</i>\n"
-            trello_help += (
-                f'· Помимо чата сообщения выгружаются на {html_link(self.trello_integration.board.url, "доску Trello")} '
-                + f"в списки: "
-                + ", ".join(f"<b>{l.name}</b>" for l in self.trello_integration.lists_by_category_name.values())
-                + "\n"
-                "· В карточки переносятся присланные в бот фотографии и документы. Для каждого сообщения доступна "
-                + "обратная ссылка на этот чат."
-            )
-            if self.trello_integration.reply_with_card_comments:
-                trello_help += (
-                    "\n"
-                    + "· Через комментарии к карточке можно ответить на сообщение в боте: "
-                    + "комментарий «/reply текст ответа» значит, что бот отправит «текст ответа» в чат с "
-                    + "пользователь_ницей, а также напишет уведомление сюда."
-                )
-            paragraphs.append(trello_help)
+
+        integration_help_messages = [integration.help_message_section() for integration in self.integrations]
+        paragraphs.extend([m for m in integration_help_messages if m])
 
         if self.config.admin_chat_help_extra:
             paragraphs.append("🪄 <i>Другое</i>\n" + self.config.admin_chat_help_extra)
@@ -389,9 +387,6 @@ class FeedbackHandler:
         else:
             return True
 
-    def _admin_chat_message_filter(self, message: tg.Message) -> bool:
-        return message.chat.id == self.admin_chat_id and message.reply_to_message is not None
-
     async def _handle_user_message(
         self,
         bot: AsyncTeleBot,
@@ -399,7 +394,7 @@ class FeedbackHandler:
         # message forwarder returns ids of messages in admin chat and a Message object with the message contents
         message_forwarder: Callable[[], Coroutine[None, None, tuple[list[int], tg.Message]]],
         user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
-        export_to_trello: bool = True,
+        export_to_integrations: bool = True,
     ) -> Optional[int]:
         if self.banned_users_store is not None and await self.banned_users_store.is_banned(user.id):
             return None
@@ -417,6 +412,7 @@ class FeedbackHandler:
             return None
 
         hashtag_msg_data: Optional[HashtagMessageData] = None
+        category: Optional[Category] = None
         if self.config.hashtags_in_admin_chat:
             category_hashtag = None  # sentinel
             if self.category_store is not None:
@@ -488,23 +484,31 @@ class FeedbackHandler:
         if not admin_chat_forwarded_msg_ids:
             return None
         main_admin_chat_forwarded_msg_id = admin_chat_forwarded_msg_ids[-1]
-        if self.trello_integration is not None and export_to_trello:
-            category = await self.category_store.get_user_category(user) if self.category_store else None
+        if export_to_integrations:
+            if category is None and self.category_store is not None:
+                # NOTE: category may already be loaded, if so -- reusing the value here
+                category = await self.category_store.get_user_category(user)
 
-            def postprocess_card_description(descr: str) -> str:
-                # HACK: we're pretending pre- and postforwarded messages are actually part of user's message
-                if preforwarded_msg is not None:
-                    descr = "[pre]: " + preforwarded_msg.text_content + "\n\n" + descr
-                if postforwarded_msg is not None:
-                    descr = descr + "\n\n" + "[post]:" + postforwarded_msg.text_content
-                return descr
+            # HACK: the code above treats user and content message as separate entities for legacy reasons, but
+            #       integrations do not; for simpler interface, they expect to receive a single Message object
+            #       with all the info to facilitate that, here we shamelessly patch the message objects to hide
+            #       all the mess
+            message = user_content_message
+            message.from_user = user
+            if preforwarded_msg is not None:
+                message.text = "[pre]: " + preforwarded_msg.text_content + "\n\n" + message.text_content
+            if postforwarded_msg is not None:
+                message.text = message.text_content + "\n\n" + "[post]: " + postforwarded_msg.text_content
 
-            await self.trello_integration.export_user_message(
-                user=user,
-                content_message=user_content_message,
-                admin_chat_message_id=main_admin_chat_forwarded_msg_id,
-                category=category,
-                postprocess_card_description=postprocess_card_description,
+            await asyncio.gather(
+                *[
+                    integration.handle_user_message(
+                        message=message,
+                        admin_chat_message_id=main_admin_chat_forwarded_msg_id,
+                        category=category,
+                    )
+                    for integration in self.integrations
+                ]
             )
         return main_admin_chat_forwarded_msg_id
 
@@ -560,7 +564,7 @@ class FeedbackHandler:
             user=user,
             message_forwarder=message_forwarder,
             user_replier=user_replier,
-            export_to_trello=export_to_trello,
+            export_to_integrations=export_to_trello,
         )
 
     def setup(self, bot: AsyncTeleBot):
@@ -635,13 +639,35 @@ class FeedbackHandler:
             finally:
                 await self.hashtag_message_for_forwarded_message_store.save(message_id, hashtag_message_data)
 
-        async def on_message_replied_from_trello(context: MessageRepliedFromTrelloContext):
-            await self.message_log_store.push(context.origin_chat_id, context.reply_message_id)
+        async def message_replied_from_integration_callback(context: MessageRepliedFromIntegrationContext) -> None:
             if self.config.hashtags_in_admin_chat:
-                await _remove_unanswered_hashtag(context.forwarded_user_message_id)
+                await _remove_unanswered_hashtag(context.reply_to_forwarded_message_id)
 
-        if self.trello_integration is not None:
-            self.trello_integration.set_on_message_replied_from_trello(on_message_replied_from_trello)
+            integration_name = telegram_html_escape(context.integration.name())
+            cloned_reply_header = (
+                telegram_html_escape(context.reply_author or "<unknown admin>")
+                + " via "
+                + (html_link(context.reply_link, integration_name) if context.reply_link else integration_name)
+            )
+            cloned_reply_message = await bot.send_message(
+                chat_id=self.admin_chat_id,
+                reply_to_message_id=context.reply_to_forwarded_message_id,
+                text=f"{cloned_reply_header}\n\n{telegram_html_escape(context.reply_text or '')}",
+                parse_mode="HTML",
+            )
+
+            await self.message_log_store.push(context.origin_chat_id, cloned_reply_message.id)
+
+            await asyncio.gather(
+                *[
+                    integration.handle_admin_message(cloned_reply_message, to_user_id=context.origin_chat_id)
+                    for integration in self.integrations
+                    if integration != context.integration
+                ]
+            )
+
+        for integration in self.integrations:
+            integration.register_message_replied_callback(message_replied_from_integration_callback)
 
         @bot.message_handler(
             chat_id=[self.admin_chat_id],
@@ -789,8 +815,13 @@ class FeedbackHandler:
 
                     if self.config.hashtags_in_admin_chat:
                         await _remove_unanswered_hashtag(forwarded_msg.id)
-                    if self.trello_integration is not None:
-                        await self.trello_integration.export_admin_message(message, to_user_id=origin_chat_id)
+                    await asyncio.gather(
+                        *[
+                            integration.handle_admin_message(message, origin_chat_id)
+                            for integration in self.integrations
+                        ]
+                    )
+
             except Exception as e:
                 await bot.reply_to(message, f"Something went wrong! {e}")
                 self.logger.exception(f"Unexpected error while replying to forwarded msg")
