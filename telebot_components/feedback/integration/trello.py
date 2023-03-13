@@ -29,6 +29,7 @@ from trello import TrelloClient
 from telebot_components.constants import times
 from telebot_components.feedback.integration.interface import (
     FeedbackHandlerIntegration,
+    FeedbackIntegrationBackgroundContext,
     MessageRepliedFromIntegrationContext,
 )
 from telebot_components.redis_utils.interface import RedisInterface
@@ -128,7 +129,6 @@ class TrelloIntegration(FeedbackHandlerIntegration):
 
     def __init__(
         self,
-        bot: AsyncTeleBot,
         redis: RedisInterface,
         bot_prefix: str,
         admin_chat_id: int,
@@ -143,7 +143,7 @@ class TrelloIntegration(FeedbackHandlerIntegration):
         # if set to False, exported messages do not have a backlink to the admin chat
         admin_chat_backlink: bool = True,
     ):
-        self.bot = bot
+        self._bot: Optional[AsyncTeleBot] = None
         self.redis = redis
         self.bot_prefix = bot_prefix
         self.admin_chat_id = admin_chat_id
@@ -208,6 +208,12 @@ class TrelloIntegration(FeedbackHandlerIntegration):
     def name(self) -> str:
         return "Trello"
 
+    @property
+    def bot(self) -> AsyncTeleBot:
+        if self._bot is None:
+            raise RuntimeError("TrelloIntegration was not properly initialized: self._bot is not set")
+        return self._bot
+
     def help_message_section(self) -> str:
         trello_help = "🗂️ <i>Интеграция с Trello</i>\n"
         trello_help += (
@@ -233,13 +239,12 @@ class TrelloIntegration(FeedbackHandlerIntegration):
     async def save_trello_webhook_data(self, webhook: TrelloWebhookData) -> bool:
         return await self.trello_webhook_data_store.save(self.STORED_WEBHOOK_DATA_KEY, webhook)
 
-    async def initialize(self):  # TODO: move bot parameter to this method and name it "setup" for uniformity
-        """Must be run on bot runner setup"""
-        self.logger.info("Initializing Trello integration")
+    async def setup(self, bot: AsyncTeleBot) -> None:
+        self.logger.info("Setting up Trello integration")
+        self._bot = bot
         loop = asyncio.get_running_loop()
 
         if self.credentials.board_id is not None:
-            # self.logger.info("Looking up target board by id")
             self.board = await loop.run_in_executor(
                 self.thread_pool, self.trello_client.get_board, self.credentials.board_id
             )
@@ -304,10 +309,10 @@ class TrelloIntegration(FeedbackHandlerIntegration):
             raise RuntimeError("Something went wrong with initialization: webhook secret is not set")
         return f"/trello-webhook/{self.bot_prefix}/{webhook_secret}"
 
-    async def initialize_webhook(self, base_url: str, server_listening_future: asyncio.Future):
-        """Must be run as a background job in parallel with webhook app setup"""
+    async def background_job(self, context: FeedbackIntegrationBackgroundContext) -> Any:
         self.ensure_initialized()
-        await server_listening_future
+        if context.server_listening is not None:
+            await context.server_listening
         self.logger.info("Server is listening, setting up Trello webhook now")
         loop = asyncio.get_running_loop()
         trello_webhook_data = await self.load_trello_webhook_data()
@@ -315,7 +320,7 @@ class TrelloIntegration(FeedbackHandlerIntegration):
             if (
                 self.reply_with_card_comments
                 and trello_webhook_data["id_model"] == self.board.id
-                and trello_webhook_data["base_url"] == base_url
+                and trello_webhook_data["base_url"] == context.base_url
             ):
                 self.logger.info("Stored Trello webhook data seem fine, running with it")
             else:
@@ -333,13 +338,18 @@ class TrelloIntegration(FeedbackHandlerIntegration):
 
         if trello_webhook_data is None:
             if self.reply_with_card_comments:
+                if context.server_listening is None or context.base_url is None:
+                    raise RuntimeError(
+                        "Error initializing Trello integration: reply_with_card_comments option is set to True, "
+                        + "but HTTP server related data is not passed to initializing background job"
+                    )
                 webhook_path = await self.webhook_path()
                 self.logger.info(f"Creating and storing new trello webhook at {webhook_path}")
                 created_webhook = await loop.run_in_executor(
                     self.thread_pool,
                     partial(
                         self.trello_client.create_hook,
-                        callback_url=base_url + webhook_path,
+                        callback_url=context.base_url + webhook_path,
                         id_model=self.board.id,
                         desc="telebot_components trello integration webhook",
                     ),
@@ -348,7 +358,7 @@ class TrelloIntegration(FeedbackHandlerIntegration):
                     TrelloWebhookData(
                         id=created_webhook.id,
                         id_model=self.board.id,
-                        base_url=base_url,
+                        base_url=context.base_url,
                         path=webhook_path,
                     )
                 )
@@ -416,7 +426,7 @@ class TrelloIntegration(FeedbackHandlerIntegration):
         self.logger.info(f"Webhook probing request from Trello: {request}")
         return web.Response()
 
-    async def get_webhook_endpoints(self) -> list[AuxBotEndpoint]:
+    async def aux_endpoints(self) -> list[AuxBotEndpoint]:
         return [
             AuxBotEndpoint(
                 method="POST",
@@ -429,6 +439,8 @@ class TrelloIntegration(FeedbackHandlerIntegration):
                 handler=self.webhook_probe_handler,
             ),
         ]
+
+    get_webhook_endpoints = aux_endpoints  # backwards compatibility
 
     async def _card_content_from_message(
         self, message: tg.Message, user_id: int, include_attachments: bool
@@ -557,6 +569,7 @@ class TrelloIntegration(FeedbackHandlerIntegration):
         message: tg.Message,
         admin_chat_message_id: int,
         category: Optional[Category],
+        bot: AsyncTeleBot,
     ) -> None:
         self.ensure_initialized()
         if category is None:
@@ -642,7 +655,12 @@ class TrelloIntegration(FeedbackHandlerIntegration):
     def _add_admin_reply_prefix(self, description: str) -> str:
         return "🤖: " + description
 
-    async def handle_admin_message(self, message: tg.Message, to_user_id: int) -> None:
+    async def handle_admin_message(
+        self,
+        message: tg.Message,
+        to_user_id: int,
+        bot: AsyncTeleBot,
+    ) -> None:
         trello_card_data = await self.trello_card_data_for_user.load(to_user_id)
         if trello_card_data is None:
             self.logger.info("Not exporting admin message as it responds to a cardless user")

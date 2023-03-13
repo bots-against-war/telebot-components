@@ -285,7 +285,6 @@ def test_html_link(href: str, text: str, expected: str):
 )
 def test_trello_card_title(description: str, user_id: int, expected_card_title: str):
     ti = TrelloIntegration(
-        bot=None,  # type: ignore
         redis=None,  # type: ignore
         bot_prefix="testing",
         admin_chat_id=1,

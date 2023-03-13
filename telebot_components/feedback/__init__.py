@@ -9,6 +9,7 @@ from typing import Any, Callable, Coroutine, Optional, Protocol, TypedDict, cast
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.api import ApiHTTPException
+from telebot.runner import AuxBotEndpoint
 from telebot.types import constants as tg_constants
 from telebot.types.service import FilterFunc
 from telebot.util import extract_arguments
@@ -22,6 +23,7 @@ from telebot_components.feedback.anti_spam import (
 )
 from telebot_components.feedback.integration.interface import (
     FeedbackHandlerIntegration,
+    FeedbackIntegrationBackgroundContext,
     MessageRepliedFromIntegrationContext,
 )
 from telebot_components.feedback.integration.trello import TrelloIntegration
@@ -506,6 +508,7 @@ class FeedbackHandler:
                         message=message,
                         admin_chat_message_id=main_admin_chat_forwarded_msg_id,
                         category=category,
+                        bot=bot,
                     )
                     for integration in self.integrations
                 ]
@@ -567,7 +570,7 @@ class FeedbackHandler:
             export_to_integrations=export_to_trello,
         )
 
-    def setup(self, bot: AsyncTeleBot):
+    async def setup(self, bot: AsyncTeleBot):
         @bot.message_handler(
             func=cast(FilterFunc, self._user_message_filter),
             chat_types=[tg_constants.ChatType.private],
@@ -601,6 +604,24 @@ class FeedbackHandler:
                 user_replier=user_replier,
             )
 
+        await self.setup_admin_chat_handlers(bot)
+        for integration in self.integrations:
+            await integration.setup(bot)
+
+    async def aux_endpoints(self) -> list[AuxBotEndpoint]:
+        return sum(await i.aux_endpoints() for i in self.integrations) or []
+
+    def background_jobs(
+        self,
+        base_url: Optional[str],
+        server_listening_future: Optional[asyncio.Future[None]],
+    ) -> list[Coroutine[None, None, None]]:
+        return [
+            i.background_job(FeedbackIntegrationBackgroundContext(base_url, server_listening_future))
+            for i in self.integrations
+        ]
+
+    async def setup_admin_chat_handlers(self, bot: AsyncTeleBot) -> None:
         @bot.message_handler(chat_id=[self.admin_chat_id], commands=["help"])
         async def admin_chat_help(message: tg.Message):
             await bot.reply_to(
@@ -660,7 +681,7 @@ class FeedbackHandler:
 
             await asyncio.gather(
                 *[
-                    integration.handle_admin_message(cloned_reply_message, to_user_id=context.origin_chat_id)
+                    integration.handle_admin_message(cloned_reply_message, to_user_id=context.origin_chat_id, bot=bot)
                     for integration in self.integrations
                     if integration != context.integration
                 ]
@@ -817,7 +838,7 @@ class FeedbackHandler:
                         await _remove_unanswered_hashtag(forwarded_msg.id)
                     await asyncio.gather(
                         *[
-                            integration.handle_admin_message(message, origin_chat_id)
+                            integration.handle_admin_message(message, origin_chat_id, bot=bot)
                             for integration in self.integrations
                         ]
                     )

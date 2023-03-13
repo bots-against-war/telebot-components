@@ -52,7 +52,7 @@ def create_mock_feedback_handler(redis: RedisInterface, is_throttling: bool) -> 
 async def test_feedback_handler_throttling(redis: RedisInterface):
     bot = MockedAsyncTeleBot("token")
     feedback_handler = create_mock_feedback_handler(redis, is_throttling=True)
-    feedback_handler.setup(bot)
+    await feedback_handler.setup(bot)
 
     @bot.message_handler(commands=["start"])
     async def welcome_user(m: tg.Message):
@@ -174,7 +174,7 @@ async def test_feedback_handler_throttling(redis: RedisInterface):
 async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
     bot = MockedAsyncTeleBot("token")
     feedback_handler = create_mock_feedback_handler(redis, is_throttling=False)
-    feedback_handler.setup(bot)
+    await feedback_handler.setup(bot)
 
     _message_id_counter = 0
 
