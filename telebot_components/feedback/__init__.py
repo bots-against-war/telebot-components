@@ -799,6 +799,14 @@ class FeedbackHandler:
                                 await asyncio.sleep(0.5)  # soft rate limit prevention
                             except Exception:
                                 pass
+                        await bot.send_message(
+                            chat_id=log_destination_chat_id,
+                            text=(
+                                f"⬆️ Log page {page + 1} / {total_pages}"
+                                + (f"\nNext: <code>/log {page + 2}</code>" if page + 1 < total_pages else "")
+                            ),
+                            parse_mode="HTML",
+                        )
                     else:
                         available_commands = list(self.admin_chat_response_action_by_command.keys()) + ["/log"]
                         await bot.reply_to(
