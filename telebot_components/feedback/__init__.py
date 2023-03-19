@@ -798,7 +798,10 @@ class FeedbackHandler:
                                     await self.user_related_messages_store.add(origin_chat_id, log_message.id)
                                 await asyncio.sleep(0.5)  # soft rate limit prevention
                             except Exception:
-                                pass
+                                self.logger.exception(
+                                    "Error sending message as part of /log command, continuing; "
+                                    + f"{page = }; {total_pages = }"
+                                )
                         await bot.send_message(
                             chat_id=log_destination_chat_id,
                             text=(
