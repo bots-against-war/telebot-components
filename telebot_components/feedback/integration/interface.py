@@ -22,7 +22,7 @@ UserMessageRepliedFromIntegrationCallback = Callable[[UserMessageRepliedFromInte
 
 @dataclass
 class FeedbackIntegrationBackgroundContext:
-    """Context object passed to"""
+    """Context object passed to feedback integration background jobs"""
 
     # this options are set only when running within webhook app
 
