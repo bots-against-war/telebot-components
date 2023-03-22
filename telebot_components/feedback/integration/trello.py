@@ -22,6 +22,7 @@ from telebot_components.feedback.integration.interface import (
     FeedbackIntegrationBackgroundContext,
     UserMessageRepliedFromIntegrationEvent,
 )
+from telebot_components.feedback.types import UserMessageRepliedEvent
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.category import Category
 from telebot_components.stores.generic import KeyValueStore
@@ -475,12 +476,8 @@ class TrelloIntegration(FeedbackHandlerIntegration):
             attachment_content=attachment_content,
         )
 
-    def _add_admin_chat_link(self, description: str, to_message_id: int) -> str:
-        # i.e. this is a Telegram supergroup and allows direct msg links
-        if str(self.admin_chat_id).startswith("-100"):
-            return f"{description}\n" + markdown_link(telegram_message_url(self.admin_chat_id, to_message_id), "💬")
-        else:
-            return description
+    def _add_admin_reply_link(self, description: str, reply_link: str) -> str:
+        return f"{description}\n" + markdown_link(reply_link, "💬")
 
     async def _append_card_content(
         self,
@@ -579,9 +576,10 @@ class TrelloIntegration(FeedbackHandlerIntegration):
 
         card_content = await self._card_content_from_message(message, message.from_user.id, include_attachments=True)
         self.logger.debug(f"Card content: {card_content}")
-        if self.admin_chat_backlink:
-            card_content.description = self._add_admin_chat_link(
-                card_content.description, to_message_id=admin_chat_message_id
+        if self.admin_chat_backlink and str(self.admin_chat_id).startswith("-100"):
+            card_content.description = self._add_admin_reply_link(
+                card_content.description,
+                reply_link=telegram_message_url(self.admin_chat_id, admin_chat_message_id),
             )
         card_content.description = "👤: " + card_content.description
 
@@ -646,31 +644,32 @@ class TrelloIntegration(FeedbackHandlerIntegration):
     def _add_admin_reply_prefix(self, description: str) -> str:
         return "🤖: " + description
 
-    async def handle_admin_message_elsewhere(
-        self,
-        message: tg.Message,
-        to_user_id: int,
-        integration: Optional["FeedbackHandlerIntegration"],
-        bot: AsyncTeleBot,
-    ) -> None:
-        trello_card_data = await self.trello_card_data_for_user.load(to_user_id)
+    async def handle_user_message_replied_elsewhere(self, event: UserMessageRepliedEvent) -> None:
+        trello_card_data = await self.trello_card_data_for_user.load(event.origin_chat_id)
         if trello_card_data is None:
             self.logger.info("Not exporting admin message as it responds to a cardless user")
             return
-        card_content = await self._card_content_from_message(message, to_user_id, include_attachments=False)
-        if self.admin_chat_backlink:
-            card_content.description = self._add_admin_chat_link(card_content.description, to_message_id=message.id)
-        card_content.description = self._add_admin_reply_prefix(card_content.description)
+        description = safe_markdownify(event.reply_text, event.reply_text)
+        if event.reply_has_attachments:
+            description = f"{description}\n📎 `(см. оригинал сообщения)"
+        if self.admin_chat_backlink and event.reply_link is not None:
+            description = self._add_admin_reply_link(description, reply_link=event.reply_link)
+        description = self._add_admin_reply_prefix(description)
         try:
             trello_card = await self._append_card_content(
                 card_id=trello_card_data["id"],
-                content=card_content,
-                user_id=to_user_id,
+                content=CardContent(
+                    description=description,
+                    title=self._title_with_user_hash(event.origin_chat_id, description),
+                    attachment=None,
+                    attachment_content=None,
+                ),
+                user_id=event.origin_chat_id,
                 old_trello_card_callback=self.remove_unanswered_label,
             )
             await self.remove_unanswered_label(trello_card)
         except Exception:
-            self.logger.exception(f"Error exporting admin message #{message}, ignoring")
+            self.logger.exception(f"Error exporting user message replied event, ignoring: {event}")
 
     def _title_with_user_hash(self, user_id: int, description: str) -> str:
         title = description

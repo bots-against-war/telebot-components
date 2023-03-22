@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 from typing import Optional
 
@@ -10,6 +11,7 @@ from telebot_components.feedback.integration.interface import (
     FeedbackIntegrationBackgroundContext,
     UserMessageRepliedFromIntegrationEvent,
 )
+from telebot_components.feedback.types import UserMessageRepliedEvent
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.category import Category
 from telebot_components.stores.generic import KeyValueStore
@@ -34,30 +36,31 @@ class _MainFeedbackHandlerIntegration(FeedbackHandlerIntegration):
         category: Optional[Category],
         bot: AsyncTeleBot,
     ) -> None:
+        """This method is not used, user messages are handled by the main admin chat's feedback handler"""
         pass
 
-    async def handle_admin_message_elsewhere(self, message: tg.Message, to_user_id: int, bot: AsyncTeleBot) -> None:
-        """This message is invoked when admins answer forwarded message in aux admin chat; it uses saved aux -> main msg id
-        mapping to notify the main feedback handler about admin action.
-        """
+    async def handle_user_message_replied_elsewhere(self, event: UserMessageRepliedEvent) -> None:
+        """This method just dispatches event from aux chat feedback handler to the main chat and other integrations"""
         if self.aux.message_replied_callback is None:
             return
-        if message.reply_to_message is None:
-            self.logger.error(f"Message received by handle_admin_message_elsewhere method is not a reply: {message!r}")
-            return
-        main_chat_message_id = await self.aux.main_message_id_by_aux_message_id_store.load(message.reply_to_message.id)
-        if main_chat_message_id is None:
+        # the terminology is reversed here, because for integration's POV, aux chat is main and vice versa
+        aux_admin_chat_message_id = event.main_admin_chat_message_id
+        main_admin_chat_message_id = await self.aux.main_by_aux_admin_chat_message_id_store.load(
+            aux_admin_chat_message_id
+        )
+        if main_admin_chat_message_id is None:
             self.logger.error(f"Message in aux admin chat has no saved main admin chat message id")
             return
         await self.aux.message_replied_callback(
             UserMessageRepliedFromIntegrationEvent(
-                bot=bot,
+                bot=event.bot,
+                origin_chat_id=event.origin_chat_id,
+                reply_text=event.reply_text,
+                reply_has_attachments=event.reply_has_attachments,
+                reply_author=event.reply_author,
+                reply_link=event.reply_link,
+                main_admin_chat_message_id=main_admin_chat_message_id,
                 integration=self.aux,
-                origin_chat_id=to_user_id,
-                main_admin_chat_message_id=main_chat_message_id,
-                reply_author=message.from_user.first_name,
-                reply_text=message.text_content or "<attachments>",
-                reply_link=None,
             )
         )
 
@@ -71,14 +74,24 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
             raise ValueError("Aux feedback handler can't have integrations itself!")
         self.feedback_handler.integrations.append(_MainFeedbackHandlerIntegration(self))
 
-        self.main_message_id_by_aux_message_id_store = KeyValueStore[int](
-            name=f"main-by-{self.feedback_handler.name}-msg-id",
+        # saving bi-directional mapping between main and aux admin chat message ids
+        self.main_by_aux_admin_chat_message_id_store = KeyValueStore[int](
+            name=f"main-by-aux-msg-id-{self.feedback_handler.name}",
             prefix=bot_prefix,
             redis=redis,
             expiration_time=self.feedback_handler.origin_chat_id_store.expiration_time,
             dumper=str,
             loader=int,
         )
+        self.aux_by_main_admin_chat_message_id_store = KeyValueStore[int](
+            name=f"aux-by-main-msg-id-{self.feedback_handler.name}",
+            prefix=bot_prefix,
+            redis=redis,
+            expiration_time=self.feedback_handler.origin_chat_id_store.expiration_time,
+            dumper=str,
+            loader=int,
+        )
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}[{self.feedback_handler.name}]")
 
     def name(self) -> str:
         return self.feedback_handler.name or "<unnamed feedback handler>"
@@ -96,7 +109,8 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
                 from_chat_id=message.chat.id,
                 message_id=admin_chat_message_id,
             )
-            await self.main_message_id_by_aux_message_id_store.save(copied.message_id, admin_chat_message_id)
+            await self.main_by_aux_admin_chat_message_id_store.save(copied.message_id, admin_chat_message_id)
+            await self.aux_by_main_admin_chat_message_id_store.save(admin_chat_message_id, copied.message_id)
             return [copied.message_id], message
 
         async def noop(*args, **kwargs) -> None:
@@ -110,17 +124,27 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
             export_to_integrations=True,
         )
 
-    async def handle_admin_message_elsewhere(self, message: tg.Message, to_user_id: int, bot: AsyncTeleBot) -> None:
-        """To handle admin messages from elsewhere (main admin chat / other integrations), we just pretend that
-        they come from aux feedback handler's integration and use its dedicated callback for that.
-        """
-        await self.feedback_handler.message_replied_from_integration_callback(
-            context=UserMessageRepliedFromIntegrationEvent(
-                bot=bot,
-                integration=
+    async def handle_user_message_replied_elsewhere(self, event: UserMessageRepliedEvent) -> None:
+        if not isinstance(event, UserMessageRepliedFromIntegrationEvent):
+            aux_admin_chat_message_id = await self.aux_by_main_admin_chat_message_id_store.load(
+                event.main_admin_chat_message_id
             )
-        )
-        pass
+            if aux_admin_chat_message_id is None:
+                self.logger.error(f"Message in the main admin chat has no saved aux admin chat message id")
+                return
+            event = UserMessageRepliedFromIntegrationEvent(
+                bot=event.bot,
+                origin_chat_id=event.origin_chat_id,
+                reply_text=event.reply_text,
+                reply_has_attachments=event.reply_has_attachments,
+                reply_author=event.reply_author,
+                reply_link=event.reply_link,
+                # from aux feedback handler's POV, aux admin chat msg id is main
+                main_admin_chat_message_id=aux_admin_chat_message_id,
+                # this is fake _MainFeedbackHandlerIntegration inserted in __init__
+                integration=self.feedback_handler.integrations[0],
+            )
+        await self.feedback_handler.message_replied_from_integration_callback(event)
 
     async def setup(self, bot: AsyncTeleBot) -> None:
         await self.feedback_handler.setup_admin_chat_handlers(bot)

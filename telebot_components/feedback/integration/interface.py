@@ -6,15 +6,14 @@ from typing import Any, Awaitable, Callable, Optional
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.runner import AuxBotEndpoint
-from telebot_components.feedback.types import UserMessageRepliedEvent
 
+from telebot_components.feedback.types import UserMessageRepliedEvent
 from telebot_components.stores.category import Category
 
 
 @dataclass
 class UserMessageRepliedFromIntegrationEvent(UserMessageRepliedEvent):
     integration: "FeedbackHandlerIntegration"
-    main_admin_chat_message_id: int
 
 
 UserMessageRepliedFromIntegrationCallback = Callable[[UserMessageRepliedFromIntegrationEvent], Awaitable[Any]]
@@ -65,18 +64,10 @@ class FeedbackHandlerIntegration(abc.ABC):
         ...
 
     @abc.abstractmethod
-    async def handle_admin_message_elsewhere(
-        self,
-        message: tg.Message,
-        to_user_id: int,
-        integration: Optional["FeedbackHandlerIntegration"],
-        bot: AsyncTeleBot,
-    ) -> None:
+    async def handle_user_message_replied_elsewhere(self, event: UserMessageRepliedEvent) -> None:
         """
-        The method is invoked when admins respond to users in the main admin chat or in other integrations.
-
-        - `message` message in the main admin chat representing the admin message (whenever it originated from);
-          should be generally used only as a text/media container
+        The method is invoked when admins have replied to user message in the main admin chat or
+        in other integrations (in which case even will be UserMessageRepliedFromIntegrationEvent).
         """
         ...
 

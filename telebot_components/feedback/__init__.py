@@ -4,11 +4,21 @@ import math
 import random
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Awaitable, Callable, Coroutine, Optional, Protocol, TypedDict, cast
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Optional,
+    Protocol,
+    TypedDict,
+    cast,
+)
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.api import ApiHTTPException
+from telebot.formatting import hbold
 from telebot.runner import AuxBotEndpoint
 from telebot.types import constants as tg_constants
 from telebot.types.service import FilterFunc
@@ -27,6 +37,7 @@ from telebot_components.feedback.integration.interface import (
     UserMessageRepliedFromIntegrationEvent,
 )
 from telebot_components.feedback.integration.trello import TrelloIntegration
+from telebot_components.feedback.types import UserMessageRepliedEvent
 from telebot_components.form.field import TelegramAttachment
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
@@ -49,6 +60,7 @@ from telebot_components.utils import (
     html_link,
     send_attachment,
     telegram_html_escape,
+    telegram_message_url,
 )
 
 
@@ -82,7 +94,6 @@ class ServiceMessages:
         )
 
 
-@dataclass
 class HashtagMessageData(TypedDict):
     """Can't just store message ids as ints because we need to update hashatag messages sometimes!"""
 
@@ -654,36 +665,33 @@ class FeedbackHandler:
         finally:
             await self.hashtag_message_for_forwarded_message_store.save(message_id, hashtag_message_data)
 
-    async def message_replied_from_integration_callback(self, context: UserMessageRepliedFromIntegrationEvent) -> None:
-        self.logger.debug(f"Message replied from integration: {context!r}")
+    async def message_replied_from_integration_callback(self, event: UserMessageRepliedFromIntegrationEvent) -> None:
+        self.logger.debug(f"Message replied from integration: {event!r}")
         if self.config.hashtags_in_admin_chat:
-            await self._remove_unanswered_hashtag(context.bot, context.main_admin_chat_message_id)
+            await self._remove_unanswered_hashtag(event.bot, event.main_admin_chat_message_id)
 
-        integration_name = telegram_html_escape(context.integration.name())
-        cloned_reply_header = (
-            telegram_html_escape(context.reply_author or "<unknown admin>")
-            + " via "
-            + (html_link(context.reply_link, integration_name) if context.reply_link else integration_name)
-        )
-        cloned_reply_message = await context.bot.send_message(
+        integration_name = telegram_html_escape(event.integration.name())
+        cloned_reply_message = await event.bot.send_message(
             chat_id=self.admin_chat_id,
-            reply_to_message_id=context.main_admin_chat_message_id,
-            text=f"{cloned_reply_header}\n\n{telegram_html_escape(context.reply_text or '')}",
+            reply_to_message_id=event.main_admin_chat_message_id,
+            text=(
+                "💬 "
+                + hbold(telegram_html_escape(event.reply_author or "<unknown admin>"), escape=False)
+                + " via "
+                + (html_link(event.reply_link, integration_name) if event.reply_link else integration_name)
+                + (("\n\n" + event.reply_text) if event.reply_text else "")
+                + ("\n\n📎 attachment" if event.reply_has_attachments else "")
+            ),
             parse_mode="HTML",
         )
 
-        await self.message_log_store.push(context.origin_chat_id, cloned_reply_message.id)
+        await self.message_log_store.push(event.origin_chat_id, cloned_reply_message.id)
 
         await asyncio.gather(
             *[
-                integration.handle_admin_message_elsewhere(
-                    cloned_reply_message,
-                    to_user_id=context.origin_chat_id,
-                    integration=context.integration,
-                    bot=context.bot,
-                )
+                integration.handle_user_message_replied_elsewhere(event)
                 for integration in self.integrations
-                if not (integration is context.integration)  # will not notify integration about its own replies
+                if not (integration is event.integration)  # do not notify integration about its own replies
             ]
         )
 
@@ -862,10 +870,21 @@ class FeedbackHandler:
 
                     if self.config.hashtags_in_admin_chat:
                         await self._remove_unanswered_hashtag(bot, forwarded_msg.id)
+                    has_attachments = message.content_type != "text"
                     await asyncio.gather(
                         *[
-                            integration.handle_admin_message_elsewhere(
-                                message, origin_chat_id, integration=None, bot=bot
+                            integration.handle_user_message_replied_elsewhere(
+                                UserMessageRepliedEvent(
+                                    bot=bot,
+                                    origin_chat_id=origin_chat_id,
+                                    reply_text=(
+                                        (message.html_text if not has_attachments else message.html_caption) or ""
+                                    ),
+                                    reply_has_attachments=has_attachments,
+                                    reply_author=message.from_user.first_name,
+                                    reply_link=telegram_message_url(self.admin_chat_id, message.id),
+                                    main_admin_chat_message_id=forwarded_msg.id,
+                                )
                             )
                             for integration in self.integrations
                         ]

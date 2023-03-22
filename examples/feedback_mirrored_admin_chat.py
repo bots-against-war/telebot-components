@@ -8,7 +8,9 @@ from telebot.types import constants as tg_constants
 from telebot_components.constants import times
 from telebot_components.feedback import FeedbackConfig, FeedbackHandler, ServiceMessages
 from telebot_components.feedback.anti_spam import DisabledAntiSpam
-from telebot_components.feedback.integration.aux_feedback_handler import AuxFeedbackHandlerIntegration
+from telebot_components.feedback.integration.aux_feedback_handler import (
+    AuxFeedbackHandlerIntegration,
+)
 from telebot_components.redis_utils.interface import RedisInterface
 
 
@@ -50,8 +52,8 @@ async def create_feedback_bot(redis: RedisInterface, token: str, main_admin_chat
             name=name,
         )
 
-    main_feedback_handler = feedback_handler_factory("main", main_admin_chat_id)
-    aux_feedback_handler = feedback_handler_factory("aux", aux_admin_chat_id)
+    main_feedback_handler = feedback_handler_factory("", main_admin_chat_id)
+    aux_feedback_handler = feedback_handler_factory("aux admin chat", aux_admin_chat_id)
     main_feedback_handler.integrations.append(
         AuxFeedbackHandlerIntegration(
             feedback_handler=aux_feedback_handler,
