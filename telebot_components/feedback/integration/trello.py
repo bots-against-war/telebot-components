@@ -6,17 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
 from io import BytesIO
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    Coroutine,
-    Literal,
-    Optional,
-    TypedDict,
-    Union,
-    cast,
-)
+from typing import Any, Awaitable, Callable, Literal, Optional, TypedDict, Union, cast
 
 import trello  # type: ignore
 from aiohttp import web
@@ -30,7 +20,7 @@ from telebot_components.constants import times
 from telebot_components.feedback.integration.interface import (
     FeedbackHandlerIntegration,
     FeedbackIntegrationBackgroundContext,
-    MessageRepliedFromIntegrationContext,
+    UserMessageRepliedFromIntegrationEvent,
 )
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.category import Category
@@ -39,7 +29,6 @@ from telebot_components.utils import (
     emoji_hash,
     html_link,
     markdown_link,
-    telegram_html_escape,
     telegram_message_url,
     trim_with_ellipsis,
 )
@@ -408,13 +397,15 @@ class TrelloIntegration(FeedbackHandlerIntegration):
 
             if self.message_replied_callback is not None:
                 await self.message_replied_callback(
-                    MessageRepliedFromIntegrationContext(
-                        integration=self,
+                    UserMessageRepliedFromIntegrationEvent(
+                        bot=self.bot,
                         origin_chat_id=origin_message_data["origin_chat_id"],
-                        reply_to_forwarded_message_id=origin_message_data["forwarded_message_id"],
                         reply_author=webhook_action["memberCreator"]["fullName"],
                         reply_text=reply_text,
+                        reply_has_attachments=False,  # Trello integration does not support sending attachments yet
                         reply_link=trello_card_url(commented_card_data["shortLink"]),
+                        integration=self,
+                        main_admin_chat_message_id=origin_message_data["forwarded_message_id"],
                     )
                 )
         except Exception:
@@ -655,10 +646,11 @@ class TrelloIntegration(FeedbackHandlerIntegration):
     def _add_admin_reply_prefix(self, description: str) -> str:
         return "🤖: " + description
 
-    async def handle_admin_message(
+    async def handle_admin_message_elsewhere(
         self,
         message: tg.Message,
         to_user_id: int,
+        integration: Optional["FeedbackHandlerIntegration"],
         bot: AsyncTeleBot,
     ) -> None:
         trello_card_data = await self.trello_card_data_for_user.load(to_user_id)

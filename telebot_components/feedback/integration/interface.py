@@ -1,33 +1,23 @@
 import abc
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, NoReturn, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.runner import AuxBotEndpoint
+from telebot_components.feedback.types import UserMessageRepliedEvent
 
 from telebot_components.stores.category import Category
 
 
 @dataclass
-class MessageRepliedFromIntegrationContext:
-    """
-    Context object used to notify the feedback handler and other integrations
-    about the user reply being sent throught the integration.
-    """
-
+class UserMessageRepliedFromIntegrationEvent(UserMessageRepliedEvent):
     integration: "FeedbackHandlerIntegration"
-    origin_chat_id: int
-    reply_to_forwarded_message_id: int
-
-    # these values are integration-specific and used by feedback handler opaquely
-    reply_author: Optional[str]
-    reply_text: Optional[str]
-    reply_link: Optional[str]
+    main_admin_chat_message_id: int
 
 
-MessageRepliedFromIntegrationCallback = Callable[[MessageRepliedFromIntegrationContext], Awaitable[Any]]
+UserMessageRepliedFromIntegrationCallback = Callable[[UserMessageRepliedFromIntegrationEvent], Awaitable[Any]]
 
 
 @dataclass
@@ -75,25 +65,26 @@ class FeedbackHandlerIntegration(abc.ABC):
         ...
 
     @abc.abstractmethod
-    async def handle_admin_message(
+    async def handle_admin_message_elsewhere(
         self,
         message: tg.Message,
         to_user_id: int,
+        integration: Optional["FeedbackHandlerIntegration"],
         bot: AsyncTeleBot,
     ) -> None:
         """
         The method is invoked when admins respond to users in the main admin chat or in other integrations.
 
-        - `message` object should be generally used only as a media container,
-          i.e. `from_user` and `chat` attributes may not be meaningful
+        - `message` message in the main admin chat representing the admin message (whenever it originated from);
+          should be generally used only as a text/media container
         """
         ...
 
-    def register_message_replied_callback(self, new: MessageRepliedFromIntegrationCallback) -> None:
+    def register_message_replied_callback(self, new: UserMessageRepliedFromIntegrationCallback) -> None:
         self._message_replied_callback = new
 
     @property
-    def message_replied_callback(self) -> Optional[MessageRepliedFromIntegrationCallback]:
+    def message_replied_callback(self) -> Optional[UserMessageRepliedFromIntegrationCallback]:
         try:
             return self._message_replied_callback
         except AttributeError:

@@ -4,7 +4,7 @@ import math
 import random
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Callable, Coroutine, Optional, Protocol, TypedDict, cast
+from typing import Any, Awaitable, Callable, Coroutine, Optional, Protocol, TypedDict, cast
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -24,7 +24,7 @@ from telebot_components.feedback.anti_spam import (
 from telebot_components.feedback.integration.interface import (
     FeedbackHandlerIntegration,
     FeedbackIntegrationBackgroundContext,
-    MessageRepliedFromIntegrationContext,
+    UserMessageRepliedFromIntegrationEvent,
 )
 from telebot_components.feedback.integration.trello import TrelloIntegration
 from telebot_components.form.field import TelegramAttachment
@@ -175,7 +175,12 @@ class FeedbackHandler:
         trello_integration: Optional[TrelloIntegration] = None,
         integrations: Optional[list[FeedbackHandlerIntegration]] = None,
         admin_chat_response_actions: Optional[list[AdminChatAction]] = None,
+        # specific feedback handler name in case there are several of them;
+        # the default (empty string) makes it backwards compatible
+        name: str = "",
     ) -> None:
+        self.name = name
+        bot_prefix = bot_prefix + name
         self.bot_prefix = bot_prefix
         self.logger = logging.getLogger(f"{__name__}[{self.bot_prefix}]")
 
@@ -621,7 +626,72 @@ class FeedbackHandler:
             for i in self.integrations
         ]
 
-    async def setup_admin_chat_handlers(self, bot: AsyncTeleBot) -> None:
+    async def _remove_unanswered_hashtag(self, bot: AsyncTeleBot, message_id: int):
+        if self.hashtag_message_for_forwarded_message_store is None:
+            return
+        hashtag_message_data = await self.hashtag_message_for_forwarded_message_store.load(message_id)
+        if hashtag_message_data is None:
+            return
+        if self.config.unanswered_hashtag is None:
+            return
+        if self.config.unanswered_hashtag not in hashtag_message_data["hashtags"]:
+            return
+        hashtag_message_data["hashtags"].remove(self.config.unanswered_hashtag)
+        try:
+            if hashtag_message_data["hashtags"]:
+                await bot.edit_message_text(
+                    message_id=hashtag_message_data["message_id"],
+                    chat_id=self.admin_chat_id,
+                    text=_join_hashtags(hashtag_message_data["hashtags"]),
+                )
+            else:
+                await bot.delete_message(chat_id=self.admin_chat_id, message_id=hashtag_message_data["message_id"])
+        except Exception as e:
+            # when replying on a message in a group that has already been responded to,
+            # telegram API returns and error if there's nothing to change
+            self.logger.info(f"Error updating hashtag message: {e}")
+            pass
+        finally:
+            await self.hashtag_message_for_forwarded_message_store.save(message_id, hashtag_message_data)
+
+    async def message_replied_from_integration_callback(self, context: UserMessageRepliedFromIntegrationEvent) -> None:
+        self.logger.debug(f"Message replied from integration: {context!r}")
+        if self.config.hashtags_in_admin_chat:
+            await self._remove_unanswered_hashtag(context.bot, context.main_admin_chat_message_id)
+
+        integration_name = telegram_html_escape(context.integration.name())
+        cloned_reply_header = (
+            telegram_html_escape(context.reply_author or "<unknown admin>")
+            + " via "
+            + (html_link(context.reply_link, integration_name) if context.reply_link else integration_name)
+        )
+        cloned_reply_message = await context.bot.send_message(
+            chat_id=self.admin_chat_id,
+            reply_to_message_id=context.main_admin_chat_message_id,
+            text=f"{cloned_reply_header}\n\n{telegram_html_escape(context.reply_text or '')}",
+            parse_mode="HTML",
+        )
+
+        await self.message_log_store.push(context.origin_chat_id, cloned_reply_message.id)
+
+        await asyncio.gather(
+            *[
+                integration.handle_admin_message_elsewhere(
+                    cloned_reply_message,
+                    to_user_id=context.origin_chat_id,
+                    integration=context.integration,
+                    bot=context.bot,
+                )
+                for integration in self.integrations
+                if not (integration is context.integration)  # will not notify integration about its own replies
+            ]
+        )
+
+    async def setup_admin_chat_handlers(
+        self,
+        bot: AsyncTeleBot,
+        on_admin_reply_to_bot: Optional[Callable[[], Awaitable[None]]] = None,
+    ) -> None:
         @bot.message_handler(chat_id=[self.admin_chat_id], commands=["help"])
         async def admin_chat_help(message: tg.Message):
             await bot.reply_to(
@@ -632,63 +702,8 @@ class FeedbackHandler:
                 parse_mode="HTML",
             )
 
-        async def _remove_unanswered_hashtag(message_id: int):
-            if self.hashtag_message_for_forwarded_message_store is None:
-                return
-            hashtag_message_data = await self.hashtag_message_for_forwarded_message_store.load(message_id)
-            if hashtag_message_data is None:
-                return
-            if self.config.unanswered_hashtag is None:
-                return
-            if self.config.unanswered_hashtag not in hashtag_message_data["hashtags"]:
-                return
-            hashtag_message_data["hashtags"].remove(self.config.unanswered_hashtag)
-            try:
-                if hashtag_message_data["hashtags"]:
-                    await bot.edit_message_text(
-                        message_id=hashtag_message_data["message_id"],
-                        chat_id=self.admin_chat_id,
-                        text=_join_hashtags(hashtag_message_data["hashtags"]),
-                    )
-                else:
-                    await bot.delete_message(chat_id=self.admin_chat_id, message_id=hashtag_message_data["message_id"])
-            except Exception as e:
-                # when replying on a message in a group that has already been responded to,
-                # telegram API returns and error if there's nothing to change
-                self.logger.info(f"Error updating hashtag message: {e}")
-                pass
-            finally:
-                await self.hashtag_message_for_forwarded_message_store.save(message_id, hashtag_message_data)
-
-        async def message_replied_from_integration_callback(context: MessageRepliedFromIntegrationContext) -> None:
-            if self.config.hashtags_in_admin_chat:
-                await _remove_unanswered_hashtag(context.reply_to_forwarded_message_id)
-
-            integration_name = telegram_html_escape(context.integration.name())
-            cloned_reply_header = (
-                telegram_html_escape(context.reply_author or "<unknown admin>")
-                + " via "
-                + (html_link(context.reply_link, integration_name) if context.reply_link else integration_name)
-            )
-            cloned_reply_message = await bot.send_message(
-                chat_id=self.admin_chat_id,
-                reply_to_message_id=context.reply_to_forwarded_message_id,
-                text=f"{cloned_reply_header}\n\n{telegram_html_escape(context.reply_text or '')}",
-                parse_mode="HTML",
-            )
-
-            await self.message_log_store.push(context.origin_chat_id, cloned_reply_message.id)
-
-            await asyncio.gather(
-                *[
-                    integration.handle_admin_message(cloned_reply_message, to_user_id=context.origin_chat_id, bot=bot)
-                    for integration in self.integrations
-                    if integration != context.integration
-                ]
-            )
-
         for integration in self.integrations:
-            integration.register_message_replied_callback(message_replied_from_integration_callback)
+            integration.register_message_replied_callback(self.message_replied_from_integration_callback)
 
         @bot.message_handler(
             chat_id=[self.admin_chat_id],
@@ -846,14 +861,15 @@ class FeedbackHandler:
                         )
 
                     if self.config.hashtags_in_admin_chat:
-                        await _remove_unanswered_hashtag(forwarded_msg.id)
+                        await self._remove_unanswered_hashtag(bot, forwarded_msg.id)
                     await asyncio.gather(
                         *[
-                            integration.handle_admin_message(message, origin_chat_id, bot=bot)
+                            integration.handle_admin_message_elsewhere(
+                                message, origin_chat_id, integration=None, bot=bot
+                            )
                             for integration in self.integrations
                         ]
                     )
-
             except Exception as e:
                 await bot.reply_to(message, f"Something went wrong! {e}")
                 self.logger.exception(f"Unexpected error while replying to forwarded msg")
