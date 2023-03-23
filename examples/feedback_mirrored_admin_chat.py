@@ -50,10 +50,9 @@ async def create_feedback_bot(redis: RedisInterface, token: str, main_admin_chat
         )
 
     main_feedback_handler = feedback_handler_factory("", main_admin_chat_id)
-    aux_feedback_handler = feedback_handler_factory("aux admin chat", aux_admin_chat_id)
     main_feedback_handler.integrations.append(
         AuxFeedbackHandlerIntegration(
-            feedback_handler=aux_feedback_handler,
+            feedback_handler=feedback_handler_factory("aux admin chat", aux_admin_chat_id),
             bot_prefix=bot_prefix,
             redis=redis,
         )
