@@ -18,10 +18,7 @@ async def create_feedback_bot(redis: RedisInterface, token: str, main_admin_chat
     bot_prefix = "example-feedback-mirrored-admin-chat-bot"
     bot = AsyncTeleBot(token)
 
-    logging.basicConfig(level=logging.DEBUG)
-    # TEMP
-    logging.getLogger("telebot[example-feedback-mirrored-admin-chat-bot]").setLevel(logging.INFO)
-    logging.getLogger("telebot.api").setLevel(logging.INFO)
+    logging.basicConfig(level=logging.INFO)
 
     @bot.message_handler(commands=["start", "help"], chat_types=[tg_constants.ChatType.private])
     async def start_cmd_handler(message: tg.Message):

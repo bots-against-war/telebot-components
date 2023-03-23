@@ -6,7 +6,7 @@ from telebot import AsyncTeleBot
 
 @dataclass
 class UserMessageRepliedEvent:
-    """Service type with info about user message"""
+    """Service type holding information about user message being replied"""
 
     bot: AsyncTeleBot  # passed around for ease of use
     origin_chat_id: int
