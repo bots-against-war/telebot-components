@@ -665,7 +665,12 @@ class FeedbackHandler:
         finally:
             await self.hashtag_message_for_forwarded_message_store.save(message_id, hashtag_message_data)
 
-    async def message_replied_from_integration_callback(self, event: UserMessageRepliedFromIntegrationEvent) -> None:
+    async def message_replied_from_integration_callback(
+        self,
+        event: UserMessageRepliedFromIntegrationEvent,
+        *,
+        notify_integrations: bool = True,
+    ) -> None:
         self.logger.debug(f"Message replied from integration: {event!r}")
         if self.config.hashtags_in_admin_chat:
             await self._remove_unanswered_hashtag(event.bot, event.main_admin_chat_message_id)
@@ -687,13 +692,15 @@ class FeedbackHandler:
 
         await self.message_log_store.push(event.origin_chat_id, cloned_reply_message.id)
 
-        await asyncio.gather(
-            *[
-                integration.handle_user_message_replied_elsewhere(event)
-                for integration in self.integrations
-                if not (integration is event.integration)  # do not notify integration about its own replies
-            ]
-        )
+        if notify_integrations:
+            # do not notify integration about its own replies
+            integrations_to_notify = [i for i in self.integrations if not i is event.integration]
+            self.logger.debug(f"Notifying integrations: {[i.name() for i in integrations_to_notify]}")
+            await asyncio.gather(
+                *[integration.handle_user_message_replied_elsewhere(event) for integration in integrations_to_notify]
+            )
+        else:
+            self.logger.debug(f"Will not notify integrations")
 
     async def setup_admin_chat_handlers(
         self,

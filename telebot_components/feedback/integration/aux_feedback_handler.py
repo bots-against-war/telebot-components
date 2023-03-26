@@ -125,13 +125,16 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
         )
 
     async def handle_user_message_replied_elsewhere(self, event: UserMessageRepliedEvent) -> None:
+        aux_admin_chat_message_id = await self.aux_by_main_admin_chat_message_id_store.load(
+            event.main_admin_chat_message_id
+        )
+        if aux_admin_chat_message_id is None:
+            self.logger.error(f"Message in the main admin chat has no saved aux admin chat message id")
+            return
+        # from aux feedback handler's POV, aux admin chat msg id is main
+        event.main_admin_chat_message_id = aux_admin_chat_message_id
+
         if not isinstance(event, UserMessageRepliedFromIntegrationEvent):
-            aux_admin_chat_message_id = await self.aux_by_main_admin_chat_message_id_store.load(
-                event.main_admin_chat_message_id
-            )
-            if aux_admin_chat_message_id is None:
-                self.logger.error(f"Message in the main admin chat has no saved aux admin chat message id")
-                return
             event = UserMessageRepliedFromIntegrationEvent(
                 bot=event.bot,
                 origin_chat_id=event.origin_chat_id,
@@ -139,12 +142,11 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
                 reply_has_attachments=event.reply_has_attachments,
                 reply_author=event.reply_author,
                 reply_link=event.reply_link,
-                # from aux feedback handler's POV, aux admin chat msg id is main
-                main_admin_chat_message_id=aux_admin_chat_message_id,
+                main_admin_chat_message_id=event.main_admin_chat_message_id,
                 # this is fake _MainFeedbackHandlerIntegration inserted in __init__
                 integration=self.feedback_handler.integrations[0],
             )
-        await self.feedback_handler.message_replied_from_integration_callback(event)
+        await self.feedback_handler.message_replied_from_integration_callback(event, notify_integrations=False)
 
     async def setup(self, bot: AsyncTeleBot) -> None:
         await self.feedback_handler.setup_admin_chat_handlers(bot)

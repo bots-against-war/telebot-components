@@ -14,7 +14,9 @@ from telebot_components.feedback.integration.aux_feedback_handler import (
 from telebot_components.redis_utils.interface import RedisInterface
 
 
-async def create_feedback_bot(redis: RedisInterface, token: str, main_admin_chat_id: int, aux_admin_chat_id: int):
+async def create_feedback_bot(
+    redis: RedisInterface, token: str, main_admin_chat_id: int, aux_admin_chat_ids: list[int]
+):
     bot_prefix = "example-feedback-mirrored-admin-chat-bot"
     bot = AsyncTeleBot(token)
 
@@ -34,7 +36,7 @@ async def create_feedback_bot(redis: RedisInterface, token: str, main_admin_chat
                 force_category_selection=False,
                 hashtags_in_admin_chat=True,
                 hashtag_message_rarer_than=times.FIVE_MINUTES,
-                unanswered_hashtag="неотвечено",
+                unanswered_hashtag="unanswered",
                 confirm_forwarded_to_admin_rarer_than=times.FIVE_MINUTES,
                 full_user_anonymization=False,
             ),
@@ -50,12 +52,15 @@ async def create_feedback_bot(redis: RedisInterface, token: str, main_admin_chat
         )
 
     main_feedback_handler = feedback_handler_factory("", main_admin_chat_id)
-    main_feedback_handler.integrations.append(
-        AuxFeedbackHandlerIntegration(
-            feedback_handler=feedback_handler_factory("aux admin chat", aux_admin_chat_id),
-            bot_prefix=bot_prefix,
-            redis=redis,
-        )
+    main_feedback_handler.integrations.extend(
+        [
+            AuxFeedbackHandlerIntegration(
+                feedback_handler=feedback_handler_factory(f"aux admin chat #{idx + 1}", aux_admin_chat_id),
+                bot_prefix=bot_prefix,
+                redis=redis,
+            )
+            for idx, aux_admin_chat_id in enumerate(aux_admin_chat_ids)
+        ]
     )
 
     await main_feedback_handler.setup(bot)
@@ -83,7 +88,7 @@ if __name__ == "__main__":
             redis=redis,
             token=os.environ["TOKEN"],
             main_admin_chat_id=int(os.environ["MAIN_ADMIN_CHAT_ID"]),
-            aux_admin_chat_id=int(os.environ["AUX_ADMIN_CHAT_ID"]),
+            aux_admin_chat_ids=[int(aaci) for aaci in os.environ["AUX_ADMIN_CHAT_IDS"].split(",")],
         )
         await bot_runner.run_polling()
 
