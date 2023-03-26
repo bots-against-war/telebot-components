@@ -153,5 +153,5 @@ async def test_feedback_handler_integration_basic(redis: RedisInterface) -> None
     )
     assert_list_of_required_subdicts(
         [mc.full_kwargs for mc in bot.method_calls["copy_message"]],
-        [{"chat_id": 111000111000, "from_chat_id": 7890123, "message_id": 1}],
+        [{"chat_id": ADMIN_CHAT_ID, "from_chat_id": USER_ID, "message_id": 1}],
     )
