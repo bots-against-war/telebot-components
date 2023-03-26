@@ -37,7 +37,6 @@ async def create_trello_integrated_feedback_bot(
     bot = AsyncTeleBot(token)
 
     trello_integration = TrelloIntegration(
-        bot=bot,
         redis=redis,
         bot_prefix=bot_prefix,
         admin_chat_id=admin_chat_id,
@@ -51,8 +50,6 @@ async def create_trello_integrated_feedback_bot(
         unanswered_label=unanswered_label,
         unanswered_label_config=UnansweredLabelConfig(name=unanswered_label_name, color=unanswered_label_color),
     )
-
-    await trello_integration.initialize()
 
     feedback_handler = FeedbackHandler(
         admin_chat_id,
@@ -85,25 +82,15 @@ async def create_trello_integrated_feedback_bot(
         )
         await bot.send_message(message.from_user.id, "hi there")
 
-    feedback_handler.setup(bot)
-
-    if reply_with_card_comments:
-        endpoints = await trello_integration.get_webhook_endpoints()
-        background_jobs = [
-            trello_integration.initialize_webhook(
-                base_url=base_url,
-                server_listening_future=server_listening_future,
-            )
-        ]
-    else:
-        endpoints = []
-        background_jobs = []
+    await feedback_handler.setup(bot)
 
     return BotRunner(
         bot_prefix=bot_prefix,
         bot=bot,
-        aux_endpoints=endpoints,
-        background_jobs=background_jobs,
+        aux_endpoints=await feedback_handler.aux_endpoints(),
+        background_jobs=feedback_handler.background_jobs(
+            base_url=base_url, server_listening_future=server_listening_future
+        ),
     )
 
 

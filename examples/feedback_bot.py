@@ -22,7 +22,7 @@ from telebot_components.stores.language import (
 )
 
 
-def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
+async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
     bot_prefix = "example-feedback-bot"
     bot = AsyncTeleBot(token)
 
@@ -99,7 +99,6 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
 
     try:
         trello_integration = TrelloIntegration(
-            bot=bot,
             redis=redis,
             bot_prefix=bot_prefix,
             admin_chat_id=admin_chat_id,
@@ -174,12 +173,12 @@ def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
 
     category_store.setup(bot, on_category_selected=on_category_selected)
 
-    feedback_handler.setup(bot)
+    await feedback_handler.setup(bot)
 
     return BotRunner(
         bot_prefix=bot_prefix,
         bot=bot,
-        background_jobs=[trello_integration.initialize()] if trello_integration is not None else [],
+        background_jobs=feedback_handler.background_jobs(base_url=None, server_listening_future=None),
     )
 
 
@@ -194,12 +193,14 @@ if __name__ == "__main__":
 
     load_dotenv()
 
-    redis = RedisEmulation()
-    # redis = Redis.from_url(os.environ["REDIS_URL"])
-    bot_runner = create_feedback_bot(
-        redis=redis,
-        token=os.environ["TOKEN"],
-        admin_chat_id=int(os.environ["ADMIN_CHAT_ID"]),
-    )
+    async def main() -> None:
+        redis = RedisEmulation()
+        # redis = Redis.from_url(os.environ["REDIS_URL"])
+        bot_runner = await create_feedback_bot(
+            redis=redis,
+            token=os.environ["TOKEN"],
+            admin_chat_id=int(os.environ["ADMIN_CHAT_ID"]),
+        )
+        await bot_runner.run_polling()
 
-    asyncio.run(bot_runner.run_polling())
+    asyncio.run(main())

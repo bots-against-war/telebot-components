@@ -4,11 +4,22 @@ import math
 import random
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Callable, Coroutine, Optional, Protocol, TypedDict, cast
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Optional,
+    Protocol,
+    TypedDict,
+    cast,
+)
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.api import ApiHTTPException
+from telebot.formatting import hbold
+from telebot.runner import AuxBotEndpoint
 from telebot.types import constants as tg_constants
 from telebot.types.service import FilterFunc
 from telebot.util import extract_arguments
@@ -20,14 +31,17 @@ from telebot_components.feedback.anti_spam import (
     AntiSpamInterface,
     AntiSpamStatus,
 )
-from telebot_components.feedback.trello_integration import (
-    MessageRepliedFromTrelloContext,
-    TrelloIntegration,
+from telebot_components.feedback.integration.interface import (
+    FeedbackHandlerIntegration,
+    FeedbackIntegrationBackgroundContext,
+    UserMessageRepliedFromIntegrationEvent,
 )
+from telebot_components.feedback.integration.trello import TrelloIntegration
+from telebot_components.feedback.types import UserMessageRepliedEvent
 from telebot_components.form.field import TelegramAttachment
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
-from telebot_components.stores.category import CategoryStore
+from telebot_components.stores.category import Category, CategoryStore
 from telebot_components.stores.generic import (
     KeyFlagStore,
     KeyListStore,
@@ -41,7 +55,13 @@ from telebot_components.stores.language import (
     any_text_to_str,
     vaildate_singlelang_text,
 )
-from telebot_components.utils import emoji_hash, html_link, send_attachment
+from telebot_components.utils import (
+    emoji_hash,
+    html_link,
+    send_attachment,
+    telegram_html_escape,
+    telegram_message_url,
+)
 
 
 @dataclass
@@ -74,7 +94,6 @@ class ServiceMessages:
         )
 
 
-@dataclass
 class HashtagMessageData(TypedDict):
     """Can't just store message ids as ints because we need to update hashatag messages sometimes!"""
 
@@ -165,9 +184,17 @@ class FeedbackHandler:
         language_store: Optional[LanguageStore] = None,
         category_store: Optional[CategoryStore] = None,
         trello_integration: Optional[TrelloIntegration] = None,
+        integrations: Optional[list[FeedbackHandlerIntegration]] = None,
         admin_chat_response_actions: Optional[list[AdminChatAction]] = None,
+        # specific feedback handler name in case there are several of them;
+        # the default (empty string) makes it backwards compatible
+        name: str = "",
     ) -> None:
+        self.name = name
+        bot_prefix = bot_prefix + name
         self.bot_prefix = bot_prefix
+        self.logger = logging.getLogger(f"{__name__}[{self.bot_prefix}]")
+
         self.admin_chat_id = admin_chat_id
         self.config = config
 
@@ -175,7 +202,12 @@ class FeedbackHandler:
         self.banned_users_store = banned_users_store
         self.language_store = language_store
         self.category_store = category_store
-        self.trello_integration = trello_integration
+
+        integrations_ = integrations or []
+        if trello_integration is not None:
+            self.logger.warning("'trello_integration' argument is deprecated, please use 'integrations' instead")
+            integrations_.append(trello_integration)
+        self.integrations = integrations_
 
         self.service_messages = service_messages
         self.validate_service_messages()
@@ -194,7 +226,6 @@ class FeedbackHandler:
                 )
             )
         self.admin_chat_response_action_by_command = {aca.command: aca for aca in self.admin_chat_response_actions}
-        self.logger = logging.getLogger(f"{__name__}[{self.bot_prefix}]")
 
         # === stores used by the handler ===
 
@@ -360,24 +391,9 @@ class FeedbackHandler:
             + f"\n· По умолчанию бот пересылает первые {self.config.message_log_page_size} сообщений, дальше можно листать "
             + "по страницам: «/log 2», «/log 3», и так далее"
         )
-        if self.trello_integration is not None:
-            trello_help = "🗂️ <i>Интеграция с Trello</i>\n"
-            trello_help += (
-                f'· Помимо чата сообщения выгружаются на {html_link(self.trello_integration.board.url, "доску Trello")} '
-                + f"в списки: "
-                + ", ".join(f"<b>{l.name}</b>" for l in self.trello_integration.lists_by_category_name.values())
-                + "\n"
-                "· В карточки переносятся присланные в бот фотографии и документы. Для каждого сообщения доступна "
-                + "обратная ссылка на этот чат."
-            )
-            if self.trello_integration.reply_with_card_comments:
-                trello_help += (
-                    "\n"
-                    + "· Через комментарии к карточке можно ответить на сообщение в боте: "
-                    + "комментарий «/reply текст ответа» значит, что бот отправит «текст ответа» в чат с "
-                    + "пользователь_ницей, а также напишет уведомление сюда."
-                )
-            paragraphs.append(trello_help)
+
+        integration_help_messages = [integration.help_message_section() for integration in self.integrations]
+        paragraphs.extend([m for m in integration_help_messages if m])
 
         if self.config.admin_chat_help_extra:
             paragraphs.append("🪄 <i>Другое</i>\n" + self.config.admin_chat_help_extra)
@@ -389,17 +405,14 @@ class FeedbackHandler:
         else:
             return True
 
-    def _admin_chat_message_filter(self, message: tg.Message) -> bool:
-        return message.chat.id == self.admin_chat_id and message.reply_to_message is not None
-
     async def _handle_user_message(
         self,
         bot: AsyncTeleBot,
         user: tg.User,
-        # message forwarder returns ids of messages in admin chat and a Message object with the message contents
-        message_forwarder: Callable[[], Coroutine[None, None, tuple[list[int], tg.Message]]],
+        send_user_id_hash: bool,
+        message_forwarder: Callable[[], Coroutine[None, None, tuple[int, tg.Message]]],
         user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
-        export_to_trello: bool = True,
+        export_to_integrations: bool = True,
     ) -> Optional[int]:
         if self.banned_users_store is not None and await self.banned_users_store.is_banned(user.id):
             return None
@@ -417,6 +430,7 @@ class FeedbackHandler:
             return None
 
         hashtag_msg_data: Optional[HashtagMessageData] = None
+        category: Optional[Category] = None
         if self.config.hashtags_in_admin_chat:
             category_hashtag = None  # sentinel
             if self.category_store is not None:
@@ -445,11 +459,21 @@ class FeedbackHandler:
                     hashtags = []
                 if category_hashtag is not None:
                     hashtags.append(category_hashtag)
-                # TODO: multiple categories per user support
-                hashtag_msg = await bot.send_message(self.admin_chat_id, _join_hashtags(hashtags))
-                await self.user_related_messages_store.add(user.id, hashtag_msg.id, reset_ttl=False)
-                hashtag_msg_data = HashtagMessageData(message_id=hashtag_msg.id, hashtags=hashtags)
-                await self.recent_hashtag_message_for_user_store.save(user.id, hashtag_msg_data)
+
+                if hashtags:
+                    # TODO: multiple categories per user support
+                    hashtag_msg = await bot.send_message(self.admin_chat_id, _join_hashtags(hashtags))
+                    await self.user_related_messages_store.add(user.id, hashtag_msg.id, reset_ttl=False)
+                    hashtag_msg_data = HashtagMessageData(message_id=hashtag_msg.id, hashtags=hashtags)
+                    await self.recent_hashtag_message_for_user_store.save(user.id, hashtag_msg_data)
+
+        if send_user_id_hash:
+            user_id_hash = self.config.user_id_hash_func(user.id, self.bot_prefix)
+            last_sent_user_id_hash = await self.last_sent_user_id_hash_store.load(self.CONST_KEY)
+            if last_sent_user_id_hash is None or last_sent_user_id_hash != user_id_hash:
+                user_id_hash_msg = await bot.send_message(self.admin_chat_id, user_id_hash)
+                await self.last_sent_user_id_hash_store.save(self.CONST_KEY, user_id_hash)
+                await self.save_message_from_user(user, user_id_hash_msg.id)
 
         preforwarded_msg = None
         if self.config.before_forwarding is not None:
@@ -457,9 +481,9 @@ class FeedbackHandler:
             if isinstance(preforwarded_msg, tg.Message):
                 await self.save_message_from_user(user, preforwarded_msg.id)
 
-        admin_chat_forwarded_msg_ids, user_content_message = await message_forwarder()
-        for admin_chat_forwarded_msg_id in admin_chat_forwarded_msg_ids:
-            await self.save_message_from_user(user, admin_chat_forwarded_msg_id)
+        admin_chat_forwarded_msg_id, user_content_message = await message_forwarder()
+        await self.save_message_from_user(user, admin_chat_forwarded_msg_id)
+
         postforwarded_msg = None
         if self.config.after_forwarding is not None:
             postforwarded_msg = await self.config.after_forwarding(user)
@@ -467,10 +491,7 @@ class FeedbackHandler:
                 await self.save_message_from_user(user, postforwarded_msg.id)
 
         if self.config.hashtags_in_admin_chat and hashtag_msg_data is not None:
-            for admin_chat_forwarded_msg_id in admin_chat_forwarded_msg_ids:
-                await self.hashtag_message_for_forwarded_message_store.save(
-                    admin_chat_forwarded_msg_id, hashtag_msg_data
-                )
+            await self.hashtag_message_for_forwarded_message_store.save(admin_chat_forwarded_msg_id, hashtag_msg_data)
 
         if self.service_messages.forwarded_to_admin_ok is not None and (
             self.config.confirm_forwarded_to_admin_rarer_than is None
@@ -483,30 +504,34 @@ class FeedbackHandler:
             if self.config.confirm_forwarded_to_admin_rarer_than is not None:
                 await self.recently_sent_confirmation_flag_store.set_flag(user.id)
 
-        # HACK: we are assuming that the list of forwarded message ids contains "service" ids first and the main message last,
-        # so here we use (and return) the last one
-        if not admin_chat_forwarded_msg_ids:
-            return None
-        main_admin_chat_forwarded_msg_id = admin_chat_forwarded_msg_ids[-1]
-        if self.trello_integration is not None and export_to_trello:
-            category = await self.category_store.get_user_category(user) if self.category_store else None
+        if export_to_integrations:
+            # NOTE: category may already be loaded, if so -- reusing the value here
+            if category is None and self.category_store is not None:
+                category = await self.category_store.get_user_category(user)
 
-            def postprocess_card_description(descr: str) -> str:
-                # HACK: we're pretending pre- and postforwarded messages are actually part of user's message
-                if preforwarded_msg is not None:
-                    descr = "[pre]: " + preforwarded_msg.text_content + "\n\n" + descr
-                if postforwarded_msg is not None:
-                    descr = descr + "\n\n" + "[post]:" + postforwarded_msg.text_content
-                return descr
+            # HACK: the code above treats user and content message as separate entities for legacy reasons, but
+            #       integrations do not; for simpler interface, they expect to receive a single Message object
+            #       with all the info; to facilitate that, here we shamelessly patch the message objects to hide
+            #       all the mess
+            message = user_content_message
+            message.from_user = user
+            if preforwarded_msg is not None:
+                message.text = "[pre]: " + preforwarded_msg.text_content + "\n\n" + message.text_content
+            if postforwarded_msg is not None:
+                message.text = message.text_content + "\n\n" + "[post]: " + postforwarded_msg.text_content
 
-            await self.trello_integration.export_user_message(
-                user=user,
-                content_message=user_content_message,
-                admin_chat_message_id=main_admin_chat_forwarded_msg_id,
-                category=category,
-                postprocess_card_description=postprocess_card_description,
+            await asyncio.gather(
+                *[
+                    integration.handle_user_message(
+                        message=message,
+                        admin_chat_message_id=admin_chat_forwarded_msg_id,
+                        category=category,
+                        bot=bot,
+                    )
+                    for integration in self.integrations
+                ]
             )
-        return main_admin_chat_forwarded_msg_id
+        return admin_chat_forwarded_msg_id
 
     async def _send_user_id_hash_message(self, bot: AsyncTeleBot, user_id: int) -> Optional[int]:
         user_id_hash = self.config.user_id_hash_func(user_id, self.bot_prefix)
@@ -537,17 +562,12 @@ class FeedbackHandler:
         If the message has been successfully sent to the admin chat, this method returns its id.
         """
 
-        async def message_forwarder() -> tuple[list[int], tg.Message]:
-            if send_user_id_hash_message:
-                admin_chat_message_ids = [await self._send_user_id_hash_message(bot, user.id)]
-            else:
-                admin_chat_message_ids = []
+        async def message_forwarder() -> tuple[int, tg.Message]:
             if attachment is None:
                 sent_msg = await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
             else:
                 sent_msg = await send_attachment(bot, self.admin_chat_id, attachment, text, remove_exif_data)
-            admin_chat_message_ids.append(sent_msg.id)
-            return [mid for mid in admin_chat_message_ids if mid is not None], sent_msg
+            return sent_msg.id, sent_msg
 
         async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> Optional[tg.Message]:
             if no_response:
@@ -559,11 +579,12 @@ class FeedbackHandler:
             bot=bot,
             user=user,
             message_forwarder=message_forwarder,
+            send_user_id_hash=send_user_id_hash_message,
             user_replier=user_replier,
-            export_to_trello=export_to_trello,
+            export_to_integrations=export_to_trello,
         )
 
-    def setup(self, bot: AsyncTeleBot):
+    async def setup(self, bot: AsyncTeleBot) -> None:
         @bot.message_handler(
             func=cast(FilterFunc, self._user_message_filter),
             chat_types=[tg_constants.ChatType.private],
@@ -571,21 +592,19 @@ class FeedbackHandler:
             priority=-100,  # lower priority to process the rest of the handlers first
         )
         async def user_to_bot(message: tg.Message):
-            async def message_forwarder() -> tuple[list[int], tg.Message]:
+            async def message_forwarder() -> tuple[int, tg.Message]:
                 if self.config.full_user_anonymization:
-                    user_id_msg_id = await self._send_user_id_hash_message(bot, message.from_user.id)
                     copied_message_id = await bot.copy_message(
                         chat_id=self.admin_chat_id,
                         from_chat_id=message.chat.id,
                         message_id=message.id,
                     )
-                    maybe_message_ids = [user_id_msg_id, copied_message_id.message_id]
-                    return [mid for mid in maybe_message_ids if mid is not None], message
+                    return copied_message_id.message_id, message
                 else:
                     forwarded_message = await bot.forward_message(
                         self.admin_chat_id, from_chat_id=message.chat.id, message_id=message.id
                     )
-                    return [forwarded_message.id], forwarded_message
+                    return forwarded_message.id, forwarded_message
 
             async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> tg.Message:
                 return await bot.reply_to(message, text, reply_markup=reply_markup)
@@ -594,9 +613,97 @@ class FeedbackHandler:
                 bot=bot,
                 user=message.from_user,
                 message_forwarder=message_forwarder,
+                send_user_id_hash=self.config.full_user_anonymization,
                 user_replier=user_replier,
             )
 
+        await self.setup_admin_chat_handlers(bot)
+        for integration in self.integrations:
+            await integration.setup(bot)
+
+    async def aux_endpoints(self) -> list[AuxBotEndpoint]:
+        return sum(await i.aux_endpoints() for i in self.integrations) or []
+
+    def background_jobs(
+        self,
+        base_url: Optional[str],
+        server_listening_future: Optional[asyncio.Future[None]],
+    ) -> list[Coroutine[None, None, None]]:
+        return [
+            i.background_job(FeedbackIntegrationBackgroundContext(base_url, server_listening_future))
+            for i in self.integrations
+        ]
+
+    async def _remove_unanswered_hashtag(self, bot: AsyncTeleBot, message_id: int):
+        if self.hashtag_message_for_forwarded_message_store is None:
+            return
+        hashtag_message_data = await self.hashtag_message_for_forwarded_message_store.load(message_id)
+        if hashtag_message_data is None:
+            return
+        if self.config.unanswered_hashtag is None:
+            return
+        if self.config.unanswered_hashtag not in hashtag_message_data["hashtags"]:
+            return
+        hashtag_message_data["hashtags"].remove(self.config.unanswered_hashtag)
+        try:
+            if hashtag_message_data["hashtags"]:
+                await bot.edit_message_text(
+                    message_id=hashtag_message_data["message_id"],
+                    chat_id=self.admin_chat_id,
+                    text=_join_hashtags(hashtag_message_data["hashtags"]),
+                )
+            else:
+                await bot.delete_message(chat_id=self.admin_chat_id, message_id=hashtag_message_data["message_id"])
+        except Exception as e:
+            # when replying on a message in a group that has already been responded to,
+            # telegram API returns and error if there's nothing to change
+            self.logger.info(f"Error updating hashtag message: {e}")
+            pass
+        finally:
+            await self.hashtag_message_for_forwarded_message_store.save(message_id, hashtag_message_data)
+
+    async def message_replied_from_integration_callback(
+        self,
+        event: UserMessageRepliedFromIntegrationEvent,
+        *,
+        notify_integrations: bool = True,
+    ) -> None:
+        self.logger.debug(f"Message replied from integration: {event!r}")
+        if self.config.hashtags_in_admin_chat:
+            await self._remove_unanswered_hashtag(event.bot, event.main_admin_chat_message_id)
+
+        integration_name = telegram_html_escape(event.integration.name())
+        cloned_reply_message = await event.bot.send_message(
+            chat_id=self.admin_chat_id,
+            reply_to_message_id=event.main_admin_chat_message_id,
+            text=(
+                "💬 "
+                + hbold(telegram_html_escape(event.reply_author or "<unknown admin>"), escape=False)
+                + " via "
+                + (html_link(event.reply_link, integration_name) if event.reply_link else integration_name)
+                + (("\n\n" + event.reply_text) if event.reply_text else "")
+                + ("\n\n📎 attachment" if event.reply_has_attachments else "")
+            ),
+            parse_mode="HTML",
+        )
+
+        await self.message_log_store.push(event.origin_chat_id, cloned_reply_message.id)
+
+        if notify_integrations:
+            # do not notify integration about its own replies
+            integrations_to_notify = [i for i in self.integrations if not i is event.integration]
+            self.logger.debug(f"Notifying integrations: {[i.name() for i in integrations_to_notify]}")
+            await asyncio.gather(
+                *[integration.handle_user_message_replied_elsewhere(event) for integration in integrations_to_notify]
+            )
+        else:
+            self.logger.debug(f"Will not notify integrations")
+
+    async def setup_admin_chat_handlers(
+        self,
+        bot: AsyncTeleBot,
+        on_admin_reply_to_bot: Optional[Callable[[], Awaitable[None]]] = None,
+    ) -> None:
         @bot.message_handler(chat_id=[self.admin_chat_id], commands=["help"])
         async def admin_chat_help(message: tg.Message):
             await bot.reply_to(
@@ -607,41 +714,8 @@ class FeedbackHandler:
                 parse_mode="HTML",
             )
 
-        async def _remove_unanswered_hashtag(message_id: int):
-            if self.hashtag_message_for_forwarded_message_store is None:
-                return
-            hashtag_message_data = await self.hashtag_message_for_forwarded_message_store.load(message_id)
-            if hashtag_message_data is None:
-                return
-            if self.config.unanswered_hashtag is None:
-                return
-            if self.config.unanswered_hashtag not in hashtag_message_data["hashtags"]:
-                return
-            hashtag_message_data["hashtags"].remove(self.config.unanswered_hashtag)
-            try:
-                if hashtag_message_data["hashtags"]:
-                    await bot.edit_message_text(
-                        message_id=hashtag_message_data["message_id"],
-                        chat_id=self.admin_chat_id,
-                        text=_join_hashtags(hashtag_message_data["hashtags"]),
-                    )
-                else:
-                    await bot.delete_message(chat_id=self.admin_chat_id, message_id=hashtag_message_data["message_id"])
-            except Exception as e:
-                # when replying on a message in a group that has already been responded to,
-                # telegram API returns and error if there's nothing to change
-                self.logger.info(f"Error updating hashtag message: {e}")
-                pass
-            finally:
-                await self.hashtag_message_for_forwarded_message_store.save(message_id, hashtag_message_data)
-
-        async def on_message_replied_from_trello(context: MessageRepliedFromTrelloContext):
-            await self.message_log_store.push(context.origin_chat_id, context.reply_message_id)
-            if self.config.hashtags_in_admin_chat:
-                await _remove_unanswered_hashtag(context.forwarded_user_message_id)
-
-        if self.trello_integration is not None:
-            self.trello_integration.set_on_message_replied_from_trello(on_message_replied_from_trello)
+        for integration in self.integrations:
+            integration.set_message_replied_callback(self.message_replied_from_integration_callback)
 
         @bot.message_handler(
             chat_id=[self.admin_chat_id],
@@ -751,7 +825,18 @@ class FeedbackHandler:
                                     await self.user_related_messages_store.add(origin_chat_id, log_message.id)
                                 await asyncio.sleep(0.5)  # soft rate limit prevention
                             except Exception:
-                                pass
+                                self.logger.exception(
+                                    "Error sending message as part of /log command, continuing; "
+                                    + f"{page = }; {total_pages = }"
+                                )
+                        await bot.send_message(
+                            chat_id=log_destination_chat_id,
+                            text=(
+                                f"⬆️ Log page {page + 1} / {total_pages}"
+                                + (f"\nNext: <code>/log {page + 2}</code>" if page + 1 < total_pages else "")
+                            ),
+                            parse_mode="HTML",
+                        )
                     else:
                         available_commands = list(self.admin_chat_response_action_by_command.keys()) + ["/log"]
                         await bot.reply_to(
@@ -788,9 +873,26 @@ class FeedbackHandler:
                         )
 
                     if self.config.hashtags_in_admin_chat:
-                        await _remove_unanswered_hashtag(forwarded_msg.id)
-                    if self.trello_integration is not None:
-                        await self.trello_integration.export_admin_message(message, to_user_id=origin_chat_id)
+                        await self._remove_unanswered_hashtag(bot, forwarded_msg.id)
+                    has_attachments = message.content_type != "text"
+                    await asyncio.gather(
+                        *[
+                            integration.handle_user_message_replied_elsewhere(
+                                UserMessageRepliedEvent(
+                                    bot=bot,
+                                    origin_chat_id=origin_chat_id,
+                                    reply_text=(
+                                        (message.html_text if not has_attachments else message.html_caption) or ""
+                                    ),
+                                    reply_has_attachments=has_attachments,
+                                    reply_author=message.from_user.first_name,
+                                    reply_link=telegram_message_url(self.admin_chat_id, message.id),
+                                    main_admin_chat_message_id=forwarded_msg.id,
+                                )
+                            )
+                            for integration in self.integrations
+                        ]
+                    )
             except Exception as e:
                 await bot.reply_to(message, f"Something went wrong! {e}")
                 self.logger.exception(f"Unexpected error while replying to forwarded msg")

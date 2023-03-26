@@ -52,7 +52,7 @@ def create_mock_feedback_handler(redis: RedisInterface, is_throttling: bool) -> 
 async def test_feedback_handler_throttling(redis: RedisInterface):
     bot = MockedAsyncTeleBot("token")
     feedback_handler = create_mock_feedback_handler(redis, is_throttling=True)
-    feedback_handler.setup(bot)
+    await feedback_handler.setup(bot)
 
     @bot.message_handler(commands=["start"])
     async def welcome_user(m: tg.Message):
@@ -174,7 +174,7 @@ async def test_feedback_handler_throttling(redis: RedisInterface):
 async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
     bot = MockedAsyncTeleBot("token")
     feedback_handler = create_mock_feedback_handler(redis, is_throttling=False)
-    feedback_handler.setup(bot)
+    await feedback_handler.setup(bot)
 
     _message_id_counter = 0
 
@@ -232,7 +232,10 @@ async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
     # admin requests message log
     await _send_message_to_bot(in_admin_chat=True, text="/log", reply_to_message_id=26)
     assert set(bot.method_calls.keys()) == {"send_message", "forward_message"}
-    assert [mc.full_kwargs for mc in bot.method_calls["send_message"]] == [{"chat_id": 111, "text": "📜 Log page 1 / 6"}]
+    assert [mc.full_kwargs for mc in bot.method_calls["send_message"]] == [
+        {"chat_id": 111, "text": "📜 Log page 1 / 6"},
+        {"chat_id": 111, "text": "⬆️ Log page 1 / 6\nNext: <code>/log 2</code>", "parse_mode": "HTML"},
+    ]
     assert [mc.full_kwargs for mc in bot.method_calls["forward_message"]] == [
         {"chat_id": 111, "from_chat_id": 111, "message_id": message_id} for message_id in range(4, 13, 2)
     ]
@@ -241,7 +244,10 @@ async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
     # admin requests message log page 5 by answering to another message
     await _send_message_to_bot(in_admin_chat=True, text="/log 5", reply_to_message_id=4)
     assert set(bot.method_calls.keys()) == {"send_message", "forward_message"}
-    assert [mc.full_kwargs for mc in bot.method_calls["send_message"]] == [{"chat_id": 111, "text": "📜 Log page 5 / 6"}]
+    assert [mc.full_kwargs for mc in bot.method_calls["send_message"]] == [
+        {"chat_id": 111, "text": "📜 Log page 5 / 6"},
+        {"chat_id": 111, "text": "⬆️ Log page 5 / 6\nNext: <code>/log 6</code>", "parse_mode": "HTML"},
+    ]
     assert [mc.full_kwargs for mc in bot.method_calls["forward_message"]] == [
         {"chat_id": 111, "from_chat_id": 111, "message_id": message_id} for message_id in range(44, 53, 2)
     ]
@@ -250,7 +256,10 @@ async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
     # admin requests message log on the last page (with only 1 message) by answering on a log message
     await _send_message_to_bot(in_admin_chat=True, text="/log -1", reply_to_message_id=44)
     assert set(bot.method_calls.keys()) == {"send_message", "forward_message"}
-    assert [mc.full_kwargs for mc in bot.method_calls["send_message"]] == [{"chat_id": 111, "text": "📜 Log page 6 / 6"}]
+    assert [mc.full_kwargs for mc in bot.method_calls["send_message"]] == [
+        {"chat_id": 111, "text": "📜 Log page 6 / 6"},
+        {"chat_id": 111, "text": "⬆️ Log page 6 / 6", "parse_mode": "HTML"},
+    ]
     assert [mc.full_kwargs for mc in bot.method_calls["forward_message"]] == [
         {"chat_id": 111, "from_chat_id": 111, "message_id": 54}
     ]
