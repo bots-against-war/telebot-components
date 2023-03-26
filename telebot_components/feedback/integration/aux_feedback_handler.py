@@ -100,10 +100,12 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
         self,
         message: tg.Message,
         admin_chat_message_id: int,
+        # NOTE: if two feedback handlers share CategoryStore, the categoory will be loaded by
+        #       the aux feedback handler by itself, soo we can ignore the `category` argument
         category: Optional[Category],
         bot: AsyncTeleBot,
     ) -> None:
-        async def message_forwarder() -> tuple[list[int], tg.Message]:
+        async def message_forwarder() -> tuple[int, tg.Message]:
             copied = await bot.copy_message(
                 chat_id=self.feedback_handler.admin_chat_id,
                 from_chat_id=message.chat.id,
@@ -111,7 +113,7 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
             )
             await self.main_by_aux_admin_chat_message_id_store.save(copied.message_id, admin_chat_message_id)
             await self.aux_by_main_admin_chat_message_id_store.save(admin_chat_message_id, copied.message_id)
-            return [copied.message_id], message
+            return copied.message_id, message
 
         async def noop(*args, **kwargs) -> None:
             pass
@@ -120,6 +122,7 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
             bot=bot,
             user=message.from_user,
             message_forwarder=message_forwarder,
+            send_user_id_hash=self.feedback_handler.config.full_user_anonymization,
             user_replier=noop,
             export_to_integrations=True,
         )

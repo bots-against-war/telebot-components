@@ -409,8 +409,8 @@ class FeedbackHandler:
         self,
         bot: AsyncTeleBot,
         user: tg.User,
-        # message forwarder returns ids of messages in admin chat and a Message object with the message contents
-        message_forwarder: Callable[[], Coroutine[None, None, tuple[list[int], tg.Message]]],
+        send_user_id_hash: bool,
+        message_forwarder: Callable[[], Coroutine[None, None, tuple[int, tg.Message]]],
         user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
         export_to_integrations: bool = True,
     ) -> Optional[int]:
@@ -465,15 +465,23 @@ class FeedbackHandler:
                 hashtag_msg_data = HashtagMessageData(message_id=hashtag_msg.id, hashtags=hashtags)
                 await self.recent_hashtag_message_for_user_store.save(user.id, hashtag_msg_data)
 
+        if send_user_id_hash:
+            user_id_hash = self.config.user_id_hash_func(user.id, self.bot_prefix)
+            last_sent_user_id_hash = await self.last_sent_user_id_hash_store.load(self.CONST_KEY)
+            if last_sent_user_id_hash is None or last_sent_user_id_hash != user_id_hash:
+                user_id_hash_msg = await bot.send_message(self.admin_chat_id, user_id_hash)
+                await self.last_sent_user_id_hash_store.save(self.CONST_KEY, user_id_hash)
+                await self.save_message_from_user(user, user_id_hash_msg.id)
+
         preforwarded_msg = None
         if self.config.before_forwarding is not None:
             preforwarded_msg = await self.config.before_forwarding(user)
             if isinstance(preforwarded_msg, tg.Message):
                 await self.save_message_from_user(user, preforwarded_msg.id)
 
-        admin_chat_forwarded_msg_ids, user_content_message = await message_forwarder()
-        for admin_chat_forwarded_msg_id in admin_chat_forwarded_msg_ids:
-            await self.save_message_from_user(user, admin_chat_forwarded_msg_id)
+        admin_chat_forwarded_msg_id, user_content_message = await message_forwarder()
+        await self.save_message_from_user(user, admin_chat_forwarded_msg_id)
+
         postforwarded_msg = None
         if self.config.after_forwarding is not None:
             postforwarded_msg = await self.config.after_forwarding(user)
@@ -481,10 +489,7 @@ class FeedbackHandler:
                 await self.save_message_from_user(user, postforwarded_msg.id)
 
         if self.config.hashtags_in_admin_chat and hashtag_msg_data is not None:
-            for admin_chat_forwarded_msg_id in admin_chat_forwarded_msg_ids:
-                await self.hashtag_message_for_forwarded_message_store.save(
-                    admin_chat_forwarded_msg_id, hashtag_msg_data
-                )
+            await self.hashtag_message_for_forwarded_message_store.save(admin_chat_forwarded_msg_id, hashtag_msg_data)
 
         if self.service_messages.forwarded_to_admin_ok is not None and (
             self.config.confirm_forwarded_to_admin_rarer_than is None
@@ -497,11 +502,6 @@ class FeedbackHandler:
             if self.config.confirm_forwarded_to_admin_rarer_than is not None:
                 await self.recently_sent_confirmation_flag_store.set_flag(user.id)
 
-        # HACK: we are assuming that the list of forwarded message ids contains "service" ids first and the main message last,
-        # so here we use (and return) the last one
-        if not admin_chat_forwarded_msg_ids:
-            return None
-        main_admin_chat_forwarded_msg_id = admin_chat_forwarded_msg_ids[-1]
         if export_to_integrations:
             # NOTE: category may already be loaded, if so -- reusing the value here
             if category is None and self.category_store is not None:
@@ -522,14 +522,14 @@ class FeedbackHandler:
                 *[
                     integration.handle_user_message(
                         message=message,
-                        admin_chat_message_id=main_admin_chat_forwarded_msg_id,
+                        admin_chat_message_id=admin_chat_forwarded_msg_id,
                         category=category,
                         bot=bot,
                     )
                     for integration in self.integrations
                 ]
             )
-        return main_admin_chat_forwarded_msg_id
+        return admin_chat_forwarded_msg_id
 
     async def _send_user_id_hash_message(self, bot: AsyncTeleBot, user_id: int) -> Optional[int]:
         user_id_hash = self.config.user_id_hash_func(user_id, self.bot_prefix)
@@ -560,17 +560,12 @@ class FeedbackHandler:
         If the message has been successfully sent to the admin chat, this method returns its id.
         """
 
-        async def message_forwarder() -> tuple[list[int], tg.Message]:
-            if send_user_id_hash_message:
-                admin_chat_message_ids = [await self._send_user_id_hash_message(bot, user.id)]
-            else:
-                admin_chat_message_ids = []
+        async def message_forwarder() -> tuple[int, tg.Message]:
             if attachment is None:
                 sent_msg = await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
             else:
                 sent_msg = await send_attachment(bot, self.admin_chat_id, attachment, text, remove_exif_data)
-            admin_chat_message_ids.append(sent_msg.id)
-            return [mid for mid in admin_chat_message_ids if mid is not None], sent_msg
+            return sent_msg.id, sent_msg
 
         async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> Optional[tg.Message]:
             if no_response:
@@ -582,6 +577,7 @@ class FeedbackHandler:
             bot=bot,
             user=user,
             message_forwarder=message_forwarder,
+            send_user_id_hash=send_user_id_hash_message,
             user_replier=user_replier,
             export_to_integrations=export_to_trello,
         )
@@ -594,21 +590,19 @@ class FeedbackHandler:
             priority=-100,  # lower priority to process the rest of the handlers first
         )
         async def user_to_bot(message: tg.Message):
-            async def message_forwarder() -> tuple[list[int], tg.Message]:
+            async def message_forwarder() -> tuple[int, tg.Message]:
                 if self.config.full_user_anonymization:
-                    user_id_msg_id = await self._send_user_id_hash_message(bot, message.from_user.id)
                     copied_message_id = await bot.copy_message(
                         chat_id=self.admin_chat_id,
                         from_chat_id=message.chat.id,
                         message_id=message.id,
                     )
-                    maybe_message_ids = [user_id_msg_id, copied_message_id.message_id]
-                    return [mid for mid in maybe_message_ids if mid is not None], message
+                    return copied_message_id.message_id, message
                 else:
                     forwarded_message = await bot.forward_message(
                         self.admin_chat_id, from_chat_id=message.chat.id, message_id=message.id
                     )
-                    return [forwarded_message.id], forwarded_message
+                    return forwarded_message.id, forwarded_message
 
             async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> tg.Message:
                 return await bot.reply_to(message, text, reply_markup=reply_markup)
@@ -617,6 +611,7 @@ class FeedbackHandler:
                 bot=bot,
                 user=message.from_user,
                 message_forwarder=message_forwarder,
+                send_user_id_hash=self.config.full_user_anonymization,
                 user_replier=user_replier,
             )
 
