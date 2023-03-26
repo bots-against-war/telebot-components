@@ -459,11 +459,13 @@ class FeedbackHandler:
                     hashtags = []
                 if category_hashtag is not None:
                     hashtags.append(category_hashtag)
-                # TODO: multiple categories per user support
-                hashtag_msg = await bot.send_message(self.admin_chat_id, _join_hashtags(hashtags))
-                await self.user_related_messages_store.add(user.id, hashtag_msg.id, reset_ttl=False)
-                hashtag_msg_data = HashtagMessageData(message_id=hashtag_msg.id, hashtags=hashtags)
-                await self.recent_hashtag_message_for_user_store.save(user.id, hashtag_msg_data)
+
+                if hashtags:
+                    # TODO: multiple categories per user support
+                    hashtag_msg = await bot.send_message(self.admin_chat_id, _join_hashtags(hashtags))
+                    await self.user_related_messages_store.add(user.id, hashtag_msg.id, reset_ttl=False)
+                    hashtag_msg_data = HashtagMessageData(message_id=hashtag_msg.id, hashtags=hashtags)
+                    await self.recent_hashtag_message_for_user_store.save(user.id, hashtag_msg_data)
 
         if send_user_id_hash:
             user_id_hash = self.config.user_id_hash_func(user.id, self.bot_prefix)
