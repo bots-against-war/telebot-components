@@ -503,13 +503,13 @@ class FeedbackHandler:
             return None
         main_admin_chat_forwarded_msg_id = admin_chat_forwarded_msg_ids[-1]
         if export_to_integrations:
+            # NOTE: category may already be loaded, if so -- reusing the value here
             if category is None and self.category_store is not None:
-                # NOTE: category may already be loaded, if so -- reusing the value here
                 category = await self.category_store.get_user_category(user)
 
             # HACK: the code above treats user and content message as separate entities for legacy reasons, but
             #       integrations do not; for simpler interface, they expect to receive a single Message object
-            #       with all the info to facilitate that, here we shamelessly patch the message objects to hide
+            #       with all the info; to facilitate that, here we shamelessly patch the message objects to hide
             #       all the mess
             message = user_content_message
             message.from_user = user
@@ -586,7 +586,7 @@ class FeedbackHandler:
             export_to_integrations=export_to_trello,
         )
 
-    async def setup(self, bot: AsyncTeleBot):
+    async def setup(self, bot: AsyncTeleBot) -> None:
         @bot.message_handler(
             func=cast(FilterFunc, self._user_message_filter),
             chat_types=[tg_constants.ChatType.private],
@@ -718,7 +718,7 @@ class FeedbackHandler:
             )
 
         for integration in self.integrations:
-            integration.register_message_replied_callback(self.message_replied_from_integration_callback)
+            integration.set_message_replied_callback(self.message_replied_from_integration_callback)
 
         @bot.message_handler(
             chat_id=[self.admin_chat_id],

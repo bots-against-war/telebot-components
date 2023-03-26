@@ -32,10 +32,12 @@ class FeedbackIntegrationBackgroundContext:
 
 
 class FeedbackHandlerIntegration(abc.ABC):
-    """Interface class, extending the default FeedbackHandler behavior by
-
-    - additionally handling all user messages (usually exporting them to some kind of new medium)
-    - providing an additional admin input, augumenting or even replacing the default admin chat
+    """
+    Interface class for feedback handler integrations: components extending the default
+    FeedbackHandler behavior by
+      - additionally handling all user messages (e.g. exporting them to some new format / medium)
+      - receiving an additional admin-side input, notifying the main admin chat and other
+        integrations about it
     """
 
     def help_message_section(self) -> Optional[str]:
@@ -44,7 +46,7 @@ class FeedbackHandlerIntegration(abc.ABC):
 
     @abc.abstractmethod
     def name(self) -> str:
-        """Human-readable integration name"""
+        """Human-readable integration name to display to admins"""
         ...
 
     @abc.abstractmethod
@@ -59,7 +61,7 @@ class FeedbackHandlerIntegration(abc.ABC):
         The method is invoked on all user messages (including emulated) passing through the feedback handler.
 
         - `message` object is an original user's message
-        - `admin_chat_message_id` allows backlinking to the original admin chat
+        - `admin_chat_message_id` allows backlinking to the main admin chat
         """
         ...
 
@@ -71,7 +73,7 @@ class FeedbackHandlerIntegration(abc.ABC):
         """
         ...
 
-    def register_message_replied_callback(self, new: UserMessageRepliedFromIntegrationCallback) -> None:
+    def set_message_replied_callback(self, new: UserMessageRepliedFromIntegrationCallback) -> None:
         self._message_replied_callback = new
 
     @property
@@ -89,7 +91,8 @@ class FeedbackHandlerIntegration(abc.ABC):
         return []
 
     async def background_job(self, context: FeedbackIntegrationBackgroundContext) -> Any:
-        """Optional coroutine that should be run as a background job along with the bot.
+        """
+        Optional coroutine that should be run as a background job along with the bot.
         Receives the 'server is listening' future that can be awaited if the initialization requires the
         listening HTTP server (including aux_endpoints).
         """
