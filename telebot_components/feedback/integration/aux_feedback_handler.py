@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import logging
 from typing import Optional
@@ -5,7 +6,7 @@ from typing import Optional
 from telebot import AsyncTeleBot
 from telebot import types as tg
 
-from telebot_components.feedback import FeedbackHandler
+from telebot_components.feedback import FeedbackHandler, MessageForwarderResult
 from telebot_components.feedback.integration.interface import (
     FeedbackHandlerIntegration,
     FeedbackIntegrationBackgroundContext,
@@ -31,12 +32,12 @@ class _MainFeedbackHandlerIntegration(FeedbackHandlerIntegration):
 
     async def handle_user_message(
         self,
-        message: tg.Message,
-        admin_chat_message_id: int,
+        admin_chat_message: tg.Message,
+        user: tg.User,
+        user_message: Optional[tg.Message],
         category: Optional[Category],
         bot: AsyncTeleBot,
     ) -> None:
-        """This method is not used, user messages are handled by the main admin chat's feedback handler"""
         pass
 
     async def handle_user_message_replied_elsewhere(self, event: UserMessageRepliedEvent) -> None:
@@ -98,34 +99,48 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
 
     async def handle_user_message(
         self,
-        message: tg.Message,
-        admin_chat_message_id: int,
+        admin_chat_message: tg.Message,
+        user: tg.User,
+        user_message: Optional[tg.Message],
         # NOTE: if two feedback handlers share CategoryStore, the categoory will be loaded by
-        #       the aux feedback handler by itself, soo we can ignore the `category` argument
+        #       the aux feedback handler by itself, so we can ignore the `category` argument
         category: Optional[Category],
         bot: AsyncTeleBot,
     ) -> None:
-        async def message_forwarder() -> tuple[int, tg.Message]:
-            copied = await bot.copy_message(
-                chat_id=self.feedback_handler.admin_chat_id,
-                from_chat_id=message.chat.id,
-                message_id=admin_chat_message_id,
+
+        if user_message is not None:
+            await self.feedback_handler.handle_user_message(user_message, bot, reply_to_user=False)
+        else:
+            # if we got no user message (e.g. the message in admin chat is emulated), we just clone the message
+            # from the main admin chat to the aux one
+            async def message_forwarder() -> MessageForwarderResult:
+                copied_message = await bot.copy_message(
+                    chat_id=self.feedback_handler.admin_chat_id,
+                    from_chat_id=admin_chat_message.chat.id,
+                    message_id=admin_chat_message.id,
+                )
+                await self.main_by_aux_admin_chat_message_id_store.save(
+                    copied_message.message_id, admin_chat_message.id
+                )
+                await self.aux_by_main_admin_chat_message_id_store.save(
+                    admin_chat_message.id, copied_message.message_id
+                )
+                fake_admin_chat_message = copy.deepcopy(admin_chat_message)
+                fake_admin_chat_message.chat = self.feedback_handler.admin_chat
+                fake_admin_chat_message.id = copied_message.message_id
+                return MessageForwarderResult(admin_chat_msg=fake_admin_chat_message, user_msg=None)
+
+            async def noop(*args, **kwargs) -> None:
+                pass
+
+            await self.feedback_handler._handle_user_message(
+                bot=bot,
+                user=user,
+                message_forwarder=message_forwarder,
+                send_user_id_hash=self.feedback_handler.config.full_user_anonymization,
+                user_replier=noop,
+                export_to_integrations=True,
             )
-            await self.main_by_aux_admin_chat_message_id_store.save(copied.message_id, admin_chat_message_id)
-            await self.aux_by_main_admin_chat_message_id_store.save(admin_chat_message_id, copied.message_id)
-            return copied.message_id, message
-
-        async def noop(*args, **kwargs) -> None:
-            pass
-
-        await self.feedback_handler._handle_user_message(
-            bot=bot,
-            user=message.from_user,
-            message_forwarder=message_forwarder,
-            send_user_id_hash=self.feedback_handler.config.full_user_anonymization,
-            user_replier=noop,
-            export_to_integrations=True,
-        )
 
     async def handle_user_message_replied_elsewhere(self, event: UserMessageRepliedEvent) -> None:
         aux_admin_chat_message_id = await self.aux_by_main_admin_chat_message_id_store.load(

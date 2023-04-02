@@ -1,19 +1,14 @@
 import asyncio
+import copy
+import dataclasses
+import functools
 import logging
 import math
 import random
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    Coroutine,
-    Optional,
-    Protocol,
-    TypedDict,
-    cast,
-)
+from typing import Any, Callable, Coroutine, Optional, Protocol, TypedDict, cast
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -156,6 +151,12 @@ class FeedbackConfig:
 
     # how many messages to forward in one go on /log command
     message_log_page_size: int = 30
+
+
+@dataclasses.dataclass
+class MessageForwarderResult:
+    admin_chat_msg: tg.Message
+    user_msg: Optional[tg.Message]
 
 
 DUMMY_EXPIRATION_TIME = timedelta(seconds=1312)  # for stores unused based on runtime settings
@@ -409,9 +410,9 @@ class FeedbackHandler:
         self,
         bot: AsyncTeleBot,
         user: tg.User,
-        send_user_id_hash: bool,
-        message_forwarder: Callable[[], Coroutine[None, None, tuple[int, tg.Message]]],
+        message_forwarder: Callable[[], Awaitable[MessageForwarderResult]],
         user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
+        send_user_id_hash: bool,
         export_to_integrations: bool = True,
     ) -> Optional[int]:
         if self.banned_users_store is not None and await self.banned_users_store.is_banned(user.id):
@@ -481,8 +482,9 @@ class FeedbackHandler:
             if isinstance(preforwarded_msg, tg.Message):
                 await self.save_message_from_user(user, preforwarded_msg.id)
 
-        admin_chat_forwarded_msg_id, user_content_message = await message_forwarder()
-        await self.save_message_from_user(user, admin_chat_forwarded_msg_id)
+        # admin_chat_forwarded_msg_id, user_content_message = await message_forwarder()
+        message_forwarder_result = await message_forwarder()
+        await self.save_message_from_user(user, message_forwarder_result.admin_chat_msg.id)
 
         postforwarded_msg = None
         if self.config.after_forwarding is not None:
@@ -491,7 +493,9 @@ class FeedbackHandler:
                 await self.save_message_from_user(user, postforwarded_msg.id)
 
         if self.config.hashtags_in_admin_chat and hashtag_msg_data is not None:
-            await self.hashtag_message_for_forwarded_message_store.save(admin_chat_forwarded_msg_id, hashtag_msg_data)
+            await self.hashtag_message_for_forwarded_message_store.save(
+                message_forwarder_result.admin_chat_msg.id, hashtag_msg_data
+            )
 
         if self.service_messages.forwarded_to_admin_ok is not None and (
             self.config.confirm_forwarded_to_admin_rarer_than is None
@@ -509,29 +513,37 @@ class FeedbackHandler:
             if category is None and self.category_store is not None:
                 category = await self.category_store.get_user_category(user)
 
-            # HACK: the code above treats user and content message as separate entities for legacy reasons, but
-            #       integrations do not; for simpler interface, they expect to receive a single Message object
-            #       with all the info; to facilitate that, here we shamelessly patch the message objects to hide
-            #       all the mess
-            message = user_content_message
-            message.from_user = user
+            # integrations has no concept of pre- and post-forwarded messages, so we just patch their texts
+            # to the admin chat msg; their attachments and other info is lost, which is fine because we don't
+            # use them that often anymore
             if preforwarded_msg is not None:
-                message.text = "[pre]: " + preforwarded_msg.text_content + "\n\n" + message.text_content
+                message_forwarder_result.admin_chat_msg.text = (
+                    "[pre]: "
+                    + preforwarded_msg.text_content
+                    + "\n\n"
+                    + message_forwarder_result.admin_chat_msg.text_content
+                )
             if postforwarded_msg is not None:
-                message.text = message.text_content + "\n\n" + "[post]: " + postforwarded_msg.text_content
+                message_forwarder_result.admin_chat_msg.text = (
+                    message_forwarder_result.admin_chat_msg.text_content
+                    + "\n\n"
+                    + "[post]: "
+                    + postforwarded_msg.text_content
+                )
 
             await asyncio.gather(
                 *[
                     integration.handle_user_message(
-                        message=message,
-                        admin_chat_message_id=admin_chat_forwarded_msg_id,
+                        admin_chat_message=message_forwarder_result.admin_chat_msg,
+                        user=user,
+                        user_message=message_forwarder_result.user_msg,
                         category=category,
                         bot=bot,
                     )
                     for integration in self.integrations
                 ]
             )
-        return admin_chat_forwarded_msg_id
+        return message_forwarder_result.admin_chat_msg.id
 
     async def _send_user_id_hash_message(self, bot: AsyncTeleBot, user_id: int) -> Optional[int]:
         user_id_hash = self.config.user_id_hash_func(user_id, self.bot_prefix)
@@ -562,12 +574,15 @@ class FeedbackHandler:
         If the message has been successfully sent to the admin chat, this method returns its id.
         """
 
-        async def message_forwarder() -> tuple[int, tg.Message]:
+        async def message_forwarder() -> MessageForwarderResult:
             if attachment is None:
                 sent_msg = await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
             else:
                 sent_msg = await send_attachment(bot, self.admin_chat_id, attachment, text, remove_exif_data)
-            return sent_msg.id, sent_msg
+            return MessageForwarderResult(
+                admin_chat_msg=sent_msg,
+                user_msg=None,
+            )
 
         async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> Optional[tg.Message]:
             if no_response:
@@ -579,47 +594,54 @@ class FeedbackHandler:
             bot=bot,
             user=user,
             message_forwarder=message_forwarder,
-            send_user_id_hash=send_user_id_hash_message,
             user_replier=user_replier,
+            send_user_id_hash=send_user_id_hash_message,
             export_to_integrations=export_to_trello,
         )
 
+    async def handle_user_message(self, message: tg.Message, bot: AsyncTeleBot, reply_to_user: bool):
+        async def message_forwarder() -> MessageForwarderResult:
+            if self.config.full_user_anonymization:
+                copied_message_id = await bot.copy_message(
+                    chat_id=self.admin_chat_id,
+                    from_chat_id=message.chat.id,
+                    message_id=message.id,
+                )
+                fake_admin_chat_message = copy.deepcopy(message)
+                fake_admin_chat_message.chat = self.admin_chat
+                fake_admin_chat_message.id = copied_message_id.message_id
+                return MessageForwarderResult(admin_chat_msg=fake_admin_chat_message, user_msg=message)
+            else:
+                forwarded_message = await bot.forward_message(
+                    self.admin_chat_id, from_chat_id=message.chat.id, message_id=message.id
+                )
+                return MessageForwarderResult(admin_chat_msg=forwarded_message, user_msg=message)
+
+        async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]):
+            if reply_to_user:
+                return await bot.reply_to(message, text, reply_markup=reply_markup)
+
+        await self._handle_user_message(
+            bot=bot,
+            user=message.from_user,
+            message_forwarder=message_forwarder,
+            send_user_id_hash=self.config.full_user_anonymization,
+            user_replier=user_replier,
+        )
+
     async def setup(self, bot: AsyncTeleBot) -> None:
-        @bot.message_handler(
+        bot.message_handler(
             func=cast(FilterFunc, self._user_message_filter),
             chat_types=[tg_constants.ChatType.private],
             content_types=list(tg_constants.MediaContentType),
             priority=-100,  # lower priority to process the rest of the handlers first
-        )
-        async def user_to_bot(message: tg.Message):
-            async def message_forwarder() -> tuple[int, tg.Message]:
-                if self.config.full_user_anonymization:
-                    copied_message_id = await bot.copy_message(
-                        chat_id=self.admin_chat_id,
-                        from_chat_id=message.chat.id,
-                        message_id=message.id,
-                    )
-                    return copied_message_id.message_id, message
-                else:
-                    forwarded_message = await bot.forward_message(
-                        self.admin_chat_id, from_chat_id=message.chat.id, message_id=message.id
-                    )
-                    return forwarded_message.id, forwarded_message
-
-            async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> tg.Message:
-                return await bot.reply_to(message, text, reply_markup=reply_markup)
-
-            await self._handle_user_message(
-                bot=bot,
-                user=message.from_user,
-                message_forwarder=message_forwarder,
-                send_user_id_hash=self.config.full_user_anonymization,
-                user_replier=user_replier,
-            )
+        )(functools.partial(self.handle_user_message, reply_to_user=False))
 
         await self.setup_admin_chat_handlers(bot)
         for integration in self.integrations:
             await integration.setup(bot)
+
+        self.admin_chat = await bot.get_chat(self.admin_chat_id)
 
     async def aux_endpoints(self) -> list[AuxBotEndpoint]:
         return sum(await i.aux_endpoints() for i in self.integrations) or []

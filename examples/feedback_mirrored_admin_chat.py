@@ -38,7 +38,7 @@ async def create_feedback_bot(
                 hashtag_message_rarer_than=times.FIVE_MINUTES,
                 unanswered_hashtag="unanswered",
                 confirm_forwarded_to_admin_rarer_than=times.FIVE_MINUTES,
-                full_user_anonymization=False,
+                full_user_anonymization=True,
             ),
             anti_spam=DisabledAntiSpam(),
             service_messages=ServiceMessages(

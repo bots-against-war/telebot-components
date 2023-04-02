@@ -21,16 +21,21 @@ from tests.utils import assert_list_of_required_subdicts
 class MockFeedbackHandlerIntegration(FeedbackHandlerIntegration):
     def __init__(self, name: str) -> None:
         self._name = name
-        self.handled_messages: list[tuple[tg.Message, int]] = []
+        self.handled_messages: list[tuple[tg.Message, Optional[tg.Message]]] = []
         self.handled_user_message_replied_events: list[UserMessageRepliedEvent] = []
 
     def name(self) -> str:
         return self._name
 
     async def handle_user_message(
-        self, message: tg.Message, admin_chat_message_id: int, category: Optional[Category], bot: AsyncTeleBot
+        self,
+        admin_chat_message: tg.Message,
+        user: tg.User,
+        user_message: Optional[tg.Message],
+        category: Optional[Category],
+        bot: AsyncTeleBot,
     ) -> None:
-        self.handled_messages.append((message, admin_chat_message_id))
+        self.handled_messages.append((admin_chat_message, user_message))
 
     async def handle_user_message_replied_elsewhere(self, event: UserMessageRepliedEvent) -> None:
         self.handled_user_message_replied_events.append(event)

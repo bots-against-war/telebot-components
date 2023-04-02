@@ -121,7 +121,6 @@ class TrelloIntegration(FeedbackHandlerIntegration):
         self,
         redis: RedisInterface,
         bot_prefix: str,
-        admin_chat_id: int,
         credentials: TrelloIntegrationCredentials,
         reply_with_card_comments: bool,
         unanswered_label: bool = True,
@@ -136,7 +135,6 @@ class TrelloIntegration(FeedbackHandlerIntegration):
         self._bot: Optional[AsyncTeleBot] = None
         self.redis = redis
         self.bot_prefix = bot_prefix
-        self.admin_chat_id = admin_chat_id
         self.credentials = credentials
         self.unanswered_label = unanswered_label
         self.reply_with_card_comments = reply_with_card_comments
@@ -554,8 +552,9 @@ class TrelloIntegration(FeedbackHandlerIntegration):
 
     async def handle_user_message(
         self,
-        message: tg.Message,
-        admin_chat_message_id: int,
+        admin_chat_message: tg.Message,
+        user: tg.User,
+        user_message: Optional[tg.Message],
         category: Optional[Category],
         bot: AsyncTeleBot,
     ) -> None:
@@ -574,16 +573,16 @@ class TrelloIntegration(FeedbackHandlerIntegration):
 
         loop = asyncio.get_running_loop()
 
-        card_content = await self._card_content_from_message(message, message.from_user.id, include_attachments=True)
+        card_content = await self._card_content_from_message(admin_chat_message, user.id, include_attachments=True)
         self.logger.debug(f"Card content: {card_content}")
-        if self.admin_chat_backlink and str(self.admin_chat_id).startswith("-100"):
+        if self.admin_chat_backlink and str(admin_chat_message.chat.id).startswith("-100"):
             card_content.description = self._add_admin_reply_link(
                 card_content.description,
-                reply_link=telegram_message_url(self.admin_chat_id, admin_chat_message_id),
+                reply_link=telegram_message_url(admin_chat_message.chat.id, admin_chat_message.id),
             )
         card_content.description = "👤: " + card_content.description
 
-        existing_trello_card_data = await self.trello_card_data_for_user.load(message.from_user.id)
+        existing_trello_card_data = await self.trello_card_data_for_user.load(user.id)
 
         trello_card: Optional[trello.Card] = None
         if existing_trello_card_data is not None and existing_trello_card_data["category_name"] == category.name:
@@ -591,7 +590,7 @@ class TrelloIntegration(FeedbackHandlerIntegration):
                 trello_card = await self._append_card_content(
                     card_id=existing_trello_card_data["id"],
                     content=card_content,
-                    user_id=message.from_user.id,
+                    user_id=user.id,
                 )
             except Exception:
                 self.logger.exception(f"Unexpected error appending card content, will try creating a new one")
@@ -617,7 +616,7 @@ class TrelloIntegration(FeedbackHandlerIntegration):
 
             # storing the newly created card as the "active" card for the user
             await self.trello_card_data_for_user.save(
-                message.from_user.id,
+                user.id,
                 TrelloCardData(id=trello_card.id, category_name=category.name),
             )
 
@@ -625,8 +624,8 @@ class TrelloIntegration(FeedbackHandlerIntegration):
         await self.origin_message_data_for_trello_card_id.save(
             trello_card.id,
             OriginMessageData(
-                forwarded_message_id=admin_chat_message_id,
-                origin_chat_id=message.from_user.id,
+                forwarded_message_id=admin_chat_message.id,
+                origin_chat_id=user.id,
             ),
         )
         if card_content.attachment is not None and card_content.attachment_content is not None:

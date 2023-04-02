@@ -39,7 +39,6 @@ async def create_trello_integrated_feedback_bot(
     trello_integration = TrelloIntegration(
         redis=redis,
         bot_prefix=bot_prefix,
-        admin_chat_id=admin_chat_id,
         reply_with_card_comments=reply_with_card_comments,
         credentials=TrelloIntegrationCredentials(
             user_api_key=user_api_key,
