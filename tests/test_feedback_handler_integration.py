@@ -123,9 +123,12 @@ async def test_feedback_handler_integration_basic(redis: RedisInterface) -> None
     await _send_message_to_bot(in_admin_chat=False, text="Hello this is user please respond")
     for integration in integrations:
         assert len(integration.handled_messages) == 1
-        message, admin_message_id = integration.handled_messages[0]
-        assert admin_message_id == 4
-        assert message.text == "Hello this is user please respond"
+        admin_chat_message, user_message = integration.handled_messages[0]
+        assert admin_chat_message.id == 4
+        assert admin_chat_message.text == "Hello this is user please respond"
+        assert user_message is not None
+        assert user_message.from_user.first_name == "User"
+        assert user_message.from_user.id == USER_ID
 
     user_message_replied_event = UserMessageRepliedFromIntegrationEvent(
         bot=bot,
