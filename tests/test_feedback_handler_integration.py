@@ -205,13 +205,6 @@ async def test_aux_admin_chat_integration(redis: RedisInterface) -> None:
         )
 
     await main_feedback_handler.setup(bot)
-    assert len(bot.method_calls) == 1
-    assert len(bot.method_calls["get_chat"]) == 3
-    assert [mc.full_kwargs for mc in bot.method_calls["get_chat"]] == [
-        {"chat_id": ADMIN_CHAT_ID},
-        *[{"chat_id": aux_admin_chat_id} for aux_admin_chat_id in AUX_ADMIN_CHAT_IDS],
-    ]
-    bot.method_calls.clear()
     for integration in main_feedback_handler.integrations:
         assert integration.message_replied_callback is not None
 

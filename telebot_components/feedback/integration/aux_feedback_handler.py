@@ -132,7 +132,7 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
                     admin_chat_message.id, copied_message.message_id
                 )
                 fake_admin_chat_message = copy.deepcopy(admin_chat_message)
-                fake_admin_chat_message.chat = self.feedback_handler.admin_chat
+                fake_admin_chat_message.chat = await self.feedback_handler.admin_chat()
                 fake_admin_chat_message.id = copied_message.message_id
                 return MessageForwarderResult(admin_chat_msg=fake_admin_chat_message, user_msg=None)
 
@@ -174,4 +174,4 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
 
     async def setup(self, bot: AsyncTeleBot) -> None:
         await self.feedback_handler.setup_admin_chat_handlers(bot)
-        await self.feedback_handler.load_admin_chat(bot)
+        self.feedback_handler.set_bot(bot)

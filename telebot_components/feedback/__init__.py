@@ -200,6 +200,7 @@ class FeedbackHandler:
         self.config = config
 
         self._admin_chat: Optional[tg.Chat] = None
+        self._bot: Optional[AsyncTeleBot] = None
 
         self.anti_spam = anti_spam
         self.banned_users_store = banned_users_store
@@ -298,11 +299,15 @@ class FeedbackHandler:
         )
 
     @property
-    def admin_chat(self) -> tg.Chat:
-        if self._admin_chat is not None:
-            return self._admin_chat
-        else:
-            raise RuntimeError("Admin chat was not loaded for feedback handler! Call load_admin_chat method on startup")
+    def bot(self) -> AsyncTeleBot:
+        if self._bot is None:
+            raise RuntimeError("Bot was not initialized")
+        return self._bot
+
+    async def admin_chat(self) -> tg.Chat:
+        if self._admin_chat is None:
+            self._admin_chat = await self.bot.get_chat(self.admin_chat_id)
+        return self._admin_chat
 
     def validate_service_messages(self):
         if self.config.force_category_selection and self.service_messages.you_must_select_category is None:
@@ -617,7 +622,7 @@ class FeedbackHandler:
                     message_id=message.id,
                 )
                 fake_admin_chat_message = copy.deepcopy(message)
-                fake_admin_chat_message.chat = self.admin_chat
+                fake_admin_chat_message.chat = await self.admin_chat()
                 fake_admin_chat_message.id = copied_message_id.message_id
                 return MessageForwarderResult(admin_chat_msg=fake_admin_chat_message, user_msg=message)
             else:
@@ -650,12 +655,12 @@ class FeedbackHandler:
             await self.handle_user_message(message, bot=bot, reply_to_user=True)
 
         await self.setup_admin_chat_handlers(bot)
-        await self.load_admin_chat(bot)
+        self.set_bot(bot)
         for integration in self.integrations:
             await integration.setup(bot)
 
-    async def load_admin_chat(self, bot: AsyncTeleBot) -> None:
-        self._admin_chat = await bot.get_chat(self.admin_chat_id)
+    def set_bot(self, bot: AsyncTeleBot) -> None:
+        self._bot = bot
 
     async def aux_endpoints(self) -> list[AuxBotEndpoint]:
         return sum(await i.aux_endpoints() for i in self.integrations) or []
