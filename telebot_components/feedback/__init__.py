@@ -663,7 +663,10 @@ class FeedbackHandler:
         self._bot = bot
 
     async def aux_endpoints(self) -> list[AuxBotEndpoint]:
-        return sum(await i.aux_endpoints() for i in self.integrations) or []
+        endpoints: list[AuxBotEndpoint] = []
+        for integration in self.integrations:
+            endpoints.extend(await integration.aux_endpoints())
+        return endpoints
 
     def background_jobs(
         self,
