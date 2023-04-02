@@ -38,7 +38,7 @@ async def create_feedback_bot(
                 hashtag_message_rarer_than=times.FIVE_MINUTES,
                 unanswered_hashtag="unanswered",
                 confirm_forwarded_to_admin_rarer_than=times.FIVE_MINUTES,
-                full_user_anonymization=True,
+                full_user_anonymization=False,
             ),
             anti_spam=DisabledAntiSpam(),
             service_messages=ServiceMessages(
@@ -64,6 +64,14 @@ async def create_feedback_bot(
     )
 
     await main_feedback_handler.setup(bot)
+
+    @bot.message_handler(commands=["test"])
+    async def test_cmd_handler(message: tg.Message) -> None:
+        await main_feedback_handler.emulate_user_message(
+            bot=bot,
+            user=message.from_user,
+            text="user just entered /test",
+        )
 
     return BotRunner(
         bot_prefix=bot_prefix,
