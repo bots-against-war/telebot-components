@@ -287,7 +287,6 @@ def test_trello_card_title(description: str, user_id: int, expected_card_title: 
     ti = TrelloIntegration(
         redis=None,  # type: ignore
         bot_prefix="testing",
-        admin_chat_id=1,
         credentials=TrelloIntegrationCredentials("", "", "", ""),
         reply_with_card_comments=False,
     )  # type: ignore

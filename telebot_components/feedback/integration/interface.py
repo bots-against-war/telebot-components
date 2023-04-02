@@ -52,16 +52,19 @@ class FeedbackHandlerIntegration(abc.ABC):
     @abc.abstractmethod
     async def handle_user_message(
         self,
-        message: tg.Message,
-        admin_chat_message_id: int,
+        admin_chat_message: tg.Message,
+        user: tg.User,
+        user_message: Optional[tg.Message],
         category: Optional[Category],
         bot: AsyncTeleBot,
     ) -> None:
         """
         The method is invoked on all user messages (including emulated) passing through the feedback handler.
-
-        - `message` object is an original user's message
-        - `admin_chat_message_id` allows backlinking to the main admin chat
+        - `admin_chat_message` is a message as it appears in the main admin chat, allows backlinking and other stuff
+        - `user` is a original message author
+        - `user_message` is a message as it was originally sent by the user; not always available (e.g. emulated messages)
+        - `category` is a user category, if enabled in the main admin chat
+        - `bot` is a bot
         """
         ...
 

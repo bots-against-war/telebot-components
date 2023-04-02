@@ -7,6 +7,7 @@ import aiohttp
 import pytest
 import pytest_mock
 from aioresponses import CallbackResult
+from telebot.test_util import MethodCall
 from yarl import URL
 
 
@@ -93,3 +94,7 @@ def assert_list_of_required_subdicts(actual_dicts: list[dict], required_subdicts
     ), f"actual dicts list has mismatching size: {len(actual_dicts)} != {len(required_subdicts)}: {actual_dicts = }, {required_subdicts = }"
     for actual, required in zip(actual_dicts, required_subdicts):
         assert_required_subdict(actual, required)
+
+
+def extract_full_kwargs(method_calls: list[MethodCall]) -> list[dict[str, Any]]:
+    return [mc.full_kwargs for mc in method_calls]
