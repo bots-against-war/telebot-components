@@ -199,6 +199,8 @@ class FeedbackHandler:
         self.admin_chat_id = admin_chat_id
         self.config = config
 
+        self._admin_chat: Optional[tg.Chat] = None
+
         self.anti_spam = anti_spam
         self.banned_users_store = banned_users_store
         self.language_store = language_store
@@ -294,6 +296,13 @@ class FeedbackHandler:
             loader=str,
             dumper=str,
         )
+
+    @property
+    def admin_chat(self) -> tg.Chat:
+        if self._admin_chat is not None:
+            return self._admin_chat
+        else:
+            raise RuntimeError("Admin chat was not loaded for feedback handler! Call load_admin_chat method on startup")
 
     def validate_service_messages(self):
         if self.config.force_category_selection and self.service_messages.you_must_select_category is None:
@@ -599,7 +608,7 @@ class FeedbackHandler:
             export_to_integrations=export_to_trello,
         )
 
-    async def handle_user_message(self, message: tg.Message, bot: AsyncTeleBot, reply_to_user: bool):
+    async def handle_user_message(self, message: tg.Message, bot: AsyncTeleBot, reply_to_user: bool) -> Optional[int]:
         async def message_forwarder() -> MessageForwarderResult:
             if self.config.full_user_anonymization:
                 copied_message_id = await bot.copy_message(
@@ -621,7 +630,7 @@ class FeedbackHandler:
             if reply_to_user:
                 return await bot.reply_to(message, text, reply_markup=reply_markup)
 
-        await self._handle_user_message(
+        return await self._handle_user_message(
             bot=bot,
             user=message.from_user,
             message_forwarder=message_forwarder,
@@ -630,6 +639,7 @@ class FeedbackHandler:
         )
 
     async def setup(self, bot: AsyncTeleBot) -> None:
+        # user messages handler
         @bot.message_handler(
             func=cast(FilterFunc, self._user_message_filter),
             chat_types=[tg_constants.ChatType.private],
@@ -640,10 +650,12 @@ class FeedbackHandler:
             await self.handle_user_message(message, bot=bot, reply_to_user=True)
 
         await self.setup_admin_chat_handlers(bot)
+        await self.load_admin_chat(bot)
         for integration in self.integrations:
             await integration.setup(bot)
 
-        self.admin_chat = await bot.get_chat(self.admin_chat_id)
+    async def load_admin_chat(self, bot: AsyncTeleBot) -> None:
+        self._admin_chat = await bot.get_chat(self.admin_chat_id)
 
     async def aux_endpoints(self) -> list[AuxBotEndpoint]:
         return sum(await i.aux_endpoints() for i in self.integrations) or []

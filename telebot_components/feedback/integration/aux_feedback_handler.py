@@ -107,9 +107,15 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
         category: Optional[Category],
         bot: AsyncTeleBot,
     ) -> None:
-
         if user_message is not None:
-            await self.feedback_handler.handle_user_message(user_message, bot, reply_to_user=False)
+            aux_admin_message_id = await self.feedback_handler.handle_user_message(
+                user_message,
+                bot,
+                reply_to_user=False,
+            )
+            if aux_admin_message_id:  # if the message was actually sent to the aux admin chat
+                await self.main_by_aux_admin_chat_message_id_store.save(aux_admin_message_id, admin_chat_message.id)
+                await self.aux_by_main_admin_chat_message_id_store.save(admin_chat_message.id, aux_admin_message_id)
         else:
             # if we got no user message (e.g. the message in admin chat is emulated), we just clone the message
             # from the main admin chat to the aux one
@@ -168,3 +174,4 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
 
     async def setup(self, bot: AsyncTeleBot) -> None:
         await self.feedback_handler.setup_admin_chat_handlers(bot)
+        await self.feedback_handler.load_admin_chat(bot)
