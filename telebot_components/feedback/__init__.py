@@ -513,7 +513,7 @@ class FeedbackHandler:
             if category is None and self.category_store is not None:
                 category = await self.category_store.get_user_category(user)
 
-            # integrations has no concept of pre- and post-forwarded messages, so we just patch their texts
+            # integrations have no concept of pre- and post-forwarded messages, so we just patch their texts
             # to the admin chat msg; their attachments and other info is lost, which is fine because we don't
             # use them that often anymore
             if preforwarded_msg is not None:
@@ -630,12 +630,14 @@ class FeedbackHandler:
         )
 
     async def setup(self, bot: AsyncTeleBot) -> None:
-        bot.message_handler(
+        @bot.message_handler(
             func=cast(FilterFunc, self._user_message_filter),
             chat_types=[tg_constants.ChatType.private],
             content_types=list(tg_constants.MediaContentType),
             priority=-100,  # lower priority to process the rest of the handlers first
-        )(functools.partial(self.handle_user_message, reply_to_user=False))
+        )
+        async def handle_user_message(message: tg.Message) -> None:
+            await self.handle_user_message(message, bot=bot, reply_to_user=True)
 
         await self.setup_admin_chat_handlers(bot)
         for integration in self.integrations:
