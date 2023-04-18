@@ -67,3 +67,7 @@ files = '.'
 
 [tool.flake8]
 max-line-length = 120
+extend-ignore = [
+    "F841",  # local variable 'xxx' is assigned to but never used
+    "E203",  # whitespace before ':' (black formatting compatibility)
+]

@@ -36,7 +36,7 @@ class CalendarCallbackPayload:
                 )
         if self.action is CalendarAction.UPDATE:
             if self.year is None or self.month is None:
-                raise RuntimeError(f"Year and month must be specified for UPDATE action")
+                raise RuntimeError("Year and month must be specified for UPDATE action")
 
     def dump(self) -> str:
         parts: list[str] = [self.action.value]

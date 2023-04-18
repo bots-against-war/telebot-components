@@ -23,7 +23,7 @@ async def redis() -> AsyncGenerator[RedisInterface, None]:
             else:
                 break  # from outer cycle - found empty database
         else:
-            raise RuntimeError(f"Didn't found an empy Redis DB for testing")
+            raise RuntimeError("Didn't found an empy Redis DB for testing")
         yield redis
         await redis.flushdb(asynchronous=False)
         try:

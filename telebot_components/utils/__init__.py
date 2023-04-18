@@ -63,7 +63,7 @@ def trim_with_ellipsis(message: str, target_len: int) -> str:
 
 
 def join_paragraphs(lines: list[str]) -> str:
-    return "\n\n".join([l for l in lines if l])
+    return "\n\n".join([line for line in lines if line])
 
 
 yaml = YAML(typ="unsafe")

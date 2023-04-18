@@ -83,10 +83,10 @@ class ForumTopicStore:
 
     async def setup(self, bot: AsyncTeleBot, retry_interval_sec: Optional[float]) -> None:
         if self.is_initialized:
-            self.logger.warning(f"setup method called on an already initialized store")
+            self.logger.warning("setup method called on an already initialized store")
             return
         if self.is_setup_in_progress:
-            self.logger.warning(f"setup method called, but another one is already in progress")
+            self.logger.warning("setup method called, but another one is already in progress")
             return
         self.is_setup_in_progress = True
         self.logger.info(f"Setting up forum topic store on admin chat id: {self.admin_chat_id}")
@@ -145,7 +145,7 @@ class ForumTopicStore:
                 self.logger.info("All topics are created")
                 break
             except Exception as exc:
-                self.logger.exception(f"Unexpected error creating forum topics")
+                self.logger.exception("Unexpected error creating forum topics")
                 if retry_interval_sec is None:
                     self.logger.info("Aborting")
                     return

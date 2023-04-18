@@ -1,15 +1,12 @@
 import json
 import random
-import re
-from typing import Any, Optional, Type
+from typing import Optional
 from uuid import uuid4
 
-import aiohttp
 import pytest
-from aioresponses import CallbackResult, aioresponses
+from aioresponses import aioresponses
 from telebot import AsyncTeleBot
 from telebot import types as tg
-from yarl import URL
 
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.language import (

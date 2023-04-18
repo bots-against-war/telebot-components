@@ -96,7 +96,8 @@ class TrelloIntegrationCredentials:
         if self.board_id is not None:
             if not (self.organization_name is None and self.board_name is None):
                 raise ValueError(
-                    "Legacy Trello board lookup config (organization and board name) can't be used together with board id"
+                    "Legacy Trello board lookup config (organization and board name) "
+                    "can't be used together with board id"
                 )
         else:
             if self.organization_name is None or self.board_name is None:
@@ -206,8 +207,8 @@ class TrelloIntegration(FeedbackHandlerIntegration):
         trello_help = "🗂️ <i>Интеграция с Trello</i>\n"
         trello_help += (
             f'· Помимо чата сообщения выгружаются на {html_link(self.board.url, "доску Trello")} '
-            + f"в списки: "
-            + ", ".join(f"<b>{l.name}</b>" for l in self.lists_by_category_name.values())
+            + "в списки: "
+            + ", ".join(f"<b>{lst.name}</b>" for lst in self.lists_by_category_name.values())
             + "\n"
             "· В карточки переносятся присланные в бот фотографии и документы. Для каждого сообщения доступна "
             + "обратная ссылка на этот чат."
@@ -263,7 +264,7 @@ class TrelloIntegration(FeedbackHandlerIntegration):
             self.board = matching_boards[0]
 
         lists_on_board = await loop.run_in_executor(self.thread_pool, self.board.all_lists)
-        lists_by_name: dict[str, trello.List] = {l.name: l for l in lists_on_board}
+        lists_by_name: dict[str, trello.List] = {lst.name: lst for lst in lists_on_board}
         self.lists_by_category_name: dict[str, trello.List] = dict()
 
         for category in self.categories:
@@ -593,7 +594,7 @@ class TrelloIntegration(FeedbackHandlerIntegration):
                     user_id=user.id,
                 )
             except Exception:
-                self.logger.exception(f"Unexpected error appending card content, will try creating a new one")
+                self.logger.exception("Unexpected error appending card content, will try creating a new one")
                 new_card_reason = "error occured appending to existing card"
         elif existing_trello_card_data is None:
             new_card_reason = "no saved card data found for the user"
@@ -748,7 +749,7 @@ class TrelloIntegration(FeedbackHandlerIntegration):
 def safe_markdownify(html_text: str, fallback_text: str) -> str:
     try:
         md: str = markdownify(html_text)
-        md = md.replace("#", "\#")
+        md = md.replace("#", r"\#")
         return md
     except Exception:
         return fallback_text + "\n⚠️ Не удалось отобразить часть текста, оригинал сообщения по ссылке."

@@ -62,7 +62,7 @@ class FeedbackHandlerIntegration(abc.ABC):
         The method is invoked on all user messages (including emulated) passing through the feedback handler.
         - `admin_chat_message` is a message as it appears in the main admin chat, allows backlinking and other stuff
         - `user` is a original message author
-        - `user_message` is a message as it was originally sent by the user; not always available (e.g. emulated messages)
+        - `user_message` is a message as it was sent by the user; not always available (e.g. emulated messages)
         - `category` is a user category, if enabled in the main admin chat
         - `bot` is a bot
         """

@@ -15,7 +15,6 @@ from telebot_components.feedback.integration.interface import (
     UserMessageRepliedFromIntegrationEvent,
 )
 from telebot_components.feedback.types import UserMessageRepliedEvent
-from telebot_components.redis_utils.emulation import RedisEmulation
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.category import Category
 from tests.utils import assert_list_of_required_subdicts, extract_full_kwargs
@@ -304,7 +303,10 @@ async def test_aux_admin_chat_integration(redis: RedisInterface) -> None:
                 {
                     "chat_id": aux_admin_chat_id,
                     "reply_to_message_id": 2,
-                    "text": '💬 <b>Admin</b> via <a href="https://t.me/c/111000111000/3">main admin chat</a>\n\nhello from the main admin chat',
+                    "text": (
+                        '💬 <b>Admin</b> via <a href="https://t.me/c/111000111000/3">main admin chat</a>\n\n'
+                        "hello from the main admin chat"
+                    ),
                     "parse_mode": "HTML",
                 }
                 for aux_admin_chat_id in AUX_ADMIN_CHAT_IDS
@@ -330,13 +332,19 @@ async def test_aux_admin_chat_integration(redis: RedisInterface) -> None:
             {
                 "chat_id": 111000111000,
                 "reply_to_message_id": 2,
-                "text": '💬 <b>Admin</b> via <a href="https://t.me/c/1312/4">aux-admin-chat-0</a>\n\nhello from aux admin chat 1',
+                "text": (
+                    '💬 <b>Admin</b> via <a href="https://t.me/c/1312/4">aux-admin-chat-0</a>\n\n'
+                    "hello from aux admin chat 1"
+                ),
                 "parse_mode": "HTML",
             },
             {
                 "chat_id": 161,
                 "reply_to_message_id": 2,
-                "text": '💬 <b>Admin</b> via <a href="https://t.me/c/1312/4">aux-admin-chat-0</a>\n\nhello from aux admin chat 1',
+                "text": (
+                    '💬 <b>Admin</b> via <a href="https://t.me/c/1312/4">aux-admin-chat-0</a>\n\n'
+                    "hello from aux admin chat 1"
+                ),
                 "parse_mode": "HTML",
             },
         ],

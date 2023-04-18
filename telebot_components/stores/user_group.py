@@ -1,6 +1,6 @@
 import functools
 import logging
-from typing import Any, Awaitable, Callable, Coroutine, Optional
+from typing import Awaitable, Callable, Optional, TypeVar
 
 from telebot import AsyncTeleBot, invoke_handler
 from telebot import types as tg
@@ -12,7 +12,11 @@ from telebot_components.stores.generic import SetStore
 logger = logging.getLogger(__name__)
 
 
-unity = lambda x: x
+ArgT = TypeVar("ArgT")
+
+
+def unity(x: ArgT) -> ArgT:
+    return x
 
 
 async def telegram_user_id_identity(user: tg.User) -> str:

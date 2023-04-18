@@ -32,7 +32,7 @@ async def create_trello_integrated_feedback_bot(
     unanswered_label_name: str,
     unanswered_label_color: TrelloLabelColor,
 ) -> BotRunner:
-    bot_prefix = f"trello-integration-bot"
+    bot_prefix = "trello-integration-bot"
 
     bot = AsyncTeleBot(token)
 

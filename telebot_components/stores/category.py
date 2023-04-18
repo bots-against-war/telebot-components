@@ -1,5 +1,4 @@
 import logging
-import re
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Awaitable, Callable, Optional
@@ -141,7 +140,7 @@ class CategoryStore:
                 return
             category_saved = await self.save_user_category(user, category)
             if not category_saved:
-                await callback_query_processing_error(bot, call, f"unable to save category", self.logger)
+                await callback_query_processing_error(bot, call, "unable to save category", self.logger)
                 return
             try:
                 await bot.answer_callback_query(call.id)

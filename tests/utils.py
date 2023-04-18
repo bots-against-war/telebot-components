@@ -33,7 +33,7 @@ class TimeSupplier:
             if not future.done():
                 future.set_result(None)
 
-        task = asyncio.create_task(set_future_result())
+        _ = asyncio.create_task(set_future_result())
         try:
             await future  # using dummy await here to delegate control to other coroutines
         except Exception:
@@ -89,9 +89,10 @@ def assert_required_subdict(actual: dict, required: dict):
 
 
 def assert_list_of_required_subdicts(actual_dicts: list[dict], required_subdicts: list[dict]):
-    assert len(actual_dicts) == len(
-        required_subdicts
-    ), f"actual dicts list has mismatching size: {len(actual_dicts)} != {len(required_subdicts)}: {actual_dicts = }, {required_subdicts = }"
+    assert len(actual_dicts) == len(required_subdicts), (
+        f"actual dicts list has mismatching size: {len(actual_dicts)} != {len(required_subdicts)}: "
+        + f"{actual_dicts = }, {required_subdicts = }"
+    )
     for actual, required in zip(actual_dicts, required_subdicts):
         assert_required_subdict(actual, required)
 

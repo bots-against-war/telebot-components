@@ -7,7 +7,6 @@ from telebot.types import constants as tg_constants
 
 from telebot_components.broadcast import BroadcastHandler, QueuedBroadcast
 from telebot_components.broadcast.message_senders import MessageCopySender
-from telebot_components.constants import times
 from telebot_components.redis_utils.interface import RedisInterface
 
 

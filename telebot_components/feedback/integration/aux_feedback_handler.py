@@ -1,5 +1,4 @@
 import copy
-import dataclasses
 import logging
 from typing import Optional
 
@@ -9,7 +8,6 @@ from telebot import types as tg
 from telebot_components.feedback import FeedbackHandler, MessageForwarderResult
 from telebot_components.feedback.integration.interface import (
     FeedbackHandlerIntegration,
-    FeedbackIntegrationBackgroundContext,
     UserMessageRepliedFromIntegrationEvent,
 )
 from telebot_components.feedback.types import UserMessageRepliedEvent
@@ -50,7 +48,7 @@ class _MainFeedbackHandlerIntegration(FeedbackHandlerIntegration):
             aux_admin_chat_message_id
         )
         if main_admin_chat_message_id is None:
-            self.logger.error(f"Message in aux admin chat has no saved main admin chat message id")
+            self.logger.error("Message in aux admin chat has no saved main admin chat message id")
             return
         await self.aux.message_replied_callback(
             UserMessageRepliedFromIntegrationEvent(
@@ -154,7 +152,7 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
             event.main_admin_chat_message_id
         )
         if aux_admin_chat_message_id is None:
-            self.logger.error(f"Message in the main admin chat has no saved aux admin chat message id")
+            self.logger.error("Message in the main admin chat has no saved aux admin chat message id")
             return
         # from aux feedback handler's POV, aux admin chat msg id is main
         event.main_admin_chat_message_id = aux_admin_chat_message_id

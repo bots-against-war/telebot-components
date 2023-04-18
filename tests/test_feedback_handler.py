@@ -3,7 +3,6 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
-import pytest
 from telebot import types as tg
 from telebot.test_util import MockedAsyncTeleBot
 

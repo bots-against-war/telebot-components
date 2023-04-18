@@ -35,7 +35,7 @@ from telebot_components.feedback.types import UserMessageRepliedEvent
 from telebot_components.form.field import TelegramAttachment
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
-from telebot_components.stores.category import Category, CategoryStore
+from telebot_components.stores.category import CategoryStore
 from telebot_components.stores.forum_topics import CategoryForumTopicStore
 from telebot_components.stores.generic import (
     KeyFlagStore,
@@ -344,8 +344,8 @@ class FeedbackHandler:
         copies_or_forwards = "пересылает" if not self.config.full_user_anonymization else "копирует"
         paragraphs.append(
             "💬 <i>Основное</i>\n"
-            + f"· В этот чат бот {copies_or_forwards} все сообщения (кроме специальных случаев вроде /команд), которые ему "
-            + "пишут в личку.\n"
+            + f"· В этот чат бот {copies_or_forwards} все сообщения (кроме специальных случаев вроде /команд), "
+            + "которые ему пишут в личку.\n"
             + (
                 (
                     "· Перед скопированным сообщением бот указывает анонимизированный идентификатор пользователь_ницы, "
@@ -377,15 +377,16 @@ class FeedbackHandler:
         security_help = (
             "🛡️ <i>Защита и безопасность</i>\n"
             + "· Бот никак не выдаёт, кто отвечает пользователь_нице из этого чата. Насколько возможно судить, "
-            + "никакого способа взломать бота нет. Однако всё, что вы отвечаете через бота, сразу пересылается человеку "
-            + "на другом конце, и отменить отправку можно лишь в течении первых 5 минут, поэтому будьте внимательны!"
+            + "никакого способа взломать бота нет. Однако всё, что вы отвечаете через бота, "
+            + "сразу пересылается человеку на другом конце, и отменить отправку можно лишь в течении первых "
+            + "5 минут, поэтому будьте внимательны!"
         )
         if isinstance(self.anti_spam, AntiSpam):
             security_help += (
                 "\n"
                 + "· Бот автоматически ограничивает число сообщений, присылаемых ему в единицу времени. "
-                + f"Конфигурация на данный момент: не больше {self.anti_spam.config.throttle_after_messages} сообщений за "
-                + f"{self.anti_spam.config.throttle_duration}. При необходимости её можно изменять."
+                + f"Конфигурация на данный момент: не больше {self.anti_spam.config.throttle_after_messages} "
+                + f"сообщений за {self.anti_spam.config.throttle_duration}. При необходимости её можно изменять."
             )
         if self.banned_users_store is not None:
             security_help += (
@@ -406,8 +407,8 @@ class FeedbackHandler:
                 else "вам в личку (для этого вы должны хотя бы раз что-то ему написать). Можно настроить бота так, "
                 + "чтобы чтобы бот пересылал историю сообщений не в личку, а прямо в этот чат."
             )
-            + f"\n· По умолчанию бот пересылает первые {self.config.message_log_page_size} сообщений, дальше можно листать "
-            + "по страницам: «/log 2», «/log 3», и так далее"
+            + f"\n· По умолчанию бот пересылает первые {self.config.message_log_page_size} сообщений, "
+            + "дальше можно листать по страницам: «/log 2», «/log 3», и так далее"
         )
 
         integration_help_messages = [integration.help_message_section() for integration in self.integrations]
@@ -759,13 +760,13 @@ class FeedbackHandler:
 
         if notify_integrations:
             # do not notify integration about its own replies
-            integrations_to_notify = [i for i in self.integrations if not i is event.integration]
+            integrations_to_notify = [i for i in self.integrations if i is not event.integration]
             self.logger.debug(f"Notifying integrations: {[i.name() for i in integrations_to_notify]}")
             await asyncio.gather(
                 *[integration.handle_user_message_replied_elsewhere(event) for integration in integrations_to_notify]
             )
         else:
-            self.logger.debug(f"Will not notify integrations")
+            self.logger.debug("Will not notify integrations")
 
     async def setup_admin_chat_handlers(
         self,
@@ -849,7 +850,7 @@ class FeedbackHandler:
                                 page -= 1  # one based to zero based
                         except Exception:
                             await bot.reply_to(
-                                message, f"Bad command, expected format is '/log' or '/log <page number>'"
+                                message, "Bad command, expected format is '/log' or '/log <page number>'"
                             )
                             return
                         log_message_ids = await self.message_log_store.all(origin_chat_id)
@@ -860,8 +861,9 @@ class FeedbackHandler:
                         end_idx = self.config.message_log_page_size * (page + 1)
                         log_message_ids_page = log_message_ids[start_idx:end_idx]
                         self.logger.info(
-                            f"Forwarding log page {page} / {total_pages} (from {message.text_content!r}) received for origin chat id "
-                            + f"{origin_chat_id}, total messages: {len(log_message_ids)}, on current page: {len(log_message_ids_page)}"
+                            f"Forwarding log page {page} / {total_pages} (from {message.text_content!r}) "
+                            + f"received for origin chat id {origin_chat_id}, total messages: {len(log_message_ids)}, "
+                            + f"on current page: {len(log_message_ids_page)}"
                         )
                         if not log_message_ids_page:
                             if page == 0:
@@ -869,7 +871,8 @@ class FeedbackHandler:
                             else:
                                 await bot.reply_to(
                                     message,
-                                    f"Only {len(log_message_ids)} messages are available in log, not enough messages for page {page}",
+                                    f"Only {len(log_message_ids)} messages are available in log, "
+                                    + f"not enough messages for page {page}",
                                 )
                             return
                         log_destination_chat_id = (
@@ -963,7 +966,7 @@ class FeedbackHandler:
                     )
             except Exception as e:
                 await bot.reply_to(message, f"Something went wrong! {e}")
-                self.logger.exception(f"Unexpected error while replying to forwarded msg")
+                self.logger.exception("Unexpected error while replying to forwarded msg")
 
 
 def _join_hashtags(hashtags: list[str]) -> str:

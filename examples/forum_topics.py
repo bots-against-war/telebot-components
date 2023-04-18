@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from telebot import AsyncTeleBot
 from telebot import types as tg

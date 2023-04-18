@@ -272,7 +272,8 @@ def test_html_link(href: str, text: str, expected: str):
             "🪝☄🌀🎄: intricate markdown content",
         ),
         pytest.param(
-            "                           some poorly\n\n\n\n\n\nformatted\n\n\t\t\t\ttext with\n * bullet\n * points\n * list",
+            "                           some poorly\n\n\n\n\n\nformatted\n\n\t\t\t\t"
+            "text with\n * bullet\n * points\n * list",
             69,
             "🕟🪪🍚🙅: some poorly formatted text with bullet points...",
         ),

@@ -192,7 +192,7 @@ class BroadcastHandler:
                     if on_broadcast_start is not None:
                         try:
                             await on_broadcast_start(qb)
-                        except:
+                        except Exception:
                             logger.exception("Unexpected error in on_broadcast_start callback, ignoring")
                     self.is_broadcasting = True
                 else:
@@ -210,7 +210,8 @@ class BroadcastHandler:
                 min([qb.start_time for qb in queued_broadcasts]) if queued_broadcasts else time.time() + 300
             )
             logger.info(
-                f"The next broadcast queue processing scheduled in {self.next_broadcast_queue_processing_time - time.time():.2f} sec"
+                "The next broadcast queue processing scheduled "
+                + f"in {self.next_broadcast_queue_processing_time - time.time():.2f} sec"
             )
 
     @prevent_shutdown_on_broadcasting

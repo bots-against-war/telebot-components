@@ -186,7 +186,6 @@ if __name__ == "__main__":
     import os
 
     from dotenv import load_dotenv
-    from redis.asyncio import Redis  # type: ignore
 
     from telebot_components.redis_utils.emulation import RedisEmulation
 
@@ -194,7 +193,6 @@ if __name__ == "__main__":
 
     async def main() -> None:
         redis = RedisEmulation()
-        # redis = Redis.from_url(os.environ["REDIS_URL"])
         bot_runner = await create_feedback_bot(
             redis=redis,
             token=os.environ["TOKEN"],
