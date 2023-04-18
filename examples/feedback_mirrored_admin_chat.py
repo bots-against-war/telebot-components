@@ -28,9 +28,9 @@ async def create_feedback_bot(
 
     def feedback_handler_factory(name: str, admin_chat_id: int) -> FeedbackHandler:
         return FeedbackHandler(
-            admin_chat_id,
-            redis,
-            bot_prefix,
+            admin_chat_id=admin_chat_id,
+            redis=redis,
+            bot_prefix=bot_prefix,
             config=FeedbackConfig(
                 message_log_to_admin_chat=True,
                 force_category_selection=False,

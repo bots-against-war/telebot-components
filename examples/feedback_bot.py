@@ -114,9 +114,9 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
         trello_integration = None
 
     feedback_handler = FeedbackHandler(
-        admin_chat_id,
-        redis,
-        bot_prefix,
+        admin_chat_id=admin_chat_id,
+        redis=redis,
+        bot_prefix=bot_prefix,
         config=FeedbackConfig(
             message_log_to_admin_chat=True,
             force_category_selection=True,

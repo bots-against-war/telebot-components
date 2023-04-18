@@ -27,6 +27,7 @@ Pillow = "^9.2.0"
 markdown = "^3.4.1"
 beautifulsoup4 = "^4.11.1"
 tenacity = "^8.1.0"
+async-lru = "^2.0.2"
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.1.2"
