@@ -47,6 +47,10 @@ class ForumTopicSpec:
     def id(self) -> str:
         return self._id or self.name
 
+    @classmethod
+    def from_category(cls, category: Category) -> "ForumTopicSpec":
+        return ForumTopicSpec(name=category.name)
+
 
 class ForumTopicStore:
     def __init__(
@@ -186,6 +190,9 @@ class CategoryForumTopicStore:
                     "category -> forum topic mapping must include only topics added to the store, "
                     + f"but {mapped_topic_spec} is not"
                 )
+
+    def __hash__(self) -> int:
+        return id(self)  # hash is required for alru cache below
 
     @alru_cache(maxsize=1_000)
     async def get_message_thread_id(self, category: Optional[Category]) -> Optional[int]:

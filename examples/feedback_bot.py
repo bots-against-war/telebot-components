@@ -149,7 +149,7 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
                 Language.RU: "Пожалуйста, не присылайте в бот больше {} сообщений за {}.",
                 Language.EN: "Please send no more than {} messages in {}.",
             },
-            copied_to_user_ok="Скопировано в чат с пользовател_ьницей ✨",
+            copied_to_user_ok="Скопировано в чат с пользователь_ницей ✨",
             can_not_delete_message="Невозможно удалить сообщение.",
             deleted_message_ok="Сообщение успешно удалено!",
         ),

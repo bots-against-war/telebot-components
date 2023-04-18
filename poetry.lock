@@ -663,7 +663,7 @@ python-versions = ">=3.6"
 
 [[package]]
 name = "telebot-against-war"
-version = "0.6.0"
+version = "0.6.2"
 description = "Async-first fork of pyTelegramBotApi"
 category = "main"
 optional = false
@@ -1382,8 +1382,8 @@ soupsieve = [
     {file = "soupsieve-2.3.2.post1.tar.gz", hash = "sha256:fc53893b3da2c33de295667a0e19f078c14bf86544af307354de5fcf12a3f30d"},
 ]
 telebot-against-war = [
-    {file = "telebot_against_war-0.6.0-py3-none-any.whl", hash = "sha256:d4df635b50a203fad65676afaa7fa08180d862f1be8253b78980dc371a5b5084"},
-    {file = "telebot_against_war-0.6.0.tar.gz", hash = "sha256:8053036398f448b9aa948c6e303c093853bf10b9828573eff1359d277472a0cf"},
+    {file = "telebot_against_war-0.6.2-py3-none-any.whl", hash = "sha256:03c0f2b28cfaffc5f3a1263ef9380a833c63ae5acc361c6ad4db535c781c5612"},
+    {file = "telebot_against_war-0.6.2.tar.gz", hash = "sha256:7ed6a76e4e92af2cf7616c63426fc751c8e14ff10f07e1013cdc5158a431fd47"},
 ]
 tenacity = [
     {file = "tenacity-8.1.0-py3-none-any.whl", hash = "sha256:35525cd47f82830069f0d6b73f7eb83bc5b73ee2fff0437952cedf98b27653ac"},

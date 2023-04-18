@@ -1,6 +1,6 @@
 import functools
 import logging
-from typing import Awaitable, Callable, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Optional, TypeVar
 
 from telebot import AsyncTeleBot, invoke_handler
 from telebot import types as tg
@@ -72,7 +72,7 @@ class UserGroupStore:
     def membership_required(self, bot: AsyncTeleBot, membership_required_reply_text: Optional[str] = None):
         def decorator(handler_func: HandlerFunction[tg.Message]) -> HandlerFunction[tg.Message]:
             @functools.wraps(handler_func)
-            async def wrapped(*args) -> None:
+            async def wrapped(*args) -> Any:
                 try:
                     message: tg.Message = args[0]
                     if await self.is_member(message.from_user):
