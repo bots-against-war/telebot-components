@@ -56,13 +56,16 @@ class ForumTopicStore:
         admin_chat_id: int,
         topics: list[ForumTopicSpec],
         error_messages: ForumTopicStoreErrorMessages,
+        initialization_retry_interval_sec: Optional[float] = None,
     ) -> None:
         self.topics = topics
         self.topic_by_id = {t.id: t for t in topics}
         self.admin_chat_id = admin_chat_id
         self.error_messages = error_messages
-        self.is_setup_in_progress = False
+        self.bot: Optional[AsyncTeleBot] = None
+        self.is_initialization_in_progress = False
         self.is_initialized = False
+        self.initialization_retry_interval_sec = initialization_retry_interval_sec
         self.message_thread_id_by_topic = KeyDictStore[int](
             name="forum-topic-id",  # NOTE: this is a bit of a legacy name
             prefix=bot_prefix,
@@ -81,30 +84,36 @@ class ForumTopicStore:
             return None
         return await self.message_thread_id_by_topic.get_subkey(self.admin_chat_id, topic_id)
 
-    async def setup(self, bot: AsyncTeleBot, retry_interval_sec: Optional[float]) -> None:
+    async def setup(self, bot: AsyncTeleBot) -> None:
+        self.bot = bot
+
+    async def background_job(self) -> None:
+        if self.bot is None:
+            self.logger.error("Unable to initialize: bot has not been set up")
+            return
         if self.is_initialized:
-            self.logger.warning("setup method called on an already initialized store")
+            self.logger.warning("already initialized")
             return
-        if self.is_setup_in_progress:
-            self.logger.warning("setup method called, but another one is already in progress")
+        if self.is_initialization_in_progress:
+            self.logger.warning("another initialization is already in progress")
             return
-        self.is_setup_in_progress = True
+        self.is_initialization_in_progress = True
         self.logger.info(f"Setting up forum topic store on admin chat id: {self.admin_chat_id}")
         while True:
-            admin_chat = await bot.get_chat(self.admin_chat_id)
+            admin_chat = await self.bot.get_chat(self.admin_chat_id)
             if admin_chat.is_forum:
                 self.logger.info("Admin chat is forum, continue initialization")
                 break
             self.logger.info("Failed to setup form topic store, admin chat is not a forum")
-            if retry_interval_sec is None:
+            if self.initialization_retry_interval_sec is None:
                 self.logger.info("Aborting")
                 return
-            await bot.send_message(
+            await self.bot.send_message(
                 chat_id=self.admin_chat_id,
-                text=self.error_messages.admin_chat_is_not_forum_error.format(retry_interval_sec),
+                text=self.error_messages.admin_chat_is_not_forum_error.format(self.initialization_retry_interval_sec),
             )
-            self.logger.info(f"Will try again in {retry_interval_sec} sec")
-            await asyncio.sleep(retry_interval_sec)
+            self.logger.info(f"Will try again in {self.initialization_retry_interval_sec} sec")
+            await asyncio.sleep(self.initialization_retry_interval_sec)
 
         while True:
             try:
@@ -116,7 +125,7 @@ class ForumTopicStore:
                         self.logger.info(
                             f"Found saved message thread id for {topic_spec}, validating and syncing state"
                         )
-                        success = await bot.edit_forum_topic(
+                        success = await self.bot.edit_forum_topic(
                             chat_id=self.admin_chat_id,
                             message_thread_id=existing_message_thread_id,
                             name=topic_spec.name,
@@ -129,7 +138,7 @@ class ForumTopicStore:
                             self.logger.info(f"Forum topic not updated for {topic_spec}, will create new one")
 
                     self.logger.info(f"Creating new forum topic for {topic_spec}")
-                    created_topic = await bot.create_forum_topic(
+                    created_topic = await self.bot.create_forum_topic(
                         chat_id=self.admin_chat_id,
                         name=topic_spec.name,
                         icon_color=(topic_spec.icon_color or default_color).value,
@@ -146,15 +155,17 @@ class ForumTopicStore:
                 break
             except Exception as exc:
                 self.logger.exception("Unexpected error creating forum topics")
-                if retry_interval_sec is None:
+                if self.initialization_retry_interval_sec is None:
                     self.logger.info("Aborting")
                     return
-                await bot.send_message(
+                await self.bot.send_message(
                     self.admin_chat_id,
-                    text=self.error_messages.cant_create_topic.format(topic_spec.name, exc, retry_interval_sec),
+                    text=self.error_messages.cant_create_topic.format(
+                        topic_spec.name, exc, self.initialization_retry_interval_sec
+                    ),
                 )
-                self.logger.info(f"Will retry in {retry_interval_sec} sec")
-                await asyncio.sleep(retry_interval_sec)
+                self.logger.info(f"Will retry in {self.initialization_retry_interval_sec} sec")
+                await asyncio.sleep(self.initialization_retry_interval_sec)
 
         self.is_initialized = True
         self.logger.info("Forum topics store set up")
@@ -183,3 +194,9 @@ class CategoryForumTopicStore:
             return None
         else:
             return await self.forum_topic_store.get_message_thread_id(forum_topic.id)
+
+    async def setup(self, bot: AsyncTeleBot) -> None:
+        await self.forum_topic_store.setup(bot)
+
+    async def background_job(self) -> None:
+        await self.forum_topic_store.background_job()

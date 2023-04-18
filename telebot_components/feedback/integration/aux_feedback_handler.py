@@ -172,5 +172,4 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
         await self.feedback_handler.message_replied_from_integration_callback(event, notify_integrations=False)
 
     async def setup(self, bot: AsyncTeleBot) -> None:
-        await self.feedback_handler.setup_admin_chat_handlers(bot)
-        self.feedback_handler.set_bot(bot)
+        await self.feedback_handler.setup_without_user_message_handler(bot)

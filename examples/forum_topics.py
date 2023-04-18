@@ -14,7 +14,7 @@ from telebot_components.stores.forum_topics import (
 )
 
 
-def create_forum_topics_bot(token: str, redis: RedisInterface, admin_chat_id: int):
+async def create_forum_topics_bot(token: str, redis: RedisInterface, admin_chat_id: int):
     bot_prefix = "example-menu-bot"
     bot = AsyncTeleBot(token)
     logging.basicConfig(level=logging.INFO)
@@ -31,6 +31,7 @@ def create_forum_topics_bot(token: str, redis: RedisInterface, admin_chat_id: in
             "can't setup topics! error during {}: {}; will try again in {} sec",
         ),
     )
+    await forum_topics_store.setup(bot)
 
     @bot.message_handler(commands=["start", "help"])
     async def start_cmd_handler(message: tg.Message):
@@ -61,7 +62,7 @@ def create_forum_topics_bot(token: str, redis: RedisInterface, admin_chat_id: in
     return BotRunner(
         bot_prefix=bot_prefix,
         bot=bot,
-        background_jobs=[forum_topics_store.setup(bot, retry_interval_sec=300)],
+        background_jobs=[forum_topics_store.background_job()],
     )
 
 
@@ -73,10 +74,12 @@ if __name__ == "__main__":
 
     load_dotenv()
 
-    bot_runner = create_forum_topics_bot(
-        token=os.environ["TOKEN"],
-        redis=RedisEmulation(),
-        admin_chat_id=int(os.environ["ADMIN_CHAT_ID"]),
-    )
+    async def main() -> None:
+        bot_runner = await create_forum_topics_bot(
+            token=os.environ["TOKEN"],
+            redis=RedisEmulation(),
+            admin_chat_id=int(os.environ["ADMIN_CHAT_ID"]),
+        )
+        await bot_runner.run_polling()
 
-    asyncio.run(bot_runner.run_polling())
+    asyncio.run(main())

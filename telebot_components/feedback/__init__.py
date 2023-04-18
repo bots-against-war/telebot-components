@@ -679,13 +679,15 @@ class FeedbackHandler:
         async def handle_user_message(message: tg.Message) -> None:
             await self.handle_user_message(message, bot=bot, reply_to_user=True)
 
+        await self.setup_without_user_message_handler(bot)
+
+    async def setup_without_user_message_handler(self, bot: AsyncTeleBot) -> None:
         await self.setup_admin_chat_handlers(bot)
-        self.set_bot(bot)
+        self._bot = bot
         for integration in self.integrations:
             await integration.setup(bot)
-
-    def set_bot(self, bot: AsyncTeleBot) -> None:
-        self._bot = bot
+        if self.forum_topic_store is not None:
+            await self.forum_topic_store.setup(bot)
 
     async def aux_endpoints(self) -> list[AuxBotEndpoint]:
         endpoints: list[AuxBotEndpoint] = []
@@ -698,10 +700,14 @@ class FeedbackHandler:
         base_url: Optional[str],
         server_listening_future: Optional[asyncio.Future[None]],
     ) -> list[Coroutine[None, None, None]]:
-        return [
+        integration_backgroung_jobs = [
             i.background_job(FeedbackIntegrationBackgroundContext(base_url, server_listening_future))
             for i in self.integrations
         ]
+        self_background_jobs: list[Coroutine[None, None, None]] = []
+        if self.forum_topic_store is not None:
+            self_background_jobs.append(self.forum_topic_store.background_job())
+        return self_background_jobs + integration_backgroung_jobs
 
     async def _remove_unanswered_hashtag(self, bot: AsyncTeleBot, message_id: int):
         if self.hashtag_message_for_forwarded_message_store is None:
