@@ -268,18 +268,21 @@ async def test_aux_admin_chat_integration(redis: RedisInterface) -> None:
         ],
     )
     # the message is forwarded to all admin chats
-    assert extract_full_kwargs(bot.method_calls["forward_message"]) == [
-        {"chat_id": ADMIN_CHAT_ID, "from_chat_id": USER_ID, "message_id": 1},
-        *[
-            {"chat_id": aux_admin_chat_id, "from_chat_id": USER_ID, "message_id": 1}
-            for aux_admin_chat_id in AUX_ADMIN_CHAT_IDS
+    assert_list_of_required_subdicts(
+        extract_full_kwargs(bot.method_calls["forward_message"]),
+        [
+            {"chat_id": ADMIN_CHAT_ID, "from_chat_id": USER_ID, "message_id": 1},
+            *[
+                {"chat_id": aux_admin_chat_id, "from_chat_id": USER_ID, "message_id": 1}
+                for aux_admin_chat_id in AUX_ADMIN_CHAT_IDS
+            ],
+            {"chat_id": ADMIN_CHAT_ID, "from_chat_id": USER_ID, "message_id": 2},
+            *[
+                {"chat_id": aux_admin_chat_id, "from_chat_id": USER_ID, "message_id": 2}
+                for aux_admin_chat_id in AUX_ADMIN_CHAT_IDS
+            ],
         ],
-        {"chat_id": ADMIN_CHAT_ID, "from_chat_id": USER_ID, "message_id": 2},
-        *[
-            {"chat_id": aux_admin_chat_id, "from_chat_id": USER_ID, "message_id": 2}
-            for aux_admin_chat_id in AUX_ADMIN_CHAT_IDS
-        ],
-    ]
+    )
 
     bot.method_calls.clear()
 
