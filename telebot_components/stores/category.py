@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Awaitable, Callable, Optional
 
+from async_lru import alru_cache
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.callback_data import CallbackData
@@ -12,7 +13,6 @@ from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import KeyValueStore
 from telebot_components.stores.language import (
     AnyText,
-    Language,
     LanguageStore,
     MaybeLanguage,
     any_text_to_str,
@@ -22,12 +22,13 @@ from telebot_components.stores.types import OnOptionSelected
 from telebot_components.stores.utils import callback_query_processing_error
 
 
-@dataclass
+@dataclass(frozen=True)
 class Category:
     name: str
     button_caption: Optional[AnyText] = None
     hashtag: Optional[str] = None
-    hidden: bool = False  # hide category from menu for new users while keeping them for those who already selected it
+    # hides category from menu for new users while keeping them for those who already selected it
+    hidden: bool = False
 
     def get_localized_button_caption(self, language: MaybeLanguage) -> str:
         return any_text_to_str(self.button_caption, language) if self.button_caption is not None else self.name
@@ -93,6 +94,7 @@ class CategoryStore:
     async def save_user_category(self, user: tg.User, category: Category) -> bool:
         if category.name not in self.categories_by_name:
             self.logger.warning("Saving category that has not been passed to the store on initialization")
+        self.get_user_category.cache_invalidate(user)
         result = await self.user_category_store.save(user.id, category)
         if self.on_category_selected is not None:
             try:
@@ -101,6 +103,7 @@ class CategoryStore:
                 self.logger.exception("Error in on_category_selected callback")
         return result
 
+    @alru_cache(maxsize=1_000_000)
     async def get_user_category(self, user: tg.User) -> Optional[Category]:
         return await self.user_category_store.load(user.id) or self.default_category
 

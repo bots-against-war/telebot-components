@@ -119,11 +119,12 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
         else:
             # if we got no user message (e.g. the message in admin chat is emulated), we just clone the message
             # from the main admin chat to the aux one
-            async def message_forwarder() -> MessageForwarderResult:
+            async def message_forwarder(message_thread_id: Optional[int]) -> MessageForwarderResult:
                 copied_message = await bot.copy_message(
                     chat_id=self.feedback_handler.admin_chat_id,
                     from_chat_id=admin_chat_message.chat.id,
                     message_id=admin_chat_message.id,
+                    message_thread_id=message_thread_id,
                 )
                 await self.main_by_aux_admin_chat_message_id_store.save(
                     copied_message.message_id, admin_chat_message.id

@@ -5,9 +5,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+from async_lru import alru_cache
 from telebot import AsyncTeleBot
 
 from telebot_components.redis_utils.interface import RedisInterface
+from telebot_components.stores.category import Category
 from telebot_components.stores.generic import KeyDictStore
 
 
@@ -37,7 +39,8 @@ class ForumTopicSpec:
     icon_custom_emoji_id: Optional[str] = None
 
     # NOTE: this is not a message_thread_id!
-    # this id is used to migrate legacy code or for complex topic naming scenarios (e.g. topic must be renameable)
+    # this id is used to migrate legacy code or for advanced topic naming scenarios
+    # (e.g. if topic must be renameable)
     _id: Optional[str] = None
 
     @property
@@ -155,3 +158,28 @@ class ForumTopicStore:
 
         self.is_initialized = True
         self.logger.info("Forum topics store set up")
+
+
+@dataclass
+class CategoryForumTopicStore:
+    """Helper class to use category and forum topic stores together (e.g. in FeedbackHandler)"""
+
+    forum_topic_store: ForumTopicStore
+    forum_topic_by_category: dict[Optional[Category], ForumTopicSpec]  # None = forum topic for no category
+
+    def __post_init__(self) -> None:
+        # validating all forum topics are known
+        for mapped_topic_spec in self.forum_topic_by_category.values():
+            if mapped_topic_spec not in self.forum_topic_store.topics:
+                raise ValueError(
+                    "category -> forum topic mapping must include only topics added to the store, "
+                    + f"but {mapped_topic_spec} is not"
+                )
+
+    @alru_cache(maxsize=1_000)
+    async def get_message_thread_id(self, category: Optional[Category]) -> Optional[int]:
+        forum_topic = self.forum_topic_by_category.get(category)
+        if forum_topic is None:
+            return None
+        else:
+            return await self.forum_topic_store.get_message_thread_id(forum_topic.id)
