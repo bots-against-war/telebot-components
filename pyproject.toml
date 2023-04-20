@@ -9,6 +9,7 @@ repository = "https://github.com/bots-against-war/telebot-components"
 packages = [{include = "telebot_components"}]
 [tool.poetry.group.dev.dependencies]
 pyproject-flake8 = "^6.0.0.post1"
+coverage = "^7.2.3"
 
 
 [tool.poetry-dynamic-versioning]
@@ -19,7 +20,7 @@ style="semver"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-telebot-against-war = "^0.6.0"
+telebot-against-war = "^0.6.3"
 redis = "^4.3.1"
 py-trello = "^0.18.0"
 markdownify = "^0.11.2"
