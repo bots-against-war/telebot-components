@@ -91,7 +91,7 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
         service_messages=ServiceMessages(
             forwarded_to_admin_ok="forwarded!",
             you_must_select_category="select category first!",
-            throttling_template="Please send no more than {} messages in {}.",
+            throttling_template="please send no more than {} messages in {}.",
             copied_to_user_ok="Скопировано в чат с пользователь_ницей ✨",
             can_not_delete_message="Невозможно удалить сообщение.",
             deleted_message_ok="Сообщение успешно удалено!",
