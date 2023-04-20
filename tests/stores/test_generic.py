@@ -308,4 +308,4 @@ async def test_key_dict_store(redis: RedisInterface):
     assert set(await user_data_store.list_subkeys("good")) == {"1", "9"}
     await user_data_store.remove_subkey("good", "9")
     assert set(await user_data_store.list_subkeys("good")) == {"1"}
-    assert await user_data_store.get_subkey("good", "9") == None
+    assert await user_data_store.get_subkey("good", "9") is None

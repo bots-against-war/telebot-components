@@ -1,7 +1,6 @@
 import asyncio
 import copy
 import dataclasses
-import functools
 import logging
 import math
 import random
@@ -36,7 +35,8 @@ from telebot_components.feedback.types import UserMessageRepliedEvent
 from telebot_components.form.field import TelegramAttachment
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
-from telebot_components.stores.category import Category, CategoryStore
+from telebot_components.stores.category import CategoryStore
+from telebot_components.stores.forum_topics import CategoryForumTopicStore
 from telebot_components.stores.generic import (
     KeyFlagStore,
     KeyListStore,
@@ -145,12 +145,18 @@ class FeedbackConfig:
     # if True, user messages are not forwarded but copied to admin chat without any back
     # link to the user account; before the message, user id hash is sent for identification
     full_user_anonymization: bool = False
-    # function used to generate user id hash for a particular bot; if full_user_anonymization is False,
-    # it is ignored
+
+    # (user id, bot prefix) -> unique string identifying the user
+    # used to generate user id hash for a particular bot;
     user_id_hash_func: Callable[[int, str], str] = emoji_hash
 
     # how many messages to forward in one go on /log command
     message_log_page_size: int = 30
+
+    # [⚠️ experimental] create new forum topic per new user
+    forum_topic_per_user: bool = False
+
+    user_forum_topic_lifetime: timedelta = timedelta(days=7)
 
 
 @dataclasses.dataclass
@@ -175,6 +181,7 @@ class FeedbackHandler:
 
     def __init__(
         self,
+        *,
         admin_chat_id: int,
         redis: RedisInterface,
         bot_prefix: str,
@@ -184,6 +191,7 @@ class FeedbackHandler:
         banned_users_store: Optional[BannedUsersStore] = None,
         language_store: Optional[LanguageStore] = None,
         category_store: Optional[CategoryStore] = None,
+        forum_topic_store: Optional[CategoryForumTopicStore] = None,
         trello_integration: Optional[TrelloIntegration] = None,
         integrations: Optional[list[FeedbackHandlerIntegration]] = None,
         admin_chat_response_actions: Optional[list[AdminChatAction]] = None,
@@ -206,6 +214,11 @@ class FeedbackHandler:
         self.banned_users_store = banned_users_store
         self.language_store = language_store
         self.category_store = category_store
+        self.forum_topic_store = forum_topic_store
+        if self.config.forum_topic_per_user and self.forum_topic_store is not None:
+            raise ValueError(
+                "Forum topics can be used either for categories OR created per-user, not both at the same time"
+            )
 
         integrations_ = integrations or []
         if trello_integration is not None:
@@ -289,12 +302,23 @@ class FeedbackHandler:
             expiration_time=times.FIVE_MINUTES,
         )
 
+        # const key -> last sent user id hash to avoid repeating it on multiple consequtive messages
         self.last_sent_user_id_hash_store = KeyValueStore[str](
             name="last-sent-user-id-hash",
             prefix=bot_prefix,
             redis=redis,
             expiration_time=timedelta(hours=12),
             loader=str,
+            dumper=str,
+        )
+
+        # message
+        self.message_thread_id_by_user_id_store = KeyValueStore[int](
+            name="message-thread-id-by-user",
+            prefix=bot_prefix,
+            redis=redis,
+            expiration_time=self.config.user_forum_topic_lifetime,
+            loader=int,
             dumper=str,
         )
 
@@ -341,8 +365,8 @@ class FeedbackHandler:
         copies_or_forwards = "пересылает" if not self.config.full_user_anonymization else "копирует"
         paragraphs.append(
             "💬 <i>Основное</i>\n"
-            + f"· В этот чат бот {copies_or_forwards} все сообщения (кроме специальных случаев вроде /команд), которые ему "
-            + "пишут в личку.\n"
+            + f"· В этот чат бот {copies_or_forwards} все сообщения (кроме специальных случаев вроде /команд), "
+            + "которые ему пишут в личку.\n"
             + (
                 (
                     "· Перед скопированным сообщением бот указывает анонимизированный идентификатор пользователь_ницы, "
@@ -374,15 +398,16 @@ class FeedbackHandler:
         security_help = (
             "🛡️ <i>Защита и безопасность</i>\n"
             + "· Бот никак не выдаёт, кто отвечает пользователь_нице из этого чата. Насколько возможно судить, "
-            + "никакого способа взломать бота нет. Однако всё, что вы отвечаете через бота, сразу пересылается человеку "
-            + "на другом конце, и отменить отправку можно лишь в течении первых 5 минут, поэтому будьте внимательны!"
+            + "никакого способа взломать бота нет. Однако всё, что вы отвечаете через бота, "
+            + "сразу пересылается человеку на другом конце, и отменить отправку можно лишь в течении первых "
+            + "5 минут, поэтому будьте внимательны!"
         )
         if isinstance(self.anti_spam, AntiSpam):
             security_help += (
                 "\n"
                 + "· Бот автоматически ограничивает число сообщений, присылаемых ему в единицу времени. "
-                + f"Конфигурация на данный момент: не больше {self.anti_spam.config.throttle_after_messages} сообщений за "
-                + f"{self.anti_spam.config.throttle_duration}. При необходимости её можно изменять."
+                + f"Конфигурация на данный момент: не больше {self.anti_spam.config.throttle_after_messages} "
+                + f"сообщений за {self.anti_spam.config.throttle_duration}. При необходимости её можно изменять."
             )
         if self.banned_users_store is not None:
             security_help += (
@@ -403,8 +428,8 @@ class FeedbackHandler:
                 else "вам в личку (для этого вы должны хотя бы раз что-то ему написать). Можно настроить бота так, "
                 + "чтобы чтобы бот пересылал историю сообщений не в личку, а прямо в этот чат."
             )
-            + f"\n· По умолчанию бот пересылает первые {self.config.message_log_page_size} сообщений, дальше можно листать "
-            + "по страницам: «/log 2», «/log 3», и так далее"
+            + f"\n· По умолчанию бот пересылает первые {self.config.message_log_page_size} сообщений, "
+            + "дальше можно листать по страницам: «/log 2», «/log 3», и так далее"
         )
 
         integration_help_messages = [integration.help_message_section() for integration in self.integrations]
@@ -424,7 +449,7 @@ class FeedbackHandler:
         self,
         bot: AsyncTeleBot,
         user: tg.User,
-        message_forwarder: Callable[[], Awaitable[MessageForwarderResult]],
+        message_forwarder: Callable[[Optional[int]], Awaitable[MessageForwarderResult]],
         user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
         send_user_id_hash: bool,
         export_to_integrations: bool = True,
@@ -444,12 +469,34 @@ class FeedbackHandler:
             await user_replier(self.service_messages.throttling(anti_spam.config, language), None)
             return None
 
+        category = await self.category_store.get_user_category(user) if self.category_store is not None else None
+        if self.forum_topic_store is not None:
+            message_thread_id: Optional[int] = await self.forum_topic_store.get_message_thread_id(category)
+        elif self.config.forum_topic_per_user:
+            message_thread_id = await self.message_thread_id_by_user_id_store.load(user.id)
+            if message_thread_id is None:
+                try:
+                    new_topic = await bot.create_forum_topic(
+                        chat_id=self.admin_chat_id,
+                        name=self.config.user_id_hash_func(
+                            user.id,
+                            self.bot_prefix,
+                        ),
+                    )
+                    # TODO: sent the topic to redis-backed queue for cleanup...
+                    message_thread_id = new_topic.message_thread_id
+                    await self.message_thread_id_by_user_id_store.save(user.id, message_thread_id)
+                except Exception:
+                    self.logger.exception(
+                        f"Error creating forum topic for user {user}, will send without message thread id"
+                    )
+        else:
+            message_thread_id = None
+
         hashtag_msg_data: Optional[HashtagMessageData] = None
-        category: Optional[Category] = None
         if self.config.hashtags_in_admin_chat:
             category_hashtag = None  # sentinel
             if self.category_store is not None:
-                category = await self.category_store.get_user_category(user)
                 if category is None:
                     if self.config.force_category_selection:
                         # see validate_service_messages
@@ -476,8 +523,11 @@ class FeedbackHandler:
                     hashtags.append(category_hashtag)
 
                 if hashtags:
-                    # TODO: multiple categories per user support
-                    hashtag_msg = await bot.send_message(self.admin_chat_id, _join_hashtags(hashtags))
+                    hashtag_msg = await bot.send_message(
+                        self.admin_chat_id,
+                        _join_hashtags(hashtags),
+                        message_thread_id=message_thread_id,
+                    )
                     await self.user_related_messages_store.add(user.id, hashtag_msg.id, reset_ttl=False)
                     hashtag_msg_data = HashtagMessageData(message_id=hashtag_msg.id, hashtags=hashtags)
                     await self.recent_hashtag_message_for_user_store.save(user.id, hashtag_msg_data)
@@ -486,7 +536,11 @@ class FeedbackHandler:
             user_id_hash = self.config.user_id_hash_func(user.id, self.bot_prefix)
             last_sent_user_id_hash = await self.last_sent_user_id_hash_store.load(self.CONST_KEY)
             if last_sent_user_id_hash is None or last_sent_user_id_hash != user_id_hash:
-                user_id_hash_msg = await bot.send_message(self.admin_chat_id, user_id_hash)
+                user_id_hash_msg = await bot.send_message(
+                    self.admin_chat_id,
+                    user_id_hash,
+                    message_thread_id=message_thread_id,
+                )
                 await self.last_sent_user_id_hash_store.save(self.CONST_KEY, user_id_hash)
                 await self.save_message_from_user(user, user_id_hash_msg.id)
 
@@ -497,7 +551,7 @@ class FeedbackHandler:
                 await self.save_message_from_user(user, preforwarded_msg.id)
 
         # admin_chat_forwarded_msg_id, user_content_message = await message_forwarder()
-        message_forwarder_result = await message_forwarder()
+        message_forwarder_result = await message_forwarder(message_thread_id)
         await self.save_message_from_user(user, message_forwarder_result.admin_chat_msg.id)
 
         postforwarded_msg = None
@@ -523,10 +577,6 @@ class FeedbackHandler:
                 await self.recently_sent_confirmation_flag_store.set_flag(user.id)
 
         if export_to_integrations:
-            # NOTE: category may already be loaded, if so -- reusing the value here
-            if category is None and self.category_store is not None:
-                category = await self.category_store.get_user_category(user)
-
             # integrations have no concept of pre- and post-forwarded messages, so we just patch their texts
             # to the admin chat msg; their attachments and other info is lost, which is fine because we don't
             # use them that often anymore
@@ -588,11 +638,23 @@ class FeedbackHandler:
         If the message has been successfully sent to the admin chat, this method returns its id.
         """
 
-        async def message_forwarder() -> MessageForwarderResult:
+        async def message_forwarder(message_thread_id: Optional[int]) -> MessageForwarderResult:
             if attachment is None:
-                sent_msg = await bot.send_message(self.admin_chat_id, text=text, **send_message_kwargs)
+                sent_msg = await bot.send_message(
+                    self.admin_chat_id,
+                    text=text,
+                    message_thread_id=message_thread_id,
+                    **send_message_kwargs,
+                )
             else:
-                sent_msg = await send_attachment(bot, self.admin_chat_id, attachment, text, remove_exif_data)
+                sent_msg = await send_attachment(
+                    bot,
+                    self.admin_chat_id,
+                    attachment,
+                    text,
+                    remove_exif_data,
+                    message_thread_id=message_thread_id,
+                )
             return MessageForwarderResult(
                 admin_chat_msg=sent_msg,
                 user_msg=None,
@@ -614,12 +676,13 @@ class FeedbackHandler:
         )
 
     async def handle_user_message(self, message: tg.Message, bot: AsyncTeleBot, reply_to_user: bool) -> Optional[int]:
-        async def message_forwarder() -> MessageForwarderResult:
+        async def message_forwarder(message_thread_id: Optional[int]) -> MessageForwarderResult:
             if self.config.full_user_anonymization:
                 copied_message_id = await bot.copy_message(
                     chat_id=self.admin_chat_id,
                     from_chat_id=message.chat.id,
                     message_id=message.id,
+                    message_thread_id=message_thread_id,
                 )
                 fake_admin_chat_message = copy.deepcopy(message)
                 fake_admin_chat_message.chat = await self.admin_chat()
@@ -627,7 +690,10 @@ class FeedbackHandler:
                 return MessageForwarderResult(admin_chat_msg=fake_admin_chat_message, user_msg=message)
             else:
                 forwarded_message = await bot.forward_message(
-                    self.admin_chat_id, from_chat_id=message.chat.id, message_id=message.id
+                    self.admin_chat_id,
+                    from_chat_id=message.chat.id,
+                    message_id=message.id,
+                    message_thread_id=message_thread_id,
                 )
                 return MessageForwarderResult(admin_chat_msg=forwarded_message, user_msg=message)
 
@@ -654,13 +720,15 @@ class FeedbackHandler:
         async def handle_user_message(message: tg.Message) -> None:
             await self.handle_user_message(message, bot=bot, reply_to_user=True)
 
+        await self.setup_without_user_message_handler(bot)
+
+    async def setup_without_user_message_handler(self, bot: AsyncTeleBot) -> None:
         await self.setup_admin_chat_handlers(bot)
-        self.set_bot(bot)
+        self._bot = bot
         for integration in self.integrations:
             await integration.setup(bot)
-
-    def set_bot(self, bot: AsyncTeleBot) -> None:
-        self._bot = bot
+        if self.forum_topic_store is not None:
+            await self.forum_topic_store.setup(bot)
 
     async def aux_endpoints(self) -> list[AuxBotEndpoint]:
         endpoints: list[AuxBotEndpoint] = []
@@ -673,10 +741,14 @@ class FeedbackHandler:
         base_url: Optional[str],
         server_listening_future: Optional[asyncio.Future[None]],
     ) -> list[Coroutine[None, None, None]]:
-        return [
+        integration_backgroung_jobs = [
             i.background_job(FeedbackIntegrationBackgroundContext(base_url, server_listening_future))
             for i in self.integrations
         ]
+        self_background_jobs: list[Coroutine[None, None, None]] = []
+        if self.forum_topic_store is not None:
+            self_background_jobs.append(self.forum_topic_store.background_job())
+        return self_background_jobs + integration_backgroung_jobs
 
     async def _remove_unanswered_hashtag(self, bot: AsyncTeleBot, message_id: int):
         if self.hashtag_message_for_forwarded_message_store is None:
@@ -735,13 +807,13 @@ class FeedbackHandler:
 
         if notify_integrations:
             # do not notify integration about its own replies
-            integrations_to_notify = [i for i in self.integrations if not i is event.integration]
+            integrations_to_notify = [i for i in self.integrations if i is not event.integration]
             self.logger.debug(f"Notifying integrations: {[i.name() for i in integrations_to_notify]}")
             await asyncio.gather(
                 *[integration.handle_user_message_replied_elsewhere(event) for integration in integrations_to_notify]
             )
         else:
-            self.logger.debug(f"Will not notify integrations")
+            self.logger.debug("Will not notify integrations")
 
     async def setup_admin_chat_handlers(
         self,
@@ -825,7 +897,7 @@ class FeedbackHandler:
                                 page -= 1  # one based to zero based
                         except Exception:
                             await bot.reply_to(
-                                message, f"Bad command, expected format is '/log' or '/log <page number>'"
+                                message, "Bad command, expected format is '/log' or '/log <page number>'"
                             )
                             return
                         log_message_ids = await self.message_log_store.all(origin_chat_id)
@@ -836,8 +908,9 @@ class FeedbackHandler:
                         end_idx = self.config.message_log_page_size * (page + 1)
                         log_message_ids_page = log_message_ids[start_idx:end_idx]
                         self.logger.info(
-                            f"Forwarding log page {page} / {total_pages} (from {message.text_content!r}) received for origin chat id "
-                            + f"{origin_chat_id}, total messages: {len(log_message_ids)}, on current page: {len(log_message_ids_page)}"
+                            f"Forwarding log page {page} / {total_pages} (from {message.text_content!r}) "
+                            + f"received for origin chat id {origin_chat_id}, total messages: {len(log_message_ids)}, "
+                            + f"on current page: {len(log_message_ids_page)}"
                         )
                         if not log_message_ids_page:
                             if page == 0:
@@ -845,7 +918,8 @@ class FeedbackHandler:
                             else:
                                 await bot.reply_to(
                                     message,
-                                    f"Only {len(log_message_ids)} messages are available in log, not enough messages for page {page}",
+                                    f"Only {len(log_message_ids)} messages are available in log, "
+                                    + f"not enough messages for page {page}",
                                 )
                             return
                         log_destination_chat_id = (
@@ -939,7 +1013,7 @@ class FeedbackHandler:
                     )
             except Exception as e:
                 await bot.reply_to(message, f"Something went wrong! {e}")
-                self.logger.exception(f"Unexpected error while replying to forwarded msg")
+                self.logger.exception("Unexpected error while replying to forwarded msg")
 
 
 def _join_hashtags(hashtags: list[str]) -> str:

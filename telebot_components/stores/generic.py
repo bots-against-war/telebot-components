@@ -3,17 +3,7 @@ import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from hashlib import md5
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    ClassVar,
-    Generic,
-    Optional,
-    Protocol,
-    TypeVar,
-    cast,
-)
+from typing import Callable, ClassVar, Generic, Optional, Protocol, TypeVar, cast
 
 import tenacity
 

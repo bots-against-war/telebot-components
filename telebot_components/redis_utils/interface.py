@@ -1,6 +1,6 @@
 import datetime
 from abc import ABC, abstractmethod
-from typing import Mapping, Optional, TypeVar, Union
+from typing import Mapping, Optional, Union
 
 # type defs copied from redis
 

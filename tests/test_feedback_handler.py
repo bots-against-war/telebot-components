@@ -1,15 +1,22 @@
+import asyncio
 import string
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
-import pytest
 from telebot import types as tg
 from telebot.test_util import MockedAsyncTeleBot
 
 from telebot_components.feedback import FeedbackConfig, FeedbackHandler, ServiceMessages
 from telebot_components.feedback.anti_spam import AntiSpam, AntiSpamConfig
 from telebot_components.redis_utils.interface import RedisInterface
+from telebot_components.stores.category import Category, CategoryStore
+from telebot_components.stores.forum_topics import (
+    CategoryForumTopicStore,
+    ForumTopicSpec,
+    ForumTopicStore,
+    ForumTopicStoreErrorMessages,
+)
 from tests.utils import TimeSupplier, assert_list_of_required_subdicts
 
 ADMIN_CHAT_ID = 111
@@ -17,8 +24,50 @@ ADMIN_USER_ID = 1312
 USER_ID = 420
 
 
-def create_mock_feedback_handler(redis: RedisInterface, is_throttling: bool) -> FeedbackHandler:
+def create_mock_feedback_handler(
+    redis: RedisInterface, is_throttling: bool, has_categories: bool, has_forum_topics: bool
+) -> FeedbackHandler:
     bot_prefix = uuid.uuid4().hex[:8]
+
+    if has_categories:
+        category_1 = Category(name="one", hashtag="one")
+        category_2 = Category(name="two", hashtag="two")
+        category_3 = Category(name="three", hashtag="three")
+        category_store: Optional[CategoryStore] = CategoryStore(
+            bot_prefix=bot_prefix,
+            redis=redis,
+            categories=[category_1, category_2, category_3],
+            category_expiration_time=None,
+        )
+    else:
+        category_store = None
+
+    if has_forum_topics:
+        if not has_categories:
+            raise ValueError("forum topics require categories")
+        forum_topic_1 = ForumTopicSpec(name="topic 1")
+        forum_topic_2 = ForumTopicSpec(name="topic 2")
+        forum_topic_3 = ForumTopicSpec(name="topic 3")
+        forum_topic_store: Optional[CategoryForumTopicStore] = CategoryForumTopicStore(
+            forum_topic_store=ForumTopicStore(
+                redis=redis,
+                bot_prefix=bot_prefix,
+                admin_chat_id=ADMIN_CHAT_ID,
+                topics=[forum_topic_1, forum_topic_2, forum_topic_3],
+                error_messages=ForumTopicStoreErrorMessages(
+                    admin_chat_is_not_forum_error="not a forum! will check again in {} sec",
+                    cant_create_topic="error creating topic {}: {}; will try again in {} sec",
+                ),
+            ),
+            forum_topic_by_category={
+                category_1: forum_topic_1,
+                category_2: forum_topic_2,
+                category_3: forum_topic_3,
+            },
+        )
+    else:
+        forum_topic_store = None
+
     return FeedbackHandler(
         admin_chat_id=ADMIN_CHAT_ID,
         redis=redis,
@@ -46,12 +95,19 @@ def create_mock_feedback_handler(redis: RedisInterface, is_throttling: bool) -> 
                 soft_ban_duration=timedelta(days=3),
             ),
         ),
+        category_store=category_store,
+        forum_topic_store=forum_topic_store,
     )
 
 
 async def test_feedback_handler_throttling(redis: RedisInterface):
     bot = MockedAsyncTeleBot("token")
-    feedback_handler = create_mock_feedback_handler(redis, is_throttling=True)
+    feedback_handler = create_mock_feedback_handler(
+        redis,
+        is_throttling=True,
+        has_categories=False,
+        has_forum_topics=False,
+    )
 
     await feedback_handler.setup(bot)
     assert not bot.method_calls
@@ -175,7 +231,12 @@ async def test_feedback_handler_throttling(redis: RedisInterface):
 
 async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
     bot = MockedAsyncTeleBot("token")
-    feedback_handler = create_mock_feedback_handler(redis, is_throttling=False)
+    feedback_handler = create_mock_feedback_handler(
+        redis,
+        is_throttling=False,
+        has_categories=False,
+        has_forum_topics=False,
+    )
 
     await feedback_handler.setup(bot)
     assert not bot.method_calls
@@ -268,3 +329,112 @@ async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
         {"chat_id": 111, "from_chat_id": 111, "message_id": 54}
     ]
     bot.method_calls.clear()
+
+
+async def test_forum_topics_for_categories(redis: RedisInterface, time_supplier: TimeSupplier) -> None:
+    bot = MockedAsyncTeleBot("token123134134")
+    feedback_handler = create_mock_feedback_handler(
+        redis,
+        is_throttling=False,
+        has_categories=True,
+        has_forum_topics=True,
+    )
+    await feedback_handler.setup(bot)
+
+    bot.add_return_values("get_chat", tg.Chat(id=ADMIN_CHAT_ID, type="supergroup", is_forum=True))
+    bot.add_return_values(
+        "create_forum_topic",
+        *[
+            tg.ForumTopic(
+                message_thread_id=100 + idx,
+                name=f"topic {idx}",
+                icon_color=0,
+            )
+            for idx in range(3)
+        ],
+    )
+
+    # actual setup for forum topic store
+    await asyncio.wait_for(
+        asyncio.gather(*feedback_handler.background_jobs(None, None)),
+        timeout=1,
+    )
+
+    # setup calls check
+
+    get_chat_calls = bot.method_calls.pop("get_chat")
+    assert len(get_chat_calls) == 1
+    assert get_chat_calls[0].full_kwargs == {"chat_id": ADMIN_CHAT_ID}
+
+    create_forum_topic_calls = bot.method_calls.pop("create_forum_topic")
+    assert len(create_forum_topic_calls) == 3
+    assert [c.full_kwargs for c in create_forum_topic_calls] == [
+        {"chat_id": 111, "name": "topic 1", "icon_color": 7322096, "icon_custom_emoji_id": None},
+        {"chat_id": 111, "name": "topic 2", "icon_color": 16766590, "icon_custom_emoji_id": None},
+        {"chat_id": 111, "name": "topic 3", "icon_color": 13338331, "icon_custom_emoji_id": None},
+    ]
+
+    bot.method_calls.clear()
+
+    _message_id_counter = 0
+
+    async def _send_message_to_bot(in_admin_chat: bool, text: str, reply_to_message_id: Optional[int] = None):
+        nonlocal _message_id_counter
+        _message_id_counter += 1
+        user_id = ADMIN_USER_ID if in_admin_chat else USER_ID
+
+        update_json = {
+            "update_id": 19283649187364,
+            "message": {
+                "message_id": _message_id_counter,
+                "from": {
+                    "id": user_id,
+                    "is_bot": False,
+                    "first_name": "Admin" if in_admin_chat else "User",
+                },
+                "chat": {
+                    "id": ADMIN_CHAT_ID if in_admin_chat else user_id,
+                    "type": "supergroup" if in_admin_chat else "private",
+                },
+                "date": int(datetime.now().timestamp()),
+                "text": text,
+            },
+        }
+
+        if reply_to_message_id is not None:
+            update_json["message"]["reply_to_message"] = {  # type: ignore
+                "message_id": reply_to_message_id,
+                "from": {
+                    "id": 1,
+                    "is_bot": True,
+                    "first_name": "Bot",
+                },
+                "chat": {
+                    "id": ADMIN_CHAT_ID,
+                    "type": "supergroup",
+                },
+                "date": 1662891416,
+                "text": "replied-to-message-text",
+            }
+
+        await bot.process_new_updates([tg.Update.de_json(update_json)])  # type: ignore
+
+    assert feedback_handler.category_store
+    await feedback_handler.category_store.save_user_category(
+        tg.User(id=USER_ID, is_bot=False, first_name="User"),
+        Category(name="two"),
+    )
+
+    await _send_message_to_bot(in_admin_chat=False, text="hello I am user in category 1")
+
+    assert_list_of_required_subdicts(
+        [c.full_kwargs for c in bot.method_calls["send_message"]],
+        [
+            {"chat_id": 111, "text": "#hey_there #two", "message_thread_id": 101},
+            {"chat_id": 420, "text": "thanks", "reply_to_message_id": 1},
+        ],
+    )
+    assert_list_of_required_subdicts(
+        [c.full_kwargs for c in bot.method_calls["forward_message"]],
+        [{"chat_id": 111, "from_chat_id": 420, "message_id": 1, "message_thread_id": 101}],
+    )

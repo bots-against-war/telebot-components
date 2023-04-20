@@ -69,10 +69,10 @@ def any_text_to_str(t: AnyText, language: MaybeLanguage) -> str:
         if isinstance(t, str):
             return t
         else:
-            raise ValueError(f"MultilangText requires a valid Language for localisation")
+            raise ValueError("MultilangText requires a valid Language for localisation")
     else:
         if isinstance(t, str):
-            raise ValueError(f"Plain string text requires language=None")
+            raise ValueError("Plain string text requires language=None")
         else:
             localised_t = t.get(language)
             if not isinstance(localised_t, str):
@@ -148,7 +148,7 @@ class LanguageStore:
 
             language_saved = await self.set_user_language(user, language)
             if not language_saved:
-                await callback_query_processing_error(bot, call, f"unable to save selected language", self.logger)
+                await callback_query_processing_error(bot, call, "unable to save selected language", self.logger)
                 return
             try:
                 await bot.answer_callback_query(call.id)

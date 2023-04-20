@@ -1,5 +1,4 @@
 import copy
-import dataclasses
 import logging
 from typing import Optional
 
@@ -9,7 +8,6 @@ from telebot import types as tg
 from telebot_components.feedback import FeedbackHandler, MessageForwarderResult
 from telebot_components.feedback.integration.interface import (
     FeedbackHandlerIntegration,
-    FeedbackIntegrationBackgroundContext,
     UserMessageRepliedFromIntegrationEvent,
 )
 from telebot_components.feedback.types import UserMessageRepliedEvent
@@ -50,7 +48,7 @@ class _MainFeedbackHandlerIntegration(FeedbackHandlerIntegration):
             aux_admin_chat_message_id
         )
         if main_admin_chat_message_id is None:
-            self.logger.error(f"Message in aux admin chat has no saved main admin chat message id")
+            self.logger.error("Message in aux admin chat has no saved main admin chat message id")
             return
         await self.aux.message_replied_callback(
             UserMessageRepliedFromIntegrationEvent(
@@ -119,11 +117,12 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
         else:
             # if we got no user message (e.g. the message in admin chat is emulated), we just clone the message
             # from the main admin chat to the aux one
-            async def message_forwarder() -> MessageForwarderResult:
+            async def message_forwarder(message_thread_id: Optional[int]) -> MessageForwarderResult:
                 copied_message = await bot.copy_message(
                     chat_id=self.feedback_handler.admin_chat_id,
                     from_chat_id=admin_chat_message.chat.id,
                     message_id=admin_chat_message.id,
+                    message_thread_id=message_thread_id,
                 )
                 await self.main_by_aux_admin_chat_message_id_store.save(
                     copied_message.message_id, admin_chat_message.id
@@ -153,7 +152,7 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
             event.main_admin_chat_message_id
         )
         if aux_admin_chat_message_id is None:
-            self.logger.error(f"Message in the main admin chat has no saved aux admin chat message id")
+            self.logger.error("Message in the main admin chat has no saved aux admin chat message id")
             return
         # from aux feedback handler's POV, aux admin chat msg id is main
         event.main_admin_chat_message_id = aux_admin_chat_message_id
@@ -173,5 +172,4 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
         await self.feedback_handler.message_replied_from_integration_callback(event, notify_integrations=False)
 
     async def setup(self, bot: AsyncTeleBot) -> None:
-        await self.feedback_handler.setup_admin_chat_handlers(bot)
-        self.feedback_handler.set_bot(bot)
+        await self.feedback_handler.setup_without_user_message_handler(bot)

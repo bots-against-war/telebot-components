@@ -114,9 +114,9 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
         trello_integration = None
 
     feedback_handler = FeedbackHandler(
-        admin_chat_id,
-        redis,
-        bot_prefix,
+        admin_chat_id=admin_chat_id,
+        redis=redis,
+        bot_prefix=bot_prefix,
         config=FeedbackConfig(
             message_log_to_admin_chat=True,
             force_category_selection=True,
@@ -149,7 +149,7 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
                 Language.RU: "Пожалуйста, не присылайте в бот больше {} сообщений за {}.",
                 Language.EN: "Please send no more than {} messages in {}.",
             },
-            copied_to_user_ok="Скопировано в чат с пользовател_ьницей ✨",
+            copied_to_user_ok="Скопировано в чат с пользователь_ницей ✨",
             can_not_delete_message="Невозможно удалить сообщение.",
             deleted_message_ok="Сообщение успешно удалено!",
         ),
@@ -186,7 +186,6 @@ if __name__ == "__main__":
     import os
 
     from dotenv import load_dotenv
-    from redis.asyncio import Redis  # type: ignore
 
     from telebot_components.redis_utils.emulation import RedisEmulation
 
@@ -194,7 +193,6 @@ if __name__ == "__main__":
 
     async def main() -> None:
         redis = RedisEmulation()
-        # redis = Redis.from_url(os.environ["REDIS_URL"])
         bot_runner = await create_feedback_bot(
             redis=redis,
             token=os.environ["TOKEN"],

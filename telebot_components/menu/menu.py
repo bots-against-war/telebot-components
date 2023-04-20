@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Coroutine, Optional
+from typing import Awaitable, Callable, Optional
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -201,7 +201,8 @@ class MenuHandler:
         if menu_items_with_bound_categories:
             if self.category_store is None:
                 raise ValueError(
-                    f"Menu items have bound categories, but category store is not passed to MenuHandler: {menu_items_with_bound_categories}"
+                    "Menu items have bound categories, but category store "
+                    + f"is not passed to MenuHandler: {menu_items_with_bound_categories}"
                 )
             menu_items_with_non_storable_categories = [
                 mi
@@ -317,4 +318,4 @@ class MenuHandler:
                         reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
                     )
                 except ApiHTTPException:
-                    self.logger.info(f"Error editing message reply markup", exc_info=True)
+                    self.logger.info("Error editing message reply markup", exc_info=True)

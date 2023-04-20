@@ -63,7 +63,7 @@ def trim_with_ellipsis(message: str, target_len: int) -> str:
 
 
 def join_paragraphs(lines: list[str]) -> str:
-    return "\n\n".join([l for l in lines if l])
+    return "\n\n".join([line for line in lines if line])
 
 
 yaml = YAML(typ="unsafe")
@@ -152,9 +152,15 @@ async def send_attachment(
     attachment: TelegramAttachment,
     caption: Optional[str] = None,
     remove_metadata: bool = True,
+    message_thread_id: Optional[int] = None,
 ):
     if isinstance(attachment, list) and all(isinstance(att, tg.PhotoSize) for att in attachment):
-        return await bot.send_photo(chat_id, photo=attachment[0].file_id, caption=caption)
+        return await bot.send_photo(
+            chat_id,
+            photo=attachment[0].file_id,
+            caption=caption,
+            message_thread_id=message_thread_id,
+        )
     elif isinstance(attachment, tg.Document):
         doc_to_send: Union[str, bytes]
 
@@ -168,13 +174,29 @@ async def send_attachment(
             document=doc_to_send,
             caption=caption,
             visible_file_name=attachment.file_name,
+            message_thread_id=message_thread_id,
         )
     elif isinstance(attachment, tg.Video):
-        return await bot.send_video(chat_id, video=attachment.file_id, caption=caption)
+        return await bot.send_video(
+            chat_id,
+            video=attachment.file_id,
+            caption=caption,
+            message_thread_id=message_thread_id,
+        )
     elif isinstance(attachment, tg.Animation):
-        return await bot.send_animation(chat_id, animation=attachment.file_id, caption=caption)
+        return await bot.send_animation(
+            chat_id,
+            animation=attachment.file_id,
+            caption=caption,
+            message_thread_id=message_thread_id,
+        )
     elif isinstance(attachment, tg.Audio):
-        return await bot.send_audio(chat_id, audio=attachment.file_id, caption=caption)
+        return await bot.send_audio(
+            chat_id,
+            audio=attachment.file_id,
+            caption=caption,
+            message_thread_id=message_thread_id,
+        )
     else:
         raise TypeError(f"Can not send attachment of type: {type(attachment)!r}.")
 

@@ -61,7 +61,8 @@ class NextFieldGetter(Generic[FieldValueT]):
     async def __call__(self, user: tg.User, value: Optional[FieldValueT]) -> Optional["FormField"]:
         if self.fields_by_name is None:
             raise RuntimeError(
-                "Next field getter hasn't been properly initialized, did you forget to pass your fields in a Form object?"
+                "Next field getter hasn't been properly initialized, "
+                + "did you forget to pass your fields in a Form object?"
             )
         next_field_name = self.next_field_name_getter(user, value)
         if next_field_name is None:
@@ -571,10 +572,10 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                     new_value.remove(selected_option)
                 else:
                     new_value.add(selected_option)
-                selected_option_page = list(self.EnumClass).index(selected_option) // self.options_per_page  # type: ignore
+                page = list(self.EnumClass).index(selected_option) // self.options_per_page  # type: ignore
                 return CallbackProcessingResult(
                     response_to_user=None,
-                    updated_inline_markup=self.get_reply_markup(language, new_value, selected_option_page),
+                    updated_inline_markup=self.get_reply_markup(language, new_value, page),
                     complete_field=False,
                     new_field_value=new_value,
                 )
