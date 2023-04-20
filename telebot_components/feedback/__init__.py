@@ -145,12 +145,18 @@ class FeedbackConfig:
     # if True, user messages are not forwarded but copied to admin chat without any back
     # link to the user account; before the message, user id hash is sent for identification
     full_user_anonymization: bool = False
-    # function used to generate user id hash for a particular bot; if full_user_anonymization is False,
-    # it is ignored
+
+    # (user id, bot prefix) -> unique string identifying the user
+    # used to generate user id hash for a particular bot;
     user_id_hash_func: Callable[[int, str], str] = emoji_hash
 
     # how many messages to forward in one go on /log command
     message_log_page_size: int = 30
+
+    # [⚠️ experimental] create new forum topic per new user
+    forum_topic_per_user: bool = False
+
+    user_forum_topic_lifetime: timedelta = timedelta(days=7)
 
 
 @dataclasses.dataclass
@@ -209,6 +215,10 @@ class FeedbackHandler:
         self.language_store = language_store
         self.category_store = category_store
         self.forum_topic_store = forum_topic_store
+        if self.config.forum_topic_per_user and self.forum_topic_store is not None:
+            raise ValueError(
+                "Forum topics can be used either for categories OR created per-user, not both at the same time"
+            )
 
         integrations_ = integrations or []
         if trello_integration is not None:
@@ -292,12 +302,23 @@ class FeedbackHandler:
             expiration_time=times.FIVE_MINUTES,
         )
 
+        # const key -> last sent user id hash to avoid repeating it on multiple consequtive messages
         self.last_sent_user_id_hash_store = KeyValueStore[str](
             name="last-sent-user-id-hash",
             prefix=bot_prefix,
             redis=redis,
             expiration_time=timedelta(hours=12),
             loader=str,
+            dumper=str,
+        )
+
+        # message
+        self.message_thread_id_by_user_id_store = KeyValueStore[int](
+            name="message-thread-id-by-user",
+            prefix=bot_prefix,
+            redis=redis,
+            expiration_time=self.config.user_forum_topic_lifetime,
+            loader=int,
             dumper=str,
         )
 
@@ -449,9 +470,29 @@ class FeedbackHandler:
             return None
 
         category = await self.category_store.get_user_category(user) if self.category_store is not None else None
-        message_thread_id = (
-            await self.forum_topic_store.get_message_thread_id(category) if self.forum_topic_store is not None else None
-        )
+        if self.forum_topic_store is not None:
+            message_thread_id: Optional[int] = await self.forum_topic_store.get_message_thread_id(category)
+        elif self.config.forum_topic_per_user:
+            message_thread_id = await self.message_thread_id_by_user_id_store.load(user.id)
+            if message_thread_id is None:
+                try:
+                    new_topic = await bot.create_forum_topic(
+                        chat_id=self.admin_chat_id,
+                        name=self.config.user_id_hash_func(
+                            user.id,
+                            self.bot_prefix,
+                        ),
+                    )
+                    # TODO: sent the topic to redis-backed queue for cleanup...
+                    message_thread_id = new_topic.message_thread_id
+                    await self.message_thread_id_by_user_id_store.save(user.id, message_thread_id)
+                except Exception:
+                    self.logger.exception(
+                        f"Error creating forum topic for user {user}, will send without message thread id"
+                    )
+        else:
+            message_thread_id = None
+
         hashtag_msg_data: Optional[HashtagMessageData] = None
         if self.config.hashtags_in_admin_chat:
             category_hashtag = None  # sentinel
