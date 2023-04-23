@@ -640,10 +640,11 @@ class FeedbackHandler:
 
         async def message_forwarder(message_thread_id: Optional[int]) -> MessageForwarderResult:
             if attachment is None:
+                if "message_thread_id" not in send_message_kwargs:
+                    send_message_kwargs["message_thread_id"] = message_thread_id
                 sent_msg = await bot.send_message(
                     self.admin_chat_id,
                     text=text,
-                    message_thread_id=message_thread_id,
                     **send_message_kwargs,
                 )
             else:

@@ -7,6 +7,7 @@ from typing import Optional
 
 from async_lru import alru_cache
 from telebot import AsyncTeleBot
+from telebot.api import ApiHTTPException
 
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.category import Category
@@ -129,17 +130,25 @@ class ForumTopicStore:
                         self.logger.info(
                             f"Found saved message thread id for {topic_spec}, validating and syncing state"
                         )
-                        success = await self.bot.edit_forum_topic(
-                            chat_id=self.admin_chat_id,
-                            message_thread_id=existing_message_thread_id,
-                            name=topic_spec.name,
-                            icon_custom_emoji_id=topic_spec.icon_custom_emoji_id,
-                        )
+                        success = False
+                        try:
+                            success = await self.bot.edit_forum_topic(
+                                chat_id=self.admin_chat_id,
+                                message_thread_id=existing_message_thread_id,
+                                name=topic_spec.name,
+                                icon_custom_emoji_id=topic_spec.icon_custom_emoji_id,
+                            )
+                        except ApiHTTPException as e:
+                            if "TOPIC_NOT_MODIFIED" in e.error_description:
+                                success = True
+                            else:
+                                self.logger.exception("Unexpected error syncing topic")
+
                         if success:
-                            self.logger.info(f"Forum topic updated for {topic_spec}")
+                            self.logger.info(f"Forum topic synced: {topic_spec}")
                             continue
                         else:
-                            self.logger.info(f"Forum topic not updated for {topic_spec}, will create new one")
+                            self.logger.info(f"Failed to sync {topic_spec}, will create new one")
 
                     self.logger.info(f"Creating new forum topic for {topic_spec}")
                     created_topic = await self.bot.create_forum_topic(
