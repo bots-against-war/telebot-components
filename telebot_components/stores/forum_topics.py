@@ -128,7 +128,8 @@ class ForumTopicStore:
                     )
                     if existing_message_thread_id is not None:
                         self.logger.info(
-                            f"Found saved message thread id for {topic_spec}, validating and syncing state"
+                            f"Found saved message thread id for {topic_spec}: "
+                            + f"{existing_message_thread_id}, trying to sync state"
                         )
                         success = False
                         try:
@@ -145,7 +146,8 @@ class ForumTopicStore:
                                 self.logger.exception("Unexpected error syncing topic")
 
                         if success:
-                            self.logger.info(f"Forum topic synced: {topic_spec}")
+                            self.logger.info(f"Forum topic OK: {topic_spec}")
+                            await asyncio.sleep(5)
                             continue
                         else:
                             self.logger.info(f"Failed to sync {topic_spec}, will create new one")
