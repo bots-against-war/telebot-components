@@ -532,7 +532,7 @@ class FeedbackHandler:
                     hashtag_msg_data = HashtagMessageData(message_id=hashtag_msg.id, hashtags=hashtags)
                     await self.recent_hashtag_message_for_user_store.save(user.id, hashtag_msg_data)
 
-        if send_user_id_hash:
+        if send_user_id_hash and not self.config.forum_topic_per_user:
             user_id_hash = self.config.user_id_hash_func(user.id, self.bot_prefix)
             last_sent_user_id_hash = await self.last_sent_user_id_hash_store.load(self.CONST_KEY)
             if last_sent_user_id_hash is None or last_sent_user_id_hash != user_id_hash:
