@@ -4,6 +4,7 @@ import itertools
 import operator
 from collections import defaultdict
 from dataclasses import dataclass
+from enum import Enum
 from itertools import chain, zip_longest
 from types import GenericAlias
 from typing import (  # type: ignore
@@ -13,10 +14,15 @@ from typing import (  # type: ignore
     Optional,
     Type,
     _TypedDictMeta,
+    cast,
     get_args,
 )
 
-from telebot_components.form.field import FormField, NextFieldGetter
+from telebot_components.form.field import (
+    FormField,
+    FormFieldResultProcessingOpts,
+    NextFieldGetter,
+)
 
 FieldName = Optional[str]
 
@@ -58,9 +64,9 @@ class Form:
                 raise ValueError(f"All fields must have unique names, but there is at least one duplicate: {fn}!")
 
         # binding next field getters so that they can look up next form field by its name
-        fields_by_name = {f.name: f for f in self.fields}
+        self.fields_by_name = {f.name: f for f in self.fields}
         for f in self.fields:
-            f.get_next_field_getter().fields_by_name = fields_by_name
+            f.get_next_field_getter().fields_by_name = self.fields_by_name
 
         # validating that field graph is connected and that the start field has no incoming edges
         reachable_field_names = set(
@@ -117,13 +123,14 @@ class Form:
         if not self.allow_cyclic:
             next_field_names = self.next_field_names.copy()
             prev_field_names = self.prev_field_names.copy()
-            topologically_sorted: list[Optional[str]] = []
+            topologically_sorted: list[str] = []
             # NOTE: this is semantically set, but we use list for predictability
             vertices_without_incoming_edges: list[Optional[str]] = [self.start_field.name]
             while vertices_without_incoming_edges:
                 vertices_without_incoming_edges.sort()
                 from_ = vertices_without_incoming_edges.pop(0)
-                topologically_sorted.append(from_)
+                if from_ is not None:
+                    topologically_sorted.append(from_)
                 tos = self.next_field_names.get(from_)
                 if tos is None:
                     continue
@@ -136,7 +143,7 @@ class Form:
 
             if any(next_field_names.values()):
                 raise ValueError("Form graph has at least one cycle")
-            self.topologically_sorted_field_names: Optional[list[FieldName]] = topologically_sorted
+            self.topologically_sorted_field_names: Optional[list[str]] = topologically_sorted
         else:
             self.topologically_sorted_field_names = None
 
@@ -202,7 +209,36 @@ class Form:
             lines.append(indent + f"{field.name}: {field_type_str}")
         return "\n".join(lines)
 
-    # def
+    def result_to_telegram_message(self, result: dict[str, Any], *, use_value_for_enums: bool = True) -> str:
+        if any(f.result_processing_opts is None for f in self.fields):
+            raise ValueError(
+                "Form can't convert result to telegram message, not all fields have necessary configuration"
+            )
+
+        lines: list[str] = []
+        field_names = self.topologically_sorted_field_names or sorted([f.name for f in self.fields])
+        for field_name in field_names:
+            field = self.fields_by_name[field_name]
+            field_result_processing_opts = cast(FormFieldResultProcessingOpts, field.result_processing_opts)
+            field_descr = field_result_processing_opts.descr
+            if field_name not in result:
+                if self.globally_required_fields is not None and field_name in self.globally_required_fields:
+                    raise ValueError(f"Globally required field {field_name!r} not found in result")
+                else:
+                    continue
+            field_value = result[field_name]
+
+            # heuristic pre-processing for field_value
+            if use_value_for_enums and isinstance(field_value, Enum):
+                field_value = field_value.value
+
+            if field_value is not None:
+                lines.append(
+                    format_named_value(
+                        field_descr, field_value, single_line=not field_result_processing_opts.is_multiline
+                    )
+                )
+        return "\n".join(lines)
 
     # VVVVVV messy shitty terminal visualization code VVVVVV
 
@@ -222,7 +258,7 @@ class Form:
             else:
                 return form_end_print_name
 
-        vertex_names = [to_print(fn) for fn in self.topologically_sorted_field_names]
+        vertex_names = self.topologically_sorted_field_names + [form_end_print_name]
         max_vertex_name_len = max([len(v) for v in vertex_names]) + 2
 
         edges: set[tuple[str, str]] = set()
@@ -391,3 +427,11 @@ def pad_to_len(string: str, length: int) -> str:
             string = " " + string
         add_to_right = not add_to_right
     return string
+
+
+def format_named_value(name: str, value: str, single_line: bool = True) -> str:
+    sep = ": " if single_line else "\n"
+    result = f"<b>{name}</b>{sep}{value}"
+    if not single_line:
+        result += "\n"
+    return result

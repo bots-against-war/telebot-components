@@ -94,12 +94,13 @@ class NextFieldGetter(Generic[FieldValueT]):
 class FormFieldResultProcessingOpts(Generic[FieldValueT]):
     """Hepler class to combine info on how to process a particular form field's result"""
 
-    is_required: bool
     descr: str  # used for telegram message formatting
 
     # external system stuff (usually airtable)
     column: Any  # usually an enum specifying airtable column
     value_mapping: Optional[dict[FieldValueT, Any]] = None  # if specified, maps a value
+
+    is_multiline: bool = False
 
 
 @dataclass

@@ -1,8 +1,14 @@
 import textwrap
+from enum import Enum
 
 import pytest
 
-from telebot_components.form.field import NextFieldGetter, PlainTextField
+from telebot_components.form.field import (
+    FormFieldResultProcessingOpts,
+    NextFieldGetter,
+    PlainTextField,
+    SingleSelectField,
+)
 from telebot_components.form.form import Form
 
 DUMMY_FORM_FIELD_KW = {"required": True, "query_message": "aaa", "empty_text_error_msg": "fail :("}
@@ -33,7 +39,7 @@ DUMMY_FORM_FIELD_KW = {"required": True, "query_message": "aaa", "empty_text_err
                 PlainTextField(
                     name="b",
                     next_field_getter=NextFieldGetter.by_mapping({"one": "c1", "two": "c2"}, default="c3"),
-                    **DUMMY_FORM_FIELD_KW  # type: ignore
+                    **DUMMY_FORM_FIELD_KW,  # type: ignore
                 ),
                 PlainTextField(name="c1", next_field_getter=NextFieldGetter.by_name("d"), **DUMMY_FORM_FIELD_KW),  # type: ignore
                 PlainTextField(name="c2", next_field_getter=NextFieldGetter.by_name("c4"), **DUMMY_FORM_FIELD_KW),  # type: ignore
@@ -73,10 +79,62 @@ def test_form_graph_analysis(
     print(f.generate_result_type())
     print(f.format_graph())
 
-    assert_is_multiline_text_same(f.generate_result_type(), expected_result_type)
+    assert_equal_multiline_text(f.generate_result_type(), expected_result_type)
 
 
-def assert_is_multiline_text_same(t1: str, t2: str) -> None:
+def test_form_result_processing() -> None:
+    class GDPRConsent(Enum):
+        YES = "yes"
+        NO = "no"
+        MAYBE = "maybe"
+
+    form = Form(
+        [
+            PlainTextField(
+                "message",
+                result_processing_opts=FormFieldResultProcessingOpts(descr="message", column="m"),
+                **DUMMY_FORM_FIELD_KW,  # type: ignore
+            ),
+            PlainTextField(
+                "name",
+                result_processing_opts=FormFieldResultProcessingOpts(descr="name", column="n"),
+                **DUMMY_FORM_FIELD_KW,  # type: ignore
+            ),
+            SingleSelectField(
+                "gdrp",
+                result_processing_opts=FormFieldResultProcessingOpts(descr="gdrp_ok", column="gdrp"),
+                required=True,
+                query_message="?",
+                EnumClass=GDPRConsent,
+                invalid_enum_value_error_msg="",
+            ),
+            PlainTextField(
+                "long_description",
+                result_processing_opts=FormFieldResultProcessingOpts(descr="long", column="l", is_multiline=True),
+                **DUMMY_FORM_FIELD_KW,  # type: ignore
+            ),
+        ]
+    )
+
+    telegram_msg_html = form.result_to_telegram_message(
+        {
+            "message": "Hello world",
+            "name": "Igor",
+            "gdrp": GDPRConsent.MAYBE,
+            "long_description": "Lorem ipsum yada yada yada",
+        }
+    )
+    expected_msg = """
+        <b>message</b>: Hello world
+        <b>name</b>: Igor
+        <b>gdrp_ok</b>: maybe
+        <b>long</b>
+        Lorem ipsum yada yada yada
+    """
+    assert_equal_multiline_text(telegram_msg_html, expected_msg)
+
+
+def assert_equal_multiline_text(t1: str, t2: str) -> None:
     def preproc(s: str) -> str:
         s = "\n".join(line for line in s.splitlines() if line)
         s = textwrap.dedent(s)
