@@ -1,10 +1,14 @@
 import copy
 from collections import defaultdict
 from dataclasses import dataclass
+import functools
 from itertools import chain, zip_longest
+import itertools
+import operator
 from types import GenericAlias
 from typing import (  # type: ignore
     Any,
+    Collection,
     Mapping,
     Optional,
     Type,
@@ -14,7 +18,7 @@ from typing import (  # type: ignore
 
 from telebot_components.form.field import FormField, NextFieldGetter
 
-FieldNameT = Optional[str]
+FieldName = Optional[str]
 
 
 class Form:
@@ -25,14 +29,16 @@ class Form:
     it's graph structure in ASCII with print_graph method.
     """
 
-    def __init__(self, fields: list[FormField], start_field: Optional[FormField] = None, allow_cyclic: bool = False):
+    def __init__(self, fields: Collection[FormField], start_field: Optional[FormField] = None, allow_cyclic: bool = False):
         if not fields:
             raise ValueError("Fields list can't be empty")
+
+        self.allow_cyclic = allow_cyclic
 
         # copying fields to avoid modifying user's objects
         self.fields = [copy.deepcopy(f) for f in fields]
         if start_field is None:
-            start_field = fields[0]
+            start_field = next(iter(fields))
         self.start_field = copy.deepcopy(start_field)
 
         # if any field has the next field getter omitted, use default sequential connection
@@ -58,7 +64,7 @@ class Form:
         reachable_field_names = set(
             chain.from_iterable(f.get_next_field_getter().possible_next_field_names for f in self.fields)
         )
-        if not allow_cyclic and self.start_field.name in reachable_field_names:
+        if not self.allow_cyclic and self.start_field.name in reachable_field_names:
             raise ValueError(
                 f"Form configuration error: start field '{self.start_field.name}' is reachable from other field(s)"
             )
@@ -80,34 +86,51 @@ class Form:
                     + ", ".join([str(n) for n in unknown_reachable_field_names])
                 )
 
-        # topological sort to validate acyclicity + for nice rendering
-        if not allow_cyclic:
-            next_field_names: dict[FieldNameT, set[FieldNameT]] = {
-                f.name: set(f.get_next_field_getter().possible_next_field_names) for f in self.fields
-            }
-            prev_field_names: dict[FieldNameT, set[FieldNameT]] = defaultdict(set)
-            for field_name, nexts in next_field_names.items():
-                for next in nexts:
-                    prev_field_names[next].add(field_name)
+        # pre-calculating some generic graph-related stuff
+        self.next_field_names: dict[FieldName, set[FieldName]] = {
+            f.name: set(f.get_next_field_getter().possible_next_field_names) for f in self.fields
+        }
+        self.prev_field_names: dict[FieldName, set[FieldName]] = defaultdict(set)
+        for field_name, nexts in self.next_field_names.items():
+            for next_ in nexts:
+                self.prev_field_names[next_].add(field_name)
 
+        # calculating global requiredness for fields
+        if not self.allow_cyclic:
+
+            def paths_from(from_field: FieldName) -> list[list[FieldName]]:
+                if from_field is None:
+                    return [[]]
+                paths: list[list[FieldName]] = []
+                for step in self.next_field_names[from_field]:
+                    paths.extend([[from_field, *subpath] for subpath in paths_from(step)])
+                return paths
+
+            path_fields = [set(p) for p in paths_from(self.start_field.name)]
+            self.globally_required_fields: Optional[set[FieldName]] = functools.reduce(operator.and_, path_fields)
+        else:
+            self.globally_required_fields = None
+
+        # topological sort to validate acyclicity + for nice rendering
+        if not self.allow_cyclic:
             topologically_sorted: list[Optional[str]] = []
             vertices_without_incoming_edges: set[Optional[str]] = {self.start_field.name}
             while vertices_without_incoming_edges:
                 from_ = vertices_without_incoming_edges.pop()
                 topologically_sorted.append(from_)
-                tos = next_field_names.get(from_)
+                tos = self.next_field_names.get(from_)
                 if tos is None:
                     continue
                 tos = tos.copy()
                 for to in tos:
-                    next_field_names[from_].remove(to)
-                    prev_field_names[to].remove(from_)
-                    if not prev_field_names[to]:
+                    self.next_field_names[from_].remove(to)
+                    self.prev_field_names[to].remove(from_)
+                    if not self.prev_field_names[to]:
                         vertices_without_incoming_edges.add(to)
 
-            if any(next_field_names.values()):
+            if any(self.next_field_names.values()):
                 raise ValueError("Form graph has at least one cycle")
-            self.topologically_sorted_field_names: Optional[list[FieldNameT]] = topologically_sorted
+            self.topologically_sorted_field_names: Optional[list[FieldName]] = topologically_sorted
         else:
             self.topologically_sorted_field_names = None
 
@@ -169,6 +192,10 @@ class Form:
             lines.append(indent + f"{field.name}: {field_type_str}")
         return "\n".join(lines)
 
+    # def
+
+    # VVVVVV messy shitty terminal visualization code VVVVVV
+
     def print_graph(self):
         if self.topologically_sorted_field_names is None:
             raise ValueError("print_graph method only available for acyclic form graphs")
@@ -179,7 +206,7 @@ class Form:
             idx += 1
             form_end_print_name = f"{DEFAULT_FORM_END_PRINT} ({idx})"
 
-        def to_print(name: FieldNameT) -> str:
+        def to_print(name: FieldName) -> str:
             if isinstance(name, str):
                 return name
             else:

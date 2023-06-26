@@ -9,6 +9,7 @@ from datetime import date, time, tzinfo
 from enum import Enum
 from hashlib import md5
 from typing import (
+    Any,
     Callable,
     ClassVar,
     Dict,
@@ -90,6 +91,18 @@ class NextFieldGetter(Generic[FieldValueT]):
 
 
 @dataclass
+class FormFieldResultProcessingOpts(Generic[FieldValueT]):
+    """Hepler class to combine info on how to process a particular form field's result"""
+
+    is_required: bool
+    descr: str  # used for telegram message formatting
+
+    # external system stuff (usually airtable)
+    column: Any  # usually an enum specifying airtable column
+    value_mapping: Optional[dict[FieldValueT, Any]] = None  # if specified, maps a value
+
+
+@dataclass
 class MessageProcessingResult(Generic[FieldValueT]):
     response_to_user: Optional[str]
     parsed_value: Optional[FieldValueT]
@@ -107,6 +120,8 @@ class FormField(Generic[FieldValueT]):
 
     # None (default) means sequential form flow
     next_field_getter: Optional[NextFieldGetter[FieldValueT]] = dataclass_field(default=None, kw_only=True)
+
+    result_processing_opts: Optional[FormFieldResultProcessingOpts] = dataclass_field(default=None, kw_only=True)
 
     def __post_init__(self):
         pass  # future-proof
