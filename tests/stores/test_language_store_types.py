@@ -74,13 +74,13 @@ def test_any_text_to_str_value_errors(any_text: Any, language: MaybeLanguage, ex
         pytest.param(
             "не словарь",
             [Language.UK, Language.RU],
-            "Language -> str dictionary expected, found str",
+            "Not a multilang text: не словарь",
             TypeError,
         ),
         pytest.param(
             1312,
             [Language.UK, Language.RU],
-            "Language -> str dictionary expected, found int",
+            "Not a multilang text: 1312",
             TypeError,
         ),
     ],

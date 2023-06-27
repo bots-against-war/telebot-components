@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any, Optional, TypeGuard, Union
 
 from telebot import AsyncTeleBot, types
 from telebot.callback_data import CallbackData
@@ -43,15 +43,30 @@ MaybeLanguage = Optional[Language]  # None = multilang mode is off, using regula
 
 MultilangText = dict[Language, str]
 
+AnyText = Union[str, MultilangText]
+
+
+def is_multilang_text(t: Any) -> TypeGuard[MultilangText]:
+    if not isinstance(t, dict):
+        return False
+    for key, value in t.items():
+        if not isinstance(key, Language):
+            return False
+        if not isinstance(value, str):
+            return False
+    return True
+
+
+def is_any_text(t: Any) -> TypeGuard[AnyText]:
+    return is_multilang_text(t) or isinstance(t, str)
+
 
 def validate_multilang_text(t: Any, languages: list[Language]) -> MultilangText:
-    if not isinstance(t, dict):
-        raise TypeError(f"Language -> str dictionary expected, found {type(t).__name__}: {t}")
+    if not is_multilang_text(t):
+        raise TypeError(f"Not a multilang text: {t}")
     for language in languages:
         if language not in t:
             raise ValueError(f"Multilang text misses localisation to '{language}': {t}")
-        if not isinstance(t[language], str):
-            raise ValueError(f"Non-string text for language {language}: {t[language]!r}")
     return t
 
 
@@ -59,9 +74,6 @@ def vaildate_singlelang_text(t: Any) -> str:
     if not isinstance(t, str):
         raise TypeError(f"Single language text must be a string, found {type(t).__name__}: {t}")
     return t
-
-
-AnyText = Union[str, MultilangText]
 
 
 def any_text_to_str(t: AnyText, language: MaybeLanguage) -> str:

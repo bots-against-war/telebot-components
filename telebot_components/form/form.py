@@ -1,20 +1,29 @@
 import copy
+import functools
+import operator
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import chain, zip_longest
 from types import GenericAlias
 from typing import (  # type: ignore
     Any,
+    Collection,
     Mapping,
     Optional,
     Type,
     _TypedDictMeta,
+    cast,
     get_args,
 )
 
-from telebot_components.form.field import FormField, NextFieldGetter
+from telebot_components.form.field import (
+    FormField,
+    FormFieldResultFormattingOpts,
+    NextFieldGetter,
+)
+from telebot_components.stores.language import MaybeLanguage
 
-FieldNameT = Optional[str]
+FieldName = Optional[str]
 
 
 class Form:
@@ -25,14 +34,18 @@ class Form:
     it's graph structure in ASCII with print_graph method.
     """
 
-    def __init__(self, fields: list[FormField], start_field: Optional[FormField] = None, allow_cyclic: bool = False):
+    def __init__(
+        self, fields: Collection[FormField], start_field: Optional[FormField] = None, allow_cyclic: bool = False
+    ):
         if not fields:
             raise ValueError("Fields list can't be empty")
+
+        self.allow_cyclic = allow_cyclic
 
         # copying fields to avoid modifying user's objects
         self.fields = [copy.deepcopy(f) for f in fields]
         if start_field is None:
-            start_field = fields[0]
+            start_field = next(iter(fields))
         self.start_field = copy.deepcopy(start_field)
 
         # if any field has the next field getter omitted, use default sequential connection
@@ -50,15 +63,15 @@ class Form:
                 raise ValueError(f"All fields must have unique names, but there is at least one duplicate: {fn}!")
 
         # binding next field getters so that they can look up next form field by its name
-        fields_by_name = {f.name: f for f in self.fields}
+        self.fields_by_name = {f.name: f for f in self.fields}
         for f in self.fields:
-            f.get_next_field_getter().fields_by_name = fields_by_name
+            f.get_next_field_getter().fields_by_name = self.fields_by_name
 
         # validating that field graph is connected and that the start field has no incoming edges
         reachable_field_names = set(
             chain.from_iterable(f.get_next_field_getter().possible_next_field_names for f in self.fields)
         )
-        if not allow_cyclic and self.start_field.name in reachable_field_names:
+        if not self.allow_cyclic and self.start_field.name in reachable_field_names:
             raise ValueError(
                 f"Form configuration error: start field '{self.start_field.name}' is reachable from other field(s)"
             )
@@ -80,22 +93,44 @@ class Form:
                     + ", ".join([str(n) for n in unknown_reachable_field_names])
                 )
 
-        # topological sort to validate acyclicity + for nice rendering
-        if not allow_cyclic:
-            next_field_names: dict[FieldNameT, set[FieldNameT]] = {
-                f.name: set(f.get_next_field_getter().possible_next_field_names) for f in self.fields
-            }
-            prev_field_names: dict[FieldNameT, set[FieldNameT]] = defaultdict(set)
-            for field_name, nexts in next_field_names.items():
-                for next in nexts:
-                    prev_field_names[next].add(field_name)
+        # pre-calculating some generic graph-related stuff
+        self.next_field_names: dict[FieldName, set[FieldName]] = {
+            f.name: set(f.get_next_field_getter().possible_next_field_names) for f in self.fields
+        }
+        self.prev_field_names: dict[FieldName, set[FieldName]] = defaultdict(set)
+        for field_name, nexts in self.next_field_names.items():
+            for next_ in nexts:
+                self.prev_field_names[next_].add(field_name)
 
-            topologically_sorted: list[Optional[str]] = []
-            vertices_without_incoming_edges: set[Optional[str]] = {self.start_field.name}
+        # calculating global requiredness for fields
+        if not self.allow_cyclic:
+
+            def paths_from(from_field: FieldName) -> list[list[FieldName]]:
+                if from_field is None:
+                    return [[]]
+                paths: list[list[FieldName]] = []
+                for step in self.next_field_names[from_field]:
+                    paths.extend([[from_field, *subpath] for subpath in paths_from(step)])
+                return paths
+
+            path_fields = [set(p) for p in paths_from(self.start_field.name)]
+            self.globally_required_fields: Optional[set[FieldName]] = functools.reduce(operator.and_, path_fields)
+        else:
+            self.globally_required_fields = None
+
+        # topological sort to validate acyclicity + for nice rendering
+        if not self.allow_cyclic:
+            next_field_names = self.next_field_names.copy()
+            prev_field_names = self.prev_field_names.copy()
+            topologically_sorted: list[str] = []
+            # NOTE: this is semantically set, but we use list for predictability
+            vertices_without_incoming_edges: list[Optional[str]] = [self.start_field.name]
             while vertices_without_incoming_edges:
-                from_ = vertices_without_incoming_edges.pop()
-                topologically_sorted.append(from_)
-                tos = next_field_names.get(from_)
+                vertices_without_incoming_edges.sort()
+                from_ = vertices_without_incoming_edges.pop(0)
+                if from_ is not None:
+                    topologically_sorted.append(from_)
+                tos = self.next_field_names.get(from_)
                 if tos is None:
                     continue
                 tos = tos.copy()
@@ -103,11 +138,11 @@ class Form:
                     next_field_names[from_].remove(to)
                     prev_field_names[to].remove(from_)
                     if not prev_field_names[to]:
-                        vertices_without_incoming_edges.add(to)
+                        vertices_without_incoming_edges.append(to)
 
             if any(next_field_names.values()):
                 raise ValueError("Form graph has at least one cycle")
-            self.topologically_sorted_field_names: Optional[list[FieldNameT]] = topologically_sorted
+            self.topologically_sorted_field_names: Optional[list[str]] = topologically_sorted
         else:
             self.topologically_sorted_field_names = None
 
@@ -160,16 +195,67 @@ class Form:
         indent = " " * 4
         lines = ["class MyFormResultT(TypedDict):", indent + '"""Generated by Form.generate_result_type() method"""']
         fields = self.fields.copy()
+        fields.sort(key=lambda ff: ff.name)  # first, alphabetical sort
         if self.topologically_sorted_field_names is not None:
+            # then, if possible, topological
             fields.sort(key=lambda ff: self.topologically_sorted_field_names.index(ff.name))  # type: ignore
         for field in fields:
             field_type_str = self._field_value_type_to_string(self._field_value_type(field))
             if not field.required:
                 field_type_str = f"Optional[{field_type_str}]"
+            if self.globally_required_fields is not None and field.name not in self.globally_required_fields:
+                field_type_str = f"NotRequired[{field_type_str}]"
             lines.append(indent + f"{field.name}: {field_type_str}")
         return "\n".join(lines)
 
-    def print_graph(self):
+    def result_to_html(self, result: Mapping[str, Any], lang: MaybeLanguage) -> str:
+        for f in self.fields:
+            if f.result_formatting_opts is None:
+                raise ValueError(
+                    f"Can't convert result to telegram message, field {f.name!r} does not have formatting opts"
+                )
+
+        lines: list[str] = []
+        field_names = self.topologically_sorted_field_names or sorted([f.name for f in self.fields])
+        for field_name in field_names:
+            field = self.fields_by_name[field_name]
+            formatting_opts = cast(FormFieldResultFormattingOpts, field.result_formatting_opts)
+            field_descr = formatting_opts.descr
+            if field_name not in result:
+                if self.globally_required_fields is not None and field_name in self.globally_required_fields:
+                    raise ValueError(f"Globally required field {field_name!r} not found in result")
+                else:
+                    continue
+            field_value = result[field_name]
+            field_value_formatter = formatting_opts.value_formatter or field.value_to_str
+            if field_value is not None:
+                lines.append(
+                    format_named_value(
+                        field_descr,
+                        field_value_formatter(field_value, lang),
+                        single_line=not formatting_opts.is_multiline,
+                    )
+                )
+        return "\n".join(lines)
+
+    def result_to_export(self, result: Mapping[str, Any]) -> dict[Any, Any]:
+        exported: dict[Any, Any] = dict()
+        for name, value in result.items():
+            field = self.fields_by_name[name]
+            if field.export_opts is None:
+                continue
+            if field.export_opts.value_mapping is not None:
+                value_for_export = field.export_opts.value_mapping[value]
+            elif field.export_opts.value_processor is not None:
+                value_for_export = field.export_opts.value_processor(value)
+            else:
+                value_for_export = value
+            exported[field.export_opts.column] = value_for_export
+        return exported
+
+    # VVVVVV messy shitty terminal visualization code VVVVVV
+
+    def format_graph(self) -> str:
         if self.topologically_sorted_field_names is None:
             raise ValueError("print_graph method only available for acyclic form graphs")
         DEFAULT_FORM_END_PRINT = "END"
@@ -179,13 +265,13 @@ class Form:
             idx += 1
             form_end_print_name = f"{DEFAULT_FORM_END_PRINT} ({idx})"
 
-        def to_print(name: FieldNameT) -> str:
+        def to_print(name: FieldName) -> str:
             if isinstance(name, str):
                 return name
             else:
                 return form_end_print_name
 
-        vertex_names = [to_print(fn) for fn in self.topologically_sorted_field_names]
+        vertex_names = self.topologically_sorted_field_names + [form_end_print_name]
         max_vertex_name_len = max([len(v) for v in vertex_names]) + 2
 
         edges: set[tuple[str, str]] = set()
@@ -238,7 +324,10 @@ class Form:
             arc_canvas.insert_string(arc_end_i - arc_start_i, 0, ("─" * arc_margin) + "┘")
             canvas.overlay(arc_canvas, arc_start_i, max_vertex_name_len + 3, front=False)
 
-        canvas.print()
+        return canvas.format()
+
+    def print_graph(self) -> None:
+        print(self.format_graph())
 
 
 @dataclass
@@ -335,9 +424,11 @@ class CharCanvas:
     def join_down(self, other: "CharCanvas", j_left: int, front: bool = True):
         self.overlay(other, self.height, j_left, front)
 
+    def format(self):
+        return "\n".join("".join(row) for row in self._array)
+
     def print(self):
-        for row in self._array:
-            print("".join(row))
+        print(self.format())
 
 
 def pad_to_len(string: str, length: int) -> str:
@@ -349,3 +440,11 @@ def pad_to_len(string: str, length: int) -> str:
             string = " " + string
         add_to_right = not add_to_right
     return string
+
+
+def format_named_value(name: str, value: str, single_line: bool = True) -> str:
+    sep = ": " if single_line else "\n"
+    result = f"<b>{name}</b>{sep}{value}"
+    if not single_line:
+        result += "\n"
+    return result
