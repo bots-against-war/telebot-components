@@ -1,10 +1,8 @@
 import copy
 import functools
-import itertools
 import operator
 from collections import defaultdict
 from dataclasses import dataclass
-from enum import Enum
 from itertools import chain, zip_longest
 from types import GenericAlias
 from typing import (  # type: ignore

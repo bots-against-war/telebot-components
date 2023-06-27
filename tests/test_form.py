@@ -43,11 +43,31 @@ DUMMY_FORM_FIELD_KW = {"required": True, "query_message": "aaa", "empty_text_err
                     next_field_getter=NextFieldGetter.by_mapping({"one": "c1", "two": "c2"}, default="c3"),
                     **DUMMY_FORM_FIELD_KW,  # type: ignore
                 ),
-                PlainTextField(name="c1", next_field_getter=NextFieldGetter.by_name("d"), **DUMMY_FORM_FIELD_KW),  # type: ignore
-                PlainTextField(name="c2", next_field_getter=NextFieldGetter.by_name("c4"), **DUMMY_FORM_FIELD_KW),  # type: ignore
-                PlainTextField(name="c4", next_field_getter=NextFieldGetter.by_name("c5"), **DUMMY_FORM_FIELD_KW),  # type: ignore
-                PlainTextField(name="c5", next_field_getter=NextFieldGetter.by_name("d"), **DUMMY_FORM_FIELD_KW),  # type: ignore
-                PlainTextField(name="c3", next_field_getter=NextFieldGetter.by_name("d"), **DUMMY_FORM_FIELD_KW),  # type: ignore
+                PlainTextField(
+                    name="c1",
+                    next_field_getter=NextFieldGetter.by_name("d"),
+                    **DUMMY_FORM_FIELD_KW,  # type: ignore
+                ),
+                PlainTextField(
+                    name="c2",
+                    next_field_getter=NextFieldGetter.by_name("c4"),
+                    **DUMMY_FORM_FIELD_KW,  # type: ignore
+                ),
+                PlainTextField(
+                    name="c4",
+                    next_field_getter=NextFieldGetter.by_name("c5"),
+                    **DUMMY_FORM_FIELD_KW,  # type: ignore
+                ),
+                PlainTextField(
+                    name="c5",
+                    next_field_getter=NextFieldGetter.by_name("d"),
+                    **DUMMY_FORM_FIELD_KW,  # type: ignore
+                ),
+                PlainTextField(
+                    name="c3",
+                    next_field_getter=NextFieldGetter.by_name("d"),
+                    **DUMMY_FORM_FIELD_KW,  # type: ignore
+                ),
                 PlainTextField(name="d", **DUMMY_FORM_FIELD_KW),  # type: ignore
                 PlainTextField(name="e", **DUMMY_FORM_FIELD_KW),  # type: ignore
             ],
