@@ -7,10 +7,10 @@ license = "GPLv3"
 readme = "README.md"
 repository = "https://github.com/bots-against-war/telebot-components"
 packages = [{include = "telebot_components"}]
+
 [tool.poetry.group.dev.dependencies]
 pyproject-flake8 = "^6.0.0.post1"
 coverage = "^7.2.3"
-
 
 [tool.poetry-dynamic-versioning]
 enable = true
@@ -46,8 +46,8 @@ mypy = "^0.960"
 
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning"]
+build-backend = "poetry_dynamic_versioning.backend"
 
 
 [tool.black]
