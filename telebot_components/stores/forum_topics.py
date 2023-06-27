@@ -140,7 +140,7 @@ class ForumTopicStore:
                                 icon_custom_emoji_id=topic_spec.icon_custom_emoji_id,
                             )
                         except ApiHTTPException as e:
-                            if "TOPIC_NOT_MODIFIED" in e.error_description:
+                            if e.error_description is not None and "TOPIC_NOT_MODIFIED" in e.error_description:
                                 success = True
                             else:
                                 self.logger.exception("Unexpected error syncing topic")
