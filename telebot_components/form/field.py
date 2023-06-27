@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import dataclasses
 import datetime
 import logging
 from dataclasses import dataclass
@@ -125,6 +126,9 @@ class MessageProcessingResult(Generic[FieldValueT]):
     no_form_state_mutation: bool
 
 
+FormFieldT = TypeVar("FormFieldT")
+
+
 @dataclass
 class FormField(Generic[FieldValueT]):
     name: str
@@ -217,6 +221,18 @@ class FormField(Generic[FieldValueT]):
         """If subclasses add their own field-related texts (custom error messages,
         button captions or anything else, they must list them here)"""
         return []
+
+    def with_output_opts(
+        self: FormFieldT,
+        formatting: Optional[FormFieldResultFormattingOpts] = None,
+        export: Optional[FormFieldResultExportOpts] = None,
+    ) -> FormFieldT:
+        """Typed version of dataclasses.replace"""
+        return dataclasses.replace(
+            self,
+            result_formatting_opts=formatting,
+            export_opts=export,
+        )
 
 
 @dataclass

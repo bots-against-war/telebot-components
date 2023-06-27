@@ -210,7 +210,7 @@ class Form:
             lines.append(indent + f"{field.name}: {field_type_str}")
         return "\n".join(lines)
 
-    def result_to_html(self, result: dict[str, Any], lang: MaybeLanguage) -> str:
+    def result_to_html(self, result: Mapping[str, Any], lang: MaybeLanguage) -> str:
         for f in self.fields:
             if f.result_formatting_opts is None:
                 raise ValueError(
@@ -240,7 +240,7 @@ class Form:
                 )
         return "\n".join(lines)
 
-    def result_to_export(self, result: dict[str, Any]) -> dict[Any, Any]:
+    def result_to_export(self, result: Mapping[str, Any]) -> dict[Any, Any]:
         exported: dict[Any, Any] = dict()
         for name, value in result.items():
             field = self.fields_by_name[name]
