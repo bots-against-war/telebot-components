@@ -4,6 +4,7 @@ from enum import Enum
 import pytest
 
 from telebot_components.form.field import (
+    FormFieldResultExportOpts,
     FormFieldResultFormattingOpts,
     NextFieldGetter,
     PlainTextField,
@@ -102,11 +103,13 @@ def test_form_result_processing() -> None:
             PlainTextField(
                 "message",
                 result_formatting_opts=FormFieldResultFormattingOpts(descr="Message"),
+                export_opts=FormFieldResultExportOpts(column="A"),
                 **DUMMY_FORM_FIELD_KW,  # type: ignore
             ),
             PlainTextField(
                 "name",
                 result_formatting_opts=FormFieldResultFormattingOpts(descr="Name"),
+                export_opts=FormFieldResultExportOpts(column="B", value_processor=lambda s: s.upper()),
                 **DUMMY_FORM_FIELD_KW,  # type: ignore
             ),
             SingleSelectField(
@@ -114,6 +117,14 @@ def test_form_result_processing() -> None:
                 result_formatting_opts=FormFieldResultFormattingOpts(
                     descr="GDRP OK?",
                     value_formatter=format_gdrp_consent,
+                ),
+                export_opts=FormFieldResultExportOpts(
+                    column="C",
+                    value_mapping={
+                        GDPRConsent.YES: "+",
+                        GDPRConsent.NO: "-",
+                        GDPRConsent.MAYBE: "?",
+                    },
                 ),
                 required=True,
                 query_message="?",
@@ -123,20 +134,20 @@ def test_form_result_processing() -> None:
             PlainTextField(
                 "long_description",
                 result_formatting_opts=FormFieldResultFormattingOpts(descr="Description", is_multiline=True),
+                export_opts=None,
                 **DUMMY_FORM_FIELD_KW,  # type: ignore
             ),
         ]
     )
 
-    telegram_msg_html = form.result_to_html(
-        {
-            "message": "Hello world",
-            "name": "Igor",
-            "gdrp": GDPRConsent.MAYBE,
-            "long_description": "Lorem ipsum yada yada yada",
-        },
-        lang=None,
-    )
+    form_result = {
+        "message": "Hello world",
+        "name": "Igor",
+        "gdrp": GDPRConsent.MAYBE,
+        "long_description": "Lorem ipsum yada yada yada",
+    }
+
+    telegram_msg_html = form.result_to_html(form_result, lang=None)
     expected_msg = """
         <b>Message</b>: Hello world
         <b>Name</b>: Igor
@@ -145,6 +156,8 @@ def test_form_result_processing() -> None:
         Lorem ipsum yada yada yada
     """
     assert_equal_multiline_text(telegram_msg_html, expected_msg)
+
+    assert form.result_to_export(form_result) == {"A": "Hello world", "B": "IGOR", "C": "?"}
 
 
 def assert_equal_multiline_text(t1: str, t2: str) -> None:

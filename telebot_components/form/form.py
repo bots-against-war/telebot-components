@@ -211,10 +211,11 @@ class Form:
         return "\n".join(lines)
 
     def result_to_html(self, result: dict[str, Any], lang: MaybeLanguage) -> str:
-        if any(f.result_formatting_opts is None for f in self.fields):
-            raise ValueError(
-                "Form can't convert result to telegram message, not all fields have necessary configuration"
-            )
+        for f in self.fields:
+            if f.result_formatting_opts is None:
+                raise ValueError(
+                    f"Can't convert result to telegram message, field {f.name!r} does not have formatting opts"
+                )
 
         lines: list[str] = []
         field_names = self.topologically_sorted_field_names or sorted([f.name for f in self.fields])
@@ -238,6 +239,21 @@ class Form:
                     )
                 )
         return "\n".join(lines)
+
+    def result_to_export(self, result: dict[str, Any]) -> dict[Any, Any]:
+        exported: dict[Any, Any] = dict()
+        for name, value in result.items():
+            field = self.fields_by_name[name]
+            if field.export_opts is None:
+                continue
+            if field.export_opts.value_mapping is not None:
+                value_for_export = field.export_opts.value_mapping[value]
+            elif field.export_opts.value_processor is not None:
+                value_for_export = field.export_opts.value_processor(value)
+            else:
+                value_for_export = value
+            exported[field.export_opts.column] = value_for_export
+        return exported
 
     # VVVVVV messy shitty terminal visualization code VVVVVV
 

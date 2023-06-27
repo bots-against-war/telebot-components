@@ -93,7 +93,7 @@ class NextFieldGetter(Generic[FieldValueT]):
 
 @dataclass
 class FormFieldResultFormattingOpts(Generic[FieldValueT]):
-    """Per-field options specifying how to format its result to HTML (e.g. telegram message)"""
+    """Options specifying how to format field's result to HTML (e.g. telegram message)"""
 
     descr: str  # used for telegram message formatting
     is_multiline: bool = False
@@ -104,9 +104,18 @@ class FormFieldResultFormattingOpts(Generic[FieldValueT]):
 
 @dataclass
 class FormFieldResultExportOpts(Generic[FieldValueT]):
-    # external system stuff (usually airtable)
-    column: Any  # usually an enum specifying airtable column
-    value_mapping: Optional[dict[FieldValueT, Any]] = None  # if specified, maps a value
+    """Options specifying how to format field's result to generic record"""
+
+    column: Any  # usually an enum specifying airtable or Google Sheets column
+
+    value_mapping: Optional[dict[FieldValueT, Any]] = None
+    unmapped_value_default: Optional[Any] = None
+
+    value_processor: Optional[Callable[[FieldValueT], Any]] = None
+
+    def __post_init__(self) -> None:
+        if (self.value_mapping is not None) and (self.value_processor is not None):
+            raise ValueError("Value mapping and value processor are mutually exclusive")
 
 
 @dataclass
@@ -129,6 +138,7 @@ class FormField(Generic[FieldValueT]):
     next_field_getter: Optional[NextFieldGetter[FieldValueT]] = dataclass_field(default=None, kw_only=True)
 
     result_formatting_opts: Optional[FormFieldResultFormattingOpts] = dataclass_field(default=None, kw_only=True)
+    export_opts: Optional[FormFieldResultExportOpts] = dataclass_field(default=None, kw_only=True)
 
     def __post_init__(self):
         pass  # future-proof
