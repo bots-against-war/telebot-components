@@ -4,12 +4,13 @@ from enum import Enum
 import pytest
 
 from telebot_components.form.field import (
-    FormFieldResultProcessingOpts,
+    FormFieldResultFormattingOpts,
     NextFieldGetter,
     PlainTextField,
     SingleSelectField,
 )
 from telebot_components.form.form import Form
+from telebot_components.stores.language import MaybeLanguage
 
 DUMMY_FORM_FIELD_KW = {"required": True, "query_message": "aaa", "empty_text_error_msg": "fail :("}
 
@@ -88,21 +89,32 @@ def test_form_result_processing() -> None:
         NO = "no"
         MAYBE = "maybe"
 
+    def format_gdrp_consent(v: GDPRConsent, lang: MaybeLanguage) -> str:
+        if v is GDPRConsent.YES:
+            return "✅"
+        elif v is GDPRConsent.NO:
+            return "❌"
+        else:
+            return "🧐"
+
     form = Form(
         [
             PlainTextField(
                 "message",
-                result_processing_opts=FormFieldResultProcessingOpts(descr="message", column="m"),
+                result_formatting_opts=FormFieldResultFormattingOpts(descr="Message"),
                 **DUMMY_FORM_FIELD_KW,  # type: ignore
             ),
             PlainTextField(
                 "name",
-                result_processing_opts=FormFieldResultProcessingOpts(descr="name", column="n"),
+                result_formatting_opts=FormFieldResultFormattingOpts(descr="Name"),
                 **DUMMY_FORM_FIELD_KW,  # type: ignore
             ),
             SingleSelectField(
                 "gdrp",
-                result_processing_opts=FormFieldResultProcessingOpts(descr="gdrp_ok", column="gdrp"),
+                result_formatting_opts=FormFieldResultFormattingOpts(
+                    descr="GDRP OK?",
+                    value_formatter=format_gdrp_consent,
+                ),
                 required=True,
                 query_message="?",
                 EnumClass=GDPRConsent,
@@ -110,25 +122,26 @@ def test_form_result_processing() -> None:
             ),
             PlainTextField(
                 "long_description",
-                result_processing_opts=FormFieldResultProcessingOpts(descr="long", column="l", is_multiline=True),
+                result_formatting_opts=FormFieldResultFormattingOpts(descr="Description", is_multiline=True),
                 **DUMMY_FORM_FIELD_KW,  # type: ignore
             ),
         ]
     )
 
-    telegram_msg_html = form.result_to_telegram_message(
+    telegram_msg_html = form.result_to_html(
         {
             "message": "Hello world",
             "name": "Igor",
             "gdrp": GDPRConsent.MAYBE,
             "long_description": "Lorem ipsum yada yada yada",
-        }
+        },
+        lang=None,
     )
     expected_msg = """
-        <b>message</b>: Hello world
-        <b>name</b>: Igor
-        <b>gdrp_ok</b>: maybe
-        <b>long</b>
+        <b>Message</b>: Hello world
+        <b>Name</b>: Igor
+        <b>GDRP OK?</b>: 🧐
+        <b>Description</b>
         Lorem ipsum yada yada yada
     """
     assert_equal_multiline_text(telegram_msg_html, expected_msg)

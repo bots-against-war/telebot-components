@@ -20,9 +20,10 @@ from typing import (  # type: ignore
 
 from telebot_components.form.field import (
     FormField,
-    FormFieldResultProcessingOpts,
+    FormFieldResultFormattingOpts,
     NextFieldGetter,
 )
+from telebot_components.stores.language import MaybeLanguage
 
 FieldName = Optional[str]
 
@@ -209,8 +210,8 @@ class Form:
             lines.append(indent + f"{field.name}: {field_type_str}")
         return "\n".join(lines)
 
-    def result_to_telegram_message(self, result: dict[str, Any], *, use_value_for_enums: bool = True) -> str:
-        if any(f.result_processing_opts is None for f in self.fields):
+    def result_to_html(self, result: dict[str, Any], lang: MaybeLanguage) -> str:
+        if any(f.result_formatting_opts is None for f in self.fields):
             raise ValueError(
                 "Form can't convert result to telegram message, not all fields have necessary configuration"
             )
@@ -219,23 +220,21 @@ class Form:
         field_names = self.topologically_sorted_field_names or sorted([f.name for f in self.fields])
         for field_name in field_names:
             field = self.fields_by_name[field_name]
-            field_result_processing_opts = cast(FormFieldResultProcessingOpts, field.result_processing_opts)
-            field_descr = field_result_processing_opts.descr
+            formatting_opts = cast(FormFieldResultFormattingOpts, field.result_formatting_opts)
+            field_descr = formatting_opts.descr
             if field_name not in result:
                 if self.globally_required_fields is not None and field_name in self.globally_required_fields:
                     raise ValueError(f"Globally required field {field_name!r} not found in result")
                 else:
                     continue
             field_value = result[field_name]
-
-            # heuristic pre-processing for field_value
-            if use_value_for_enums and isinstance(field_value, Enum):
-                field_value = field_value.value
-
+            field_value_formatter = formatting_opts.value_formatter or field.value_to_str
             if field_value is not None:
                 lines.append(
                     format_named_value(
-                        field_descr, field_value, single_line=not field_result_processing_opts.is_multiline
+                        field_descr,
+                        field_value_formatter(field_value, lang),
+                        single_line=not formatting_opts.is_multiline,
                     )
                 )
         return "\n".join(lines)

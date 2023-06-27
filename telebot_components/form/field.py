@@ -37,6 +37,7 @@ from telebot_components.stores.language import (
     Language,
     MaybeLanguage,
     any_text_to_str,
+    is_any_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,16 +92,21 @@ class NextFieldGetter(Generic[FieldValueT]):
 
 
 @dataclass
-class FormFieldResultProcessingOpts(Generic[FieldValueT]):
-    """Hepler class to combine info on how to process a particular form field's result"""
+class FormFieldResultFormattingOpts(Generic[FieldValueT]):
+    """Per-field options specifying how to format its result to HTML (e.g. telegram message)"""
 
     descr: str  # used for telegram message formatting
+    is_multiline: bool = False
+    value_formatter: Optional[
+        Callable[[FieldValueT, MaybeLanguage], str]
+    ] = None  # if not specified, field's default formatter is used
 
+
+@dataclass
+class FormFieldResultExportOpts(Generic[FieldValueT]):
     # external system stuff (usually airtable)
     column: Any  # usually an enum specifying airtable column
     value_mapping: Optional[dict[FieldValueT, Any]] = None  # if specified, maps a value
-
-    is_multiline: bool = False
 
 
 @dataclass
@@ -122,7 +128,7 @@ class FormField(Generic[FieldValueT]):
     # None (default) means sequential form flow
     next_field_getter: Optional[NextFieldGetter[FieldValueT]] = dataclass_field(default=None, kw_only=True)
 
-    result_processing_opts: Optional[FormFieldResultProcessingOpts] = dataclass_field(default=None, kw_only=True)
+    result_formatting_opts: Optional[FormFieldResultFormattingOpts] = dataclass_field(default=None, kw_only=True)
 
     def __post_init__(self):
         pass  # future-proof
@@ -166,6 +172,7 @@ class FormField(Generic[FieldValueT]):
         return self.query_message
 
     def value_to_str(self, value: FieldValueT, language: MaybeLanguage) -> str:
+        """Fields can override this to specify the default human-readable formatting of the field value."""
         return str(value)
 
     def get_result_message(self, value: FieldValueT, language: MaybeLanguage) -> Optional[str]:
@@ -237,6 +244,9 @@ class IntegerListField(FormField[list[int]]):
         except Exception:
             raise BadFieldValueError(self.not_an_integer_list_error_msg)
 
+    def value_to_str(self, value: list[int], lang: MaybeLanguage) -> str:
+        return ", ".join(str(i) for i in value)
+
 
 @dataclass
 class DateField(FormField[date]):
@@ -269,6 +279,9 @@ class DateField(FormField[date]):
         else:
             return []
 
+    def value_to_str(self, value: date, lang: MaybeLanguage) -> str:
+        return value.strftime("%d.%m.%Y")
+
 
 @dataclass
 class TimeField(FormField[time]):
@@ -279,6 +292,9 @@ class TimeField(FormField[time]):
             return time.fromisoformat(message.text_content)
         except ValueError as e:
             raise BadFieldValueError(self.bad_time_format_msg)
+
+    def value_to_str(self, value: time, lang: MaybeLanguage) -> str:
+        return value.isoformat(timespec="minutes")
 
 
 TelegramAttachment = Union[list[tg.PhotoSize], tg.Video, tg.Animation, tg.Audio, tg.Document]
@@ -441,9 +457,6 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
     def custom_value_type(self) -> Type:
         return self.EnumClass
 
-    def value_to_str(self, value: Enum, language: MaybeLanguage) -> str:
-        return any_text_to_str(value.value, language)
-
     def parse_enum(self, text: str) -> Optional[Enum]:
         for enum in self.EnumClass:
             if isinstance(enum.value, str):
@@ -468,6 +481,12 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
             raise BadFieldValueError(self.invalid_enum_value_error_msg)
         else:
             return parsed_enum
+
+    def value_to_str(self, value: Enum, lang: MaybeLanguage) -> str:
+        if not is_any_text(value.value):
+            return any_text_to_str(value.value, lang)
+        else:
+            return str(value.value)
 
 
 EnumField = SingleSelectField  # backward compatibility
@@ -724,3 +743,6 @@ class DateMenuField(StrictlyInlineFormField[date]):
             month=current_value.month if current_value else None,
             selected_value=current_value,
         )
+
+    def value_to_str(self, value: date, lang: MaybeLanguage) -> str:
+        return value.strftime("%d.%m.%Y")
