@@ -7,7 +7,7 @@ from enum import Enum
 from functools import partial
 from typing import Any, Generic, Type, TypedDict, TypeVar, Union
 
-from pyairtable import Table
+from pyairtable import Table, retry_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ class AirtableApi(Generic[AirtableColumnEnumT]):
         self.config = config
         self.ColumnsEnumClass = ColumnsEnumClass
         self.thread_pool = ThreadPoolExecutor(max_workers=16)
-        self._table = Table(api_key, config["base_id"], config["table_name"])
+        self._table = Table(api_key, config["base_id"], config["table_name"], retry_strategy=retry_strategy())
 
     def _dump_entry(self, data: dict[AirtableColumnEnumT, Any]) -> dict[str, Any]:
         return {self.field_id_by_column_enum_item[k]: v for k, v in data.items()}
