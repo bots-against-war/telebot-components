@@ -12,10 +12,10 @@ Framework / toolkit for building bots with [telebot](https://github.com/bots-aga
    cd ./baw
    ```
 
-2. The project requires Poerty 1.2.x or higher (see [installation instruction](https://python-poetry.org/docs/master#installing-with-the-official-installer))).
-   For example, to install `1.2.0b2` on Unix, run
+2. The project requires Poerty 1.5.1 (see [installation instruction](https://python-poetry.org/docs/master#installing-with-the-official-installer))).
+   For example, to install `1.5.1` on Unix, run
    ```bash
-   curl -sSL https://install.python-poetry.org | python3 - --version 1.2.0b2
+   curl -sSL https://install.python-poetry.org | python3 - --version 1.5.1
    ```
 
 3. Then, to install the library with all dependencies, run from project root
@@ -25,7 +25,7 @@ Framework / toolkit for building bots with [telebot](https://github.com/bots-aga
    - You might need to manually install dynamic versioning plugin (without it local build will
      always have version `0.0.0`):
      ```bash
-     poetry plugin add poetry-dynamic-versioning-plugin
+     poetry self add poetry-dynamic-versioning-plugin
      ```
    - To create virtualenv inside the project’s root directory, use command
      ```bash
