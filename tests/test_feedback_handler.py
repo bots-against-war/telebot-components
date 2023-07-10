@@ -4,10 +4,16 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
+import pytest
 from telebot import types as tg
 from telebot.test_util import MockedAsyncTeleBot
 
-from telebot_components.feedback import FeedbackConfig, FeedbackHandler, ServiceMessages
+from telebot_components.feedback import (
+    FeedbackConfig,
+    FeedbackHandler,
+    ServiceMessages,
+    UserAnonymization,
+)
 from telebot_components.feedback.anti_spam import AntiSpam, AntiSpamConfig
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.category import Category, CategoryStore
@@ -25,7 +31,11 @@ USER_ID = 420
 
 
 def create_mock_feedback_handler(
-    redis: RedisInterface, is_throttling: bool, has_categories: bool, has_forum_topics: bool
+    redis: RedisInterface,
+    is_throttling: bool,
+    has_categories: bool,
+    has_forum_topics: bool,
+    user_anonymization: UserAnonymization = UserAnonymization.LEGACY,
 ) -> FeedbackHandler:
     bot_prefix = uuid.uuid4().hex[:8]
 
@@ -79,6 +89,7 @@ def create_mock_feedback_handler(
             hashtags_in_admin_chat=True,
             hashtag_message_rarer_than=None,
             unanswered_hashtag="hey_there",
+            user_anonymization=user_anonymization,
         ),
         service_messages=ServiceMessages(
             forwarded_to_admin_ok="thanks",

@@ -25,7 +25,7 @@ from telebot_components.stores.forum_topics import (
 
 
 async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
-    bot_prefix = "example-feedback-bot-with-forum"
+    bot_prefix = "feedback-bot-with-forum-topic-per-category"
     bot = AsyncTeleBot(token)
 
     logging.basicConfig(level=logging.INFO)
