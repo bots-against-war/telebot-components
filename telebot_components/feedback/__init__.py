@@ -497,6 +497,8 @@ class FeedbackHandler:
             user_identifier = user.full_name
             if user.username:
                 user_identifier += " @" + user.username
+            user_identifier += f" (#{user.id})"
+
             if not support_html:
                 return user_identifier
             else:
