@@ -6,7 +6,12 @@ from telebot.runner import BotRunner
 from telebot.types import constants as tg_constants
 
 from telebot_components.constants import times
-from telebot_components.feedback import FeedbackConfig, FeedbackHandler, ServiceMessages
+from telebot_components.feedback import (
+    FeedbackConfig,
+    FeedbackHandler,
+    ServiceMessages,
+    UserAnonymization,
+)
 from telebot_components.feedback.anti_spam import AntiSpam, AntiSpamConfig
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
@@ -76,7 +81,7 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
             hashtag_message_rarer_than=times.FIVE_MINUTES,
             unanswered_hashtag="неотвечено",
             confirm_forwarded_to_admin_rarer_than=times.FIVE_MINUTES,
-            full_user_anonymization=True,
+            user_anonymization=UserAnonymization.FULL,
         ),
         anti_spam=AntiSpam(
             redis,

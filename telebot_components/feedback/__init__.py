@@ -1,9 +1,11 @@
 import asyncio
 import copy
 import dataclasses
+import enum
 import logging
 import math
 import random
+import warnings
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import timedelta
@@ -113,6 +115,19 @@ class AdminChatAction:
     delete_everything_related_to_user_after: bool = False
 
 
+class UserAnonymization(enum.Enum):
+    # name, username and user id are shown to admins
+    NONE = enum.auto()
+
+    # legacy option
+    # nothing is shown intentionally, but message forwarding mechanism is used,
+    # which gives a link to user profile unless they opted in to anonymize it
+    LEGACY = enum.auto()
+
+    # admins only see anonymized identifier for the user
+    FULL = enum.auto()
+
+
 @dataclass
 class FeedbackConfig:
     # if False, message log is sent to PM with the admin that has invoked the '/log' cmd
@@ -142,9 +157,12 @@ class FeedbackConfig:
     # appended to admin chat help under "Other" section; Supports HTML markup
     admin_chat_help_extra: Optional[str] = None
 
+    # LEGACY OPTION
     # if True, user messages are not forwarded but copied to admin chat without any back
     # link to the user account; before the message, user id hash is sent for identification
     full_user_anonymization: bool = False
+
+    user_anonymization: UserAnonymization = UserAnonymization.LEGACY
 
     # (user id, bot prefix) -> unique string identifying the user
     # used to generate user id hash for a particular bot;
@@ -157,6 +175,13 @@ class FeedbackConfig:
     forum_topic_per_user: bool = False
 
     user_forum_topic_lifetime: timedelta = timedelta(days=7)
+
+    def __post_init__(self):
+        if self.full_user_anonymization:
+            warnings.warn(
+                "full_user_anonymization argument is deprecated, use user_anonymization=UserAnonymization.FULL"
+            )
+            self.user_anonymization = UserAnonymization.FULL
 
 
 @dataclasses.dataclass
@@ -303,7 +328,7 @@ class FeedbackHandler:
         )
 
         # const key -> last sent user id hash to avoid repeating it on multiple consequtive messages
-        self.last_sent_user_id_hash_store = KeyValueStore[str](
+        self.last_sent_user_identifier_store = KeyValueStore[str](
             name="last-sent-user-id-hash",
             prefix=bot_prefix,
             redis=redis,
@@ -313,7 +338,7 @@ class FeedbackHandler:
         )
 
         # message
-        self.message_thread_id_by_user_id_store = KeyValueStore[int](
+        self.message_thread_id_by_user_identifier_store = KeyValueStore[int](
             name="message-thread-id-by-user",
             prefix=bot_prefix,
             redis=redis,
@@ -362,7 +387,7 @@ class FeedbackHandler:
             "<b>Справка-памятка для админского чата</b>",
             "<i>Сообщение сгенерировано автоматически по команде /help</i>",
         ]
-        copies_or_forwards = "пересылает" if not self.config.full_user_anonymization else "копирует"
+        copies_or_forwards = "пересылает" if self.config.user_anonymization is UserAnonymization.LEGACY else "копирует"
         paragraphs.append(
             "💬 <i>Основное</i>\n"
             + f"· В этот чат бот {copies_or_forwards} все сообщения (кроме специальных случаев вроде /команд), "
@@ -372,8 +397,12 @@ class FeedbackHandler:
                     "· Перед скопированным сообщением бот указывает анонимизированный идентификатор пользователь_ницы, "
                     + f"например такой: «{self.config.user_id_hash_func(random.randint(1, 1000), self.bot_prefix)}»\n"
                 )
-                if self.config.full_user_anonymization
-                else ""
+                if self.config.user_anonymization is UserAnonymization.FULL
+                else (
+                    "· Перед скопированным сообщением бот указывает имя и юзернейм пользователь_ницы"
+                    if self.config.user_anonymization is UserAnonymization.NONE
+                    else ""
+                )
             )
             + "· Если в этом чате ответить на сообщение, бот скопирует ответ в чат с пользователь_ницей.\n"
             + "· Чтобы отменить отправку сообщения пользователь_нице - отправьте реплай с командой /undo на ваше "
@@ -445,13 +474,27 @@ class FeedbackHandler:
         else:
             return True
 
+    def user_identifier(self, user: tg.User, support_html: bool) -> str:
+        if self.config.user_anonymization is UserAnonymization.FULL:
+            return self.config.user_id_hash_func(user.id, self.bot_prefix)
+        elif self.config.user_anonymization is UserAnonymization.NONE:
+            user_identifier = user.full_name
+            if user.username:
+                user_identifier += " @" + user.username
+            if not support_html:
+                return user_identifier
+            else:
+                return html_link(href=f"tg://user?id={user.id}", text=user_identifier)
+        elif self.config.user_anonymization is UserAnonymization.LEGACY:
+            return user.full_name  # it's shown on message forward anyway
+
     async def _handle_user_message(
         self,
         bot: AsyncTeleBot,
         user: tg.User,
         message_forwarder: Callable[[Optional[int]], Awaitable[MessageForwarderResult]],
         user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
-        send_user_id_hash: bool,
+        send_user_identifier: bool,
         export_to_integrations: bool = True,
     ) -> Optional[int]:
         if self.banned_users_store is not None and await self.banned_users_store.is_banned(user.id):
@@ -473,19 +516,15 @@ class FeedbackHandler:
         if self.forum_topic_store is not None:
             message_thread_id: Optional[int] = await self.forum_topic_store.get_message_thread_id(category)
         elif self.config.forum_topic_per_user:
-            message_thread_id = await self.message_thread_id_by_user_id_store.load(user.id)
+            message_thread_id = await self.message_thread_id_by_user_identifier_store.load(user.id)
             if message_thread_id is None:
                 try:
                     new_topic = await bot.create_forum_topic(
                         chat_id=self.admin_chat_id,
-                        name=self.config.user_id_hash_func(
-                            user.id,
-                            self.bot_prefix,
-                        ),
+                        name=self.user_identifier(user, support_html=False),
                     )
-                    # TODO: sent the topic to redis-backed queue for cleanup...
                     message_thread_id = new_topic.message_thread_id
-                    await self.message_thread_id_by_user_id_store.save(user.id, message_thread_id)
+                    await self.message_thread_id_by_user_identifier_store.save(user.id, message_thread_id)
                 except Exception:
                     self.logger.exception(
                         f"Error creating forum topic for user {user}, will send without message thread id"
@@ -532,17 +571,18 @@ class FeedbackHandler:
                     hashtag_msg_data = HashtagMessageData(message_id=hashtag_msg.id, hashtags=hashtags)
                     await self.recent_hashtag_message_for_user_store.save(user.id, hashtag_msg_data)
 
-        if send_user_id_hash and not self.config.forum_topic_per_user:
-            user_id_hash = self.config.user_id_hash_func(user.id, self.bot_prefix)
-            last_sent_user_id_hash = await self.last_sent_user_id_hash_store.load(self.CONST_KEY)
-            if last_sent_user_id_hash is None or last_sent_user_id_hash != user_id_hash:
-                user_id_hash_msg = await bot.send_message(
+        if send_user_identifier and not self.config.forum_topic_per_user:
+            user_identifier = self.user_identifier(user, support_html=True)
+            last_sent_user_identifier = await self.last_sent_user_identifier_store.load(self.CONST_KEY)
+            if last_sent_user_identifier is None or last_sent_user_identifier != user_identifier:
+                user_identifier_msg = await bot.send_message(
                     self.admin_chat_id,
-                    user_id_hash,
+                    user_identifier,
                     message_thread_id=message_thread_id,
+                    parse_mode="HTML",
                 )
-                await self.last_sent_user_id_hash_store.save(self.CONST_KEY, user_id_hash)
-                await self.save_message_from_user(user, user_id_hash_msg.id)
+                await self.last_sent_user_identifier_store.save(self.CONST_KEY, user_identifier)
+                await self.save_message_from_user(user, user_identifier_msg.id)
 
         preforwarded_msg = None
         if self.config.before_forwarding is not None:
@@ -609,16 +649,6 @@ class FeedbackHandler:
             )
         return message_forwarder_result.admin_chat_msg.id
 
-    async def _send_user_id_hash_message(self, bot: AsyncTeleBot, user_id: int) -> Optional[int]:
-        user_id_hash = self.config.user_id_hash_func(user_id, self.bot_prefix)
-        last_sent_user_id_hash = await self.last_sent_user_id_hash_store.load(self.CONST_KEY)
-        if last_sent_user_id_hash is None or last_sent_user_id_hash != user_id_hash:
-            user_id_hash_msg = await bot.send_message(self.admin_chat_id, user_id_hash)
-            await self.last_sent_user_id_hash_store.save(self.CONST_KEY, user_id_hash)
-            return user_id_hash_msg.id
-        else:
-            return None
-
     async def emulate_user_message(
         self,
         bot: AsyncTeleBot,
@@ -628,10 +658,12 @@ class FeedbackHandler:
         no_response: bool = False,
         export_to_trello: bool = True,
         remove_exif_data: bool = True,
-        send_user_id_hash_message: bool = False,
+        send_user_id_hash_message: bool = False,  # DEPRECATED, USE send_user_identifier_message
+        send_user_identifier_message: bool = False,
         **send_message_kwargs,
     ) -> Optional[int]:
-        """Sometimes we want FeedbackHandler to act like the user has sent us a message, but without actually
+        """
+        Sometimes we want FeedbackHandler to act like the user has sent us a message, but without actually
         a message there (they might have pressed a button or interacted with the bot in some other way). This
         method can be used in such cases.
 
@@ -672,13 +704,21 @@ class FeedbackHandler:
             user=user,
             message_forwarder=message_forwarder,
             user_replier=user_replier,
-            send_user_id_hash=send_user_id_hash_message,
+            send_user_identifier=send_user_identifier_message or send_user_id_hash_message,
             export_to_integrations=export_to_trello,
         )
 
     async def handle_user_message(self, message: tg.Message, bot: AsyncTeleBot, reply_to_user: bool) -> Optional[int]:
         async def message_forwarder(message_thread_id: Optional[int]) -> MessageForwarderResult:
-            if self.config.full_user_anonymization:
+            if self.config.user_anonymization is UserAnonymization.LEGACY:
+                forwarded_message = await bot.forward_message(
+                    self.admin_chat_id,
+                    from_chat_id=message.chat.id,
+                    message_id=message.id,
+                    message_thread_id=message_thread_id,
+                )
+                return MessageForwarderResult(admin_chat_msg=forwarded_message, user_msg=message)
+            else:
                 copied_message_id = await bot.copy_message(
                     chat_id=self.admin_chat_id,
                     from_chat_id=message.chat.id,
@@ -689,14 +729,6 @@ class FeedbackHandler:
                 fake_admin_chat_message.chat = await self.admin_chat()
                 fake_admin_chat_message.id = copied_message_id.message_id
                 return MessageForwarderResult(admin_chat_msg=fake_admin_chat_message, user_msg=message)
-            else:
-                forwarded_message = await bot.forward_message(
-                    self.admin_chat_id,
-                    from_chat_id=message.chat.id,
-                    message_id=message.id,
-                    message_thread_id=message_thread_id,
-                )
-                return MessageForwarderResult(admin_chat_msg=forwarded_message, user_msg=message)
 
         async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]):
             if reply_to_user:
@@ -706,7 +738,7 @@ class FeedbackHandler:
             bot=bot,
             user=message.from_user,
             message_forwarder=message_forwarder,
-            send_user_id_hash=self.config.full_user_anonymization,
+            send_user_identifier=self.config.user_anonymization is not UserAnonymization.LEGACY,
             user_replier=user_replier,
         )
 
