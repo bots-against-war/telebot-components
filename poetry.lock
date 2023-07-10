@@ -148,7 +148,7 @@ files = [
 ]
 
 [package.dependencies]
-typing-extensions = ">=4.0.0"
+typing-extensions = {version = ">=4.0.0", markers = "python_version < \"3.11\""}
 
 [[package]]
 name = "async-timeout"
@@ -1620,4 +1620,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "8775b36bf37cd7a6b121e610a2f4bb58ef500d885b51b91efda4994129b018bd"
+content-hash = "34fa4dc41a8ec0bebc8a586db5d74165b8670c7137f4ab94c17a9d5cf86d21e9"
