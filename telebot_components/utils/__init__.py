@@ -85,6 +85,7 @@ def telegram_html_escape(string: str) -> str:
 
 
 def html_link(href: str, text: str) -> str:
+    text = telegram_html_escape(text)
     return f'<a href="{href}">{text}</a>'
 
 

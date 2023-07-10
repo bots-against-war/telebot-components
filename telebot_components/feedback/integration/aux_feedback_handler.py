@@ -5,7 +5,11 @@ from typing import Optional
 from telebot import AsyncTeleBot
 from telebot import types as tg
 
-from telebot_components.feedback import FeedbackHandler, MessageForwarderResult
+from telebot_components.feedback import (
+    FeedbackHandler,
+    MessageForwarderResult,
+    UserAnonymization,
+)
 from telebot_components.feedback.integration.interface import (
     FeedbackHandlerIntegration,
     UserMessageRepliedFromIntegrationEvent,
@@ -142,7 +146,7 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
                 bot=bot,
                 user=user,
                 message_forwarder=message_forwarder,
-                send_user_id_hash=self.feedback_handler.config.full_user_anonymization,
+                send_user_identifier=self.feedback_handler.config.user_anonymization is not UserAnonymization.LEGACY,
                 user_replier=noop,
                 export_to_integrations=True,
             )

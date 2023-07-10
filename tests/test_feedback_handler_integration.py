@@ -5,7 +5,12 @@ from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.test_util import MockedAsyncTeleBot
 
-from telebot_components.feedback import FeedbackConfig, FeedbackHandler, ServiceMessages
+from telebot_components.feedback import (
+    FeedbackConfig,
+    FeedbackHandler,
+    ServiceMessages,
+    UserAnonymization,
+)
 from telebot_components.feedback.anti_spam import DisabledAntiSpam
 from telebot_components.feedback.integration.aux_feedback_handler import (
     AuxFeedbackHandlerIntegration,
@@ -65,7 +70,7 @@ async def test_feedback_handler_integration_basic(redis: RedisInterface) -> None
             hashtags_in_admin_chat=True,
             hashtag_message_rarer_than=None,
             unanswered_hashtag=None,
-            full_user_anonymization=True,
+            user_anonymization=UserAnonymization.FULL,
         ),
         anti_spam=DisabledAntiSpam(),
         service_messages=ServiceMessages(
@@ -183,7 +188,6 @@ async def test_aux_admin_chat_integration(redis: RedisInterface) -> None:
                 hashtags_in_admin_chat=True,
                 hashtag_message_rarer_than=None,
                 unanswered_hashtag=None,
-                full_user_anonymization=False,
             ),
             anti_spam=DisabledAntiSpam(),
             service_messages=ServiceMessages(
