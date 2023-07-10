@@ -1,7 +1,6 @@
 import asyncio
 import functools
 import hashlib
-import html
 import io
 import logging
 import string

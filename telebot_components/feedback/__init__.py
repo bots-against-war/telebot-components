@@ -174,7 +174,10 @@ class FeedbackConfig:
     # [⚠️ experimental] create new forum topic per new user
     forum_topic_per_user: bool = False
 
-    user_forum_topic_lifetime: timedelta = timedelta(days=7)
+    # if set, admins can reply to users by just writing to their topic, no need to use Telegram message reply
+    any_message_in_user_topic_is_reply: bool = True
+
+    user_forum_topic_lifetime: timedelta = timedelta(days=30)
 
     def __post_init__(self):
         if self.full_user_anonymization:
@@ -337,9 +340,17 @@ class FeedbackHandler:
             dumper=str,
         )
 
-        # message
-        self.message_thread_id_by_user_identifier_store = KeyValueStore[int](
+        # if forum_topic_per_user option is used
+        self.message_thread_id_by_user_id_store = KeyValueStore[int](
             name="message-thread-id-by-user",
+            prefix=bot_prefix,
+            redis=redis,
+            expiration_time=self.config.user_forum_topic_lifetime,
+            loader=int,
+            dumper=str,
+        )
+        self.last_forwarded_message_id_by_message_thread_id = KeyValueStore[int](
+            name="last-fwd-msg-id-in-thread",
             prefix=bot_prefix,
             redis=redis,
             expiration_time=self.config.user_forum_topic_lifetime,
@@ -376,11 +387,15 @@ class FeedbackHandler:
         if self.banned_users_store is not None:
             await self.banned_users_store.ban_user(origin_chat_id)
 
-    async def save_message_from_user(self, author: tg.User, forwarded_message_id: int):
+    async def save_message_from_user(
+        self, author: tg.User, forwarded_message_id: int, message_thread_id: Optional[int]
+    ):
         origin_chat_id = author.id
         await self.origin_chat_id_store.save(forwarded_message_id, origin_chat_id)
         await self.user_related_messages_store.add(origin_chat_id, forwarded_message_id, reset_ttl=True)
         await self.message_log_store.push(origin_chat_id, forwarded_message_id, reset_ttl=True)
+        if message_thread_id is not None:
+            await self.last_forwarded_message_id_by_message_thread_id.save(message_thread_id, forwarded_message_id)
 
     def _admin_help_message(self) -> str:
         paragraphs = [
@@ -475,6 +490,7 @@ class FeedbackHandler:
             return True
 
     def user_identifier(self, user: tg.User, support_html: bool) -> str:
+        """Human readable identifier for the user (not to be confused with user id)"""
         if self.config.user_anonymization is UserAnonymization.FULL:
             return self.config.user_id_hash_func(user.id, self.bot_prefix)
         elif self.config.user_anonymization is UserAnonymization.NONE:
@@ -516,7 +532,7 @@ class FeedbackHandler:
         if self.forum_topic_store is not None:
             message_thread_id: Optional[int] = await self.forum_topic_store.get_message_thread_id(category)
         elif self.config.forum_topic_per_user:
-            message_thread_id = await self.message_thread_id_by_user_identifier_store.load(user.id)
+            message_thread_id = await self.message_thread_id_by_user_id_store.load(user.id)
             if message_thread_id is None:
                 try:
                     new_topic = await bot.create_forum_topic(
@@ -524,7 +540,7 @@ class FeedbackHandler:
                         name=self.user_identifier(user, support_html=False),
                     )
                     message_thread_id = new_topic.message_thread_id
-                    await self.message_thread_id_by_user_identifier_store.save(user.id, message_thread_id)
+                    await self.message_thread_id_by_user_id_store.save(user.id, message_thread_id)
                 except Exception:
                     self.logger.exception(
                         f"Error creating forum topic for user {user}, will send without message thread id"
@@ -582,23 +598,25 @@ class FeedbackHandler:
                     parse_mode="HTML",
                 )
                 await self.last_sent_user_identifier_store.save(self.CONST_KEY, user_identifier)
-                await self.save_message_from_user(user, user_identifier_msg.id)
+                await self.save_message_from_user(user, user_identifier_msg.id, message_thread_id=message_thread_id)
 
         preforwarded_msg = None
         if self.config.before_forwarding is not None:
             preforwarded_msg = await self.config.before_forwarding(user)
             if isinstance(preforwarded_msg, tg.Message):
-                await self.save_message_from_user(user, preforwarded_msg.id)
+                await self.save_message_from_user(user, preforwarded_msg.id, message_thread_id=message_thread_id)
 
         # admin_chat_forwarded_msg_id, user_content_message = await message_forwarder()
         message_forwarder_result = await message_forwarder(message_thread_id)
-        await self.save_message_from_user(user, message_forwarder_result.admin_chat_msg.id)
+        await self.save_message_from_user(
+            user, message_forwarder_result.admin_chat_msg.id, message_thread_id=message_thread_id
+        )
 
         postforwarded_msg = None
         if self.config.after_forwarding is not None:
             postforwarded_msg = await self.config.after_forwarding(user)
             if isinstance(postforwarded_msg, tg.Message):
-                await self.save_message_from_user(user, postforwarded_msg.id)
+                await self.save_message_from_user(user, postforwarded_msg.id, message_thread_id=message_thread_id)
 
         if self.config.hashtags_in_admin_chat and hashtag_msg_data is not None:
             await self.hashtag_message_for_forwarded_message_store.save(
@@ -894,21 +912,51 @@ class FeedbackHandler:
 
         @bot.message_handler(
             chat_id=[self.admin_chat_id],
-            is_reply=True,
             content_types=list(tg_constants.MediaContentType),
         )
         async def admin_to_bot(message: tg.Message):
             try:
-                forwarded_msg = message.reply_to_message
-                if forwarded_msg is None:
+                replied_to_msg = message.reply_to_message
+                if replied_to_msg is not None and replied_to_msg.forum_topic_created is None:
+                    self.logger.debug("Message in admin chat is a non-trivial reply")
+                    forwarded_msg_id = replied_to_msg.id
+                    forwarded_msg: Optional[tg.Message] = replied_to_msg
+                elif not self.config.forum_topic_per_user:
+                    self.logger.debug(
+                        "Ignoring message in admin chat: not a reply and forum topic per user not enabled"
+                    )
                     return
-                origin_chat_id = await self.origin_chat_id_store.load(forwarded_msg.id)
+                elif not self.config.any_message_in_user_topic_is_reply:
+                    self.logger.debug(
+                        "Ignoring message in admin chat: not a reply and "
+                        + f"{self.config.any_message_in_user_topic_is_reply = }"
+                    )
+                    return
+                else:
+                    forwarded_msg = None
+                    if message.message_thread_id is None:
+                        self.logger.debug("Message in admin chat is not a reply and not in topic")
+                        return
+                    maybe_forwarded_msg_id = await self.last_forwarded_message_id_by_message_thread_id.load(
+                        message.message_thread_id
+                    )
+                    if maybe_forwarded_msg_id is None:
+                        self.logger.debug("Message in admin chat is not a reply and not in user's topic")
+                        return
+                    forwarded_msg_id = maybe_forwarded_msg_id
+
+                origin_chat_id = await self.origin_chat_id_store.load(forwarded_msg_id)
                 if origin_chat_id is None:
                     return
 
                 if message.text is not None and message.text.startswith("/"):
                     # admin chat commands
                     if message.text in self.admin_chat_response_action_by_command:
+                        if forwarded_msg is None:
+                            raise RuntimeError(
+                                "Admin chat response actions are not supported in per-user forum topics, "
+                                "please try replying to a user's message directly."
+                            )
                         admin_chat_action = self.admin_chat_response_action_by_command[message.text]
                         await admin_chat_action.callback(message, forwarded_msg, origin_chat_id)
                         if admin_chat_action.delete_everything_related_to_user_after:
@@ -1024,7 +1072,7 @@ class FeedbackHandler:
                         )
 
                     if self.config.hashtags_in_admin_chat:
-                        await self._remove_unanswered_hashtag(bot, forwarded_msg.id)
+                        await self._remove_unanswered_hashtag(bot, forwarded_msg_id)
                     has_attachments = message.content_type != "text"
                     await asyncio.gather(
                         *[
@@ -1038,7 +1086,7 @@ class FeedbackHandler:
                                     reply_has_attachments=has_attachments,
                                     reply_author=message.from_user.first_name,
                                     reply_link=telegram_message_url(self.admin_chat_id, message.id),
-                                    main_admin_chat_message_id=forwarded_msg.id,
+                                    main_admin_chat_message_id=forwarded_msg_id,
                                 )
                             )
                             for integration in self.integrations

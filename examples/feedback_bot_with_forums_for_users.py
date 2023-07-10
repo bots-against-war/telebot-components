@@ -14,21 +14,13 @@ from telebot_components.feedback import (
 )
 from telebot_components.feedback.anti_spam import AntiSpam, AntiSpamConfig
 from telebot_components.redis_utils.interface import RedisInterface
-from telebot_components.stores.banned_users import BannedUsersStore
-from telebot_components.stores.category import Category, CategoryStore
-from telebot_components.stores.forum_topics import (
-    CategoryForumTopicStore,
-    ForumTopicSpec,
-    ForumTopicStore,
-    ForumTopicStoreErrorMessages,
-)
 
 
 async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
     bot_prefix = "feedback-bot-with-forum-topic-per-user"
     bot = AsyncTeleBot(token)
 
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
 
     async def welcome(user: tg.User):
         await bot.send_message(user.id, "hey")
@@ -46,7 +38,7 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
             message_log_to_admin_chat=True,
             force_category_selection=True,
             hashtags_in_admin_chat=True,
-            hashtag_message_rarer_than=times.FIVE_MINUTES,
+            hashtag_message_rarer_than=None,
             unanswered_hashtag="неотвечено",
             confirm_forwarded_to_admin_rarer_than=times.FIVE_MINUTES,
             user_anonymization=UserAnonymization.NONE,
