@@ -19,6 +19,12 @@ from telebot_components.stores.category import (
     CategorySelectedContext,
     CategoryStore,
 )
+from telebot_components.stores.language import (
+    Language,
+    LanguageSelectionMenuConfig,
+    LanguageStore,
+    any_text_to_str,
+)
 
 
 def create_menu_bot(token: str):
@@ -44,38 +50,84 @@ def create_menu_bot(token: str):
     )
 
     menu_tree = Menu(
-        text="Hi! What survey do you want to take?",
+        text={
+            Language.RU: "Привет! Какой опрос ты хочешь пройти?",
+            Language.EN: "Hi! What survey do you want to take?",
+        },
         config=MenuConfig(
-            back_label="<-",
+            back_label={
+                Language.RU: "Назад",
+                Language.EN: "🔙 Back",
+            },
             lock_after_termination=False,
         ),
         menu_items=[
             MenuItem(
-                label="Programming language",
+                label={
+                    Language.RU: "Язык программирования",
+                    Language.EN: "Programming language",
+                },
                 submenu=Menu(
-                    "Please choose your programming language",
-                    [
+                    text={
+                        Language.RU: "Пожалуйста, выберите ваш язык программирования",
+                        Language.EN: "Please choose your programming language",
+                    },
+                    menu_items=[
                         MenuItem(
-                            label="APL",
+                            label={
+                                Language.RU: "APL",
+                                Language.EN: "APL",
+                            },
                             terminator="APL",
                             bound_category=good,
                         ),
                         MenuItem(
-                            label="PROLOG",
+                            label={
+                                Language.RU: "PROLOG",
+                                Language.EN: "PROLOG",
+                            },
                             terminator="PROLOG",
                         ),
                         MenuItem(
-                            label="Haskell",
+                            label={
+                                Language.RU: "Haskell",
+                                Language.EN: "Haskell",
+                            },
                             terminator="Haskell",
                         ),
                         MenuItem(
-                            label="C family",
+                            label={
+                                Language.RU: "C семейство",
+                                Language.EN: "C family",
+                            },
                             submenu=Menu(
-                                "Which C family language do you use?",
+                                {
+                                    Language.RU: "Какой язык семейства C вы используете?",
+                                    Language.EN: "Which C family language do you use?",
+                                },
                                 menu_items=[
-                                    MenuItem(label="C", terminator="C", bound_category=good),
-                                    MenuItem(label="C++", terminator="C++"),
-                                    MenuItem(label="C#", terminator="C#"),
+                                    MenuItem(
+                                        label={
+                                            Language.RU: "Си",
+                                            Language.EN: "C",
+                                        },
+                                        terminator="C",
+                                        bound_category=good,
+                                    ),
+                                    MenuItem(
+                                        label={
+                                            Language.RU: "Си++",
+                                            Language.EN: "C++",
+                                        },
+                                        terminator="C++",
+                                    ),
+                                    MenuItem(
+                                        label={
+                                            Language.RU: "Си шарп",
+                                            Language.EN: "C#",
+                                        },
+                                        terminator="C#",
+                                    ),
                                 ],
                             ),
                         ),
@@ -83,22 +135,37 @@ def create_menu_bot(token: str):
                 ),
             ),
             MenuItem(
-                label="Operating system",
+                label={
+                    Language.RU: "Операционная система",
+                    Language.EN: "Operating system",
+                },
                 submenu=Menu(
-                    "Please choose your operating system",
+                    {
+                        Language.RU: "Пожалуйста, выберите вашу операционную систему",
+                        Language.EN: "Please choose your operating system",
+                    },
                     [
                         MenuItem(
-                            label="Windows",
+                            label={
+                                Language.RU: "Виндоуз",
+                                Language.EN: "Windows",
+                            },
                             terminator="windows",
                             bound_category=ugly,
                         ),
                         MenuItem(
-                            label="Linux",
+                            label={
+                                Language.RU: "Линукс",
+                                Language.EN: "Linux",
+                            },
                             terminator="linux",
                             bound_category=good,
                         ),
                         MenuItem(
-                            label="MacOS",
+                            label={
+                                Language.RU: "МакОС",
+                                Language.EN: "MacOS",
+                            },
                             terminator="mac",
                             bound_category=bad,
                         ),
@@ -108,26 +175,38 @@ def create_menu_bot(token: str):
         ],
     )
 
+    language_store = LanguageStore(
+        redis=RedisEmulation(),
+        bot_prefix=bot_prefix,
+        supported_languages=[Language.RU, Language.EN],
+        default_language=Language.RU,
+        menu_config=LanguageSelectionMenuConfig(emojj_buttons=True, select_with_checkmark=True),
+    )
+
     async def on_terminal_menu_option_selected(terminator_context: TerminatorContext) -> Optional[TerminatorResult]:
         await bot.send_message(terminator_context.user.id, f"You have selected: {terminator_context.terminator!r}")
         if terminator_context.terminator == "C":
             return TerminatorResult(
-                menu_message_text_update="Segmentation fault (core dumped)",
+                menu_message_text_update={
+                    Language.RU: "Сегментация памяти (ядро сброшено)",
+                    Language.EN: "Segmentation fault (core dumped)",
+                },
                 lock_menu=True,
             )
         else:
             return None
 
-    menu_handler = MenuHandler(bot_prefix, menu_tree, category_store=category_store)
+    menu_handler = MenuHandler(bot_prefix, menu_tree, category_store=category_store, language_store=language_store)
     menu_handler.setup(bot, on_terminal_menu_option_selected)
 
     @bot.message_handler(commands=["start", "help"])
     async def start_cmd_handler(message: tg.Message):
         main_menu = menu_handler.get_main_menu()
+        language = await language_store.get_user_language(message.from_user)
         await bot.send_message(
             message.from_user.id,
-            main_menu.text,
-            reply_markup=(main_menu.get_keyboard_markup()),
+            any_text_to_str(main_menu.text, language),
+            reply_markup=(main_menu.get_keyboard_markup(language)),
         )
 
     category_store.setup(bot)
