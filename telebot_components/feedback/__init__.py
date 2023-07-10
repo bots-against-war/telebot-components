@@ -915,6 +915,7 @@ class FeedbackHandler:
         @bot.message_handler(
             chat_id=[self.admin_chat_id],
             content_types=list(tg_constants.MediaContentType),
+            priority=-100,  # to process user-space commands in admin chat first
         )
         async def admin_to_bot(message: tg.Message):
             try:
