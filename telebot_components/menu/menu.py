@@ -8,6 +8,13 @@ from telebot.api import ApiHTTPException
 from telebot.callback_data import CallbackData
 
 from telebot_components.stores.category import Category, CategoryStore
+from telebot_components.stores.language import (
+    AnyText,
+    LanguageStore,
+    MaybeLanguage,
+    any_text_to_str,
+    vaildate_singlelang_text,
+)
 
 ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
 TERMINATE_MENU_CALLBACK_DATA = CallbackData("id", prefix="terminator")
@@ -17,7 +24,7 @@ INACTIVE_BUTTON_CALLBACK_DATA = CallbackData(prefix="inactive_button")
 class MenuItem:
     def __init__(
         self,
-        label: str,
+        label: AnyText,
         submenu: Optional["Menu"] = None,
         terminator: Optional[str] = None,
         link_url: Optional[str] = None,
@@ -78,25 +85,25 @@ class MenuItem:
     def parent_menu(self, parent_menu: "Menu"):
         self._parent_menu = parent_menu
 
-    def get_inline_button(self):
+    def get_inline_button(self, language: MaybeLanguage):
         if self.submenu is not None:
             return tg.InlineKeyboardButton(
-                text=self.label,
+                text=any_text_to_str(self.label, language),
                 callback_data=ROUTE_MENU_CALLBACK_DATA.new(self.submenu.id),
             )
         elif self.link_url is not None:
             return tg.InlineKeyboardButton(
-                text=self.label,
+                text=any_text_to_str(self.label, language),
                 url=self.link_url,
             )
         else:
             return tg.InlineKeyboardButton(
-                text=self.label,
+                text=any_text_to_str(self.label, language),
                 callback_data=TERMINATE_MENU_CALLBACK_DATA.new(self.id),
             )
 
-    def get_inactive_inline_button(self, selected_item_id: str):
-        button_text = self.label
+    def get_inactive_inline_button(self, selected_item_id: str, language: MaybeLanguage):
+        button_text = any_text_to_str(self.label, language)
         if self.id == selected_item_id:
             button_text = "✅ " + button_text
         return tg.InlineKeyboardButton(
@@ -107,14 +114,14 @@ class MenuItem:
 
 @dataclass(frozen=True)
 class MenuConfig:
-    back_label: str
+    back_label: AnyText
     lock_after_termination: bool
 
 
 class Menu:
     def __init__(
         self,
-        text: str,
+        text: AnyText,
         menu_items: list[MenuItem],
         config: Optional[MenuConfig] = None,
     ):
@@ -153,15 +160,24 @@ class Menu:
             grandchildren.extend(menu.descendants())
         return children + grandchildren
 
-    def get_keyboard_markup(self):
-        keyboard = [[menu_item.get_inline_button()] for menu_item in self.menu_items]
+    def get_keyboard_markup(self, language: MaybeLanguage):
+        keyboard = [[menu_item.get_inline_button(language)] for menu_item in self.menu_items]
         if self.parent_menu is not None:
-            keyboard.append([MenuItem(label=self.config.back_label, submenu=self.parent_menu).get_inline_button()])
+            if isinstance(self.config.back_label, str):
+                keyboard.append(
+                    [MenuItem(label=self.config.back_label, submenu=self.parent_menu).get_inline_button(None)]
+                )
+            else:
+                keyboard.append(
+                    [MenuItem(label=self.config.back_label, submenu=self.parent_menu).get_inline_button(language)]
+                )
         return tg.InlineKeyboardMarkup(keyboard=keyboard)
 
-    def get_inactive_keyboard_markup(self, selected_item_id: str):
+    def get_inactive_keyboard_markup(self, selected_item_id: str, language: MaybeLanguage):
         return tg.InlineKeyboardMarkup(
-            keyboard=[[menu_item.get_inactive_inline_button(selected_item_id)] for menu_item in self.menu_items]
+            keyboard=[
+                [menu_item.get_inactive_inline_button(selected_item_id, language)] for menu_item in self.menu_items
+            ]
         )
 
 
@@ -175,7 +191,7 @@ class TerminatorContext:
 
 @dataclass
 class TerminatorResult:
-    menu_message_text_update: str
+    menu_message_text_update: AnyText
     parse_mode: Optional[str] = None
     lock_menu: Optional[bool] = None  # if set, overrides the default lock_after_termination value in Menu config
 
@@ -186,8 +202,11 @@ class MenuHandler:
         bot_prefix: str,
         menu_tree: Menu,
         category_store: Optional[CategoryStore] = None,
+        language_store: Optional[LanguageStore] = None,
     ):
         self.category_store = category_store
+        self.language_store = language_store
+
         self.menus_list: list[Menu] = [menu_tree]
         self.menus_list.extend(menu_tree.descendants())
 
@@ -217,7 +236,23 @@ class MenuHandler:
 
         self.menu_item_by_id: dict[str, MenuItem] = {mi.id: mi for mi in self.menu_items_list}
 
+        menu_texts = [menu.text for menu in self.menus_list]
+        menu_item_labels = [menu_item.label for menu_item in self.menu_items_list]
+        menu_back_labels = [menu.config.back_label for menu in self.menus_list]
+
+        for any_text in menu_texts + menu_item_labels + menu_back_labels:
+            if self.language_store is not None:
+                self.language_store.validate_multilang(any_text)
+            else:
+                vaildate_singlelang_text(any_text)
+
         self.logger = logging.getLogger(f"{__name__}[{bot_prefix}]")
+
+    async def get_maybe_language(self, user: tg.User) -> MaybeLanguage:
+        if self.language_store is None:
+            return None
+        else:
+            return await self.language_store.get_user_language(user)
 
     def init_item_ids_and_get_item_list(self) -> list[MenuItem]:
         item_list: list[MenuItem] = []
@@ -250,15 +285,16 @@ class MenuHandler:
         @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA, auto_answer=True)
         async def handle_menu(call: tg.CallbackQuery):
             user = call.from_user
+            language = await self.get_maybe_language(user)
             data = ROUTE_MENU_CALLBACK_DATA.parse(call.data)
             route_to = data["route_to"]
             menu = self.menu_by_id[route_to]
             try:
                 await bot.edit_message_text(
-                    text=menu.text,
+                    text=any_text_to_str(menu.text, language),
                     chat_id=user.id,
                     message_id=call.message.id,
-                    reply_markup=menu.get_keyboard_markup(),
+                    reply_markup=menu.get_keyboard_markup(language),
                 )
             except ApiHTTPException as e:
                 self.logger.info(f"Error editing message text and reply markup: {e!r}")
@@ -270,6 +306,7 @@ class MenuHandler:
         @bot.callback_query_handler(callback_data=TERMINATE_MENU_CALLBACK_DATA, auto_answer=True)
         async def handle_terminator(call: tg.CallbackQuery):
             user = call.from_user
+            language = await self.get_maybe_language(user)
             data = TERMINATE_MENU_CALLBACK_DATA.parse(call.data)
             selected_menu_item_id = data["id"]
 
@@ -293,7 +330,7 @@ class MenuHandler:
             if terminator_callback_result is not None:
                 try:
                     await bot.edit_message_text(
-                        terminator_callback_result.menu_message_text_update,
+                        text=any_text_to_str(terminator_callback_result.menu_message_text_update, language),
                         chat_id=call.message.chat.id,
                         message_id=call.message.id,
                         parse_mode=terminator_callback_result.parse_mode,
@@ -315,7 +352,7 @@ class MenuHandler:
                     await bot.edit_message_reply_markup(
                         chat_id=user.id,
                         message_id=call.message.id,
-                        reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id),
+                        reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id, language),
                     )
                 except ApiHTTPException:
                     self.logger.info("Error editing message reply markup", exc_info=True)

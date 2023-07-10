@@ -84,6 +84,7 @@ async def test_menu_handler_basic(example_menu: Menu):
     )
 
     example_user = tg.User(id=1312, is_bot=False, first_name="Max", last_name="Slater")
+    language = await menu_handler.get_maybe_language(example_user)
 
     seen_terminators: List[str] = []
     terminator_context_check_failed = False
@@ -98,7 +99,7 @@ async def test_menu_handler_basic(example_menu: Menu):
 
     main_menu = menu_handler.get_main_menu()
     assert main_menu.text == "example menu"
-    assert main_menu.get_keyboard_markup().to_dict() == {
+    assert main_menu.get_keyboard_markup(language).to_dict() == {
         "inline_keyboard": [
             [{"text": "picking game", "callback_data": "menu:1"}],
             [{"text": "feedback", "callback_data": "terminator:1"}],
