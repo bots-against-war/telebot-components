@@ -123,6 +123,26 @@ class RedisEmulation(RedisInterface):
             self.lists[name].append(v)
         return len(self.lists[name])
 
+    async def rpop(
+        self,
+        name: str,
+        count: Optional[int] = None,
+    ) -> Union[bytes, list[bytes], None]:
+        self._evict_if_expired(name)
+        pop_elements = count or 1
+        lst = self.lists.get(name)
+        if not lst:
+            return None
+        popped: list[bytes] = []
+        for _ in range(pop_elements):
+            if not lst:
+                return popped
+            popped.append(lst.pop())
+        if pop_elements == 1:
+            return popped[0]
+        else:
+            return popped or None
+
     async def lrange(self, name: str, start: int, end: int) -> list[bytes]:
         self._evict_if_expired(name)
         if name not in self.lists:
@@ -253,6 +273,14 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def rpush(self, name: str, *values: bytes) -> int:
         self._stack.append(self.redis_em.rpush(name, *values))
         return 0
+
+    async def rpop(
+        self,
+        name: str,
+        count: Optional[int] = None,
+    ) -> Union[bytes, list[bytes], None]:
+        self._stack.append(self.redis_em.rpop(name, count))
+        return None
 
     async def lrange(self, name: str, start: int, end: int) -> list[bytes]:
         self._stack.append(self.redis_em.lrange(name, start, end))

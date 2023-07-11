@@ -2,10 +2,10 @@
 
 Framework / toolkit for building bots with [telebot](https://github.com/bots-against-war/telebot).
 
-<!-- ## Development -->
-
 ## Development
+
 ### Setup
+
 1. Clone repository
    ```bash
    git clone git@github.com:bots-against-war/telebot-components.git baw
@@ -44,7 +44,7 @@ poetry run pytest tests -vv
 ```
 
 By default, all tests are run with in-memory Redis emulation. But if you want you can run them
-locally on real Redis (**read manual below**) 
+locally on real Redis by specifying `REDIS_URL` environment variable before running `pytest`.
 
 > **Note**: Tests must be able to find an empty Redis DB to use; they also clean up after themselves.
 

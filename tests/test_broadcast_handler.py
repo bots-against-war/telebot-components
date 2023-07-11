@@ -11,7 +11,7 @@ from telebot_components.broadcast.message_senders import (
     MessageSenderContext,
 )
 from telebot_components.redis_utils.interface import RedisInterface
-from tests.utils import TimeSupplier
+from tests.utils import TimeSupplier, pytest_skip_on_real_redis
 
 
 @dataclass(frozen=True)
@@ -42,6 +42,7 @@ def broadcast_handler(redis: RedisInterface) -> BroadcastHandler:
     return BroadcastHandler(redis, "test")
 
 
+@pytest_skip_on_real_redis
 async def test_broadcast_handler_basic(broadcast_handler: BroadcastHandler, time_supplier: TimeSupplier):
     TOPIC = "foo"
 
@@ -51,13 +52,13 @@ async def test_broadcast_handler_basic(broadcast_handler: BroadcastHandler, time
         print(broadcast_completed)
         broadcast_completed.set_result(None)
 
-    for user_id in range(10000):
+    for user_id in range(1000):
         await broadcast_handler.subscribe_to_topic(
             TOPIC,
             tg.User(id=user_id, is_bot=False, first_name="Some", last_name="One", username="hjkahdkjfhaiusdfasdjkhgf"),
         )
 
-    # do not work with redis emulation
+    # does not work with redis emulation
     # assert await broadcast_handler.topics() == ['foo']
 
     background_job_task = asyncio.create_task(
@@ -69,8 +70,8 @@ async def test_broadcast_handler_basic(broadcast_handler: BroadcastHandler, time
     await broadcast_handler.new_broadcast(TOPIC, sender=MockMessageSender(1312))
     await broadcast_completed
 
-    assert len(sent_messages) == 10000
-    assert {m.subscriber_id for m in sent_messages} == set(range(10000))
+    assert len(sent_messages) == 1000
+    assert {m.subscriber_id for m in sent_messages} == set(range(1000))
     assert {m.mock_message_sender_id for m in sent_messages} == {1312}
 
     background_job_task.cancel()

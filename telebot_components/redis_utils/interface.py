@@ -107,6 +107,21 @@ class RedisInterface(ABC):
         ...
 
     @abstractmethod
+    async def rpop(
+        self,
+        name: str,
+        count: Optional[int] = None,
+    ) -> Union[bytes, list[bytes], None]:
+        """
+        Removes and returns the last elements of the list ``name``.
+
+        By default, the command pops a single element from the end of the list.
+        When provided with the optional ``count`` argument, the reply will
+        consist of up to count elements, depending on the list's length.
+        """
+        ...
+
+    @abstractmethod
     async def lrange(self, name: str, start: int, end: int) -> list[bytes]:
         """
         Return a slice of the list ``name`` between

@@ -289,11 +289,12 @@ async def test_aux_admin_chat_integration(redis: RedisInterface) -> None:
 
     bot.method_calls.clear()
 
+    # reply from main admin chat duplicated to aux ones
     await _send_message_to_bot(
         chat_id=ADMIN_CHAT_ID, is_from_admin=True, text="hello from the main admin chat", reply_to_message_id=2
     )
     assert extract_full_kwargs(bot.method_calls["copy_message"]) == [
-        {"chat_id": 7890123, "from_chat_id": 111000111000, "message_id": 3}
+        {"chat_id": USER_ID, "from_chat_id": ADMIN_CHAT_ID, "message_id": 3}
     ]
     assert_list_of_required_subdicts(
         extract_full_kwargs(bot.method_calls["send_message"]),
