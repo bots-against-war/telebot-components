@@ -112,6 +112,8 @@ async def test_list(redis: RedisInterface):
     assert await redis.lrange(key, 1, -2) == values[1:-1]
     assert await redis.lrange(key, 1, -9) == values[1:2]
     assert await redis.lrange(key, 1, -100) == []
+    assert await redis.lrange(key, -1, -1) == [values[9]]
+    assert await redis.lrange(key, -1000, -100) == []
 
 
 @pytest_skip_on_real_redis

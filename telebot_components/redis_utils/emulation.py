@@ -153,14 +153,11 @@ class RedisEmulation(RedisInterface):
         length = len(list_)
         if start > length:
             return []
-        start = max(start, 0)
-        if end < -1:
-            end += 1
+        if end > 0:
+            end = min(end, length)
         elif end == -1:
             end = length
-        else:
-            end = min(end, length)
-            end += 1
+        end += 1  # redis' `end` is inclusive, python's is exclusive
         return list_[start:end]
 
     async def exists(self, *names: str) -> int:
