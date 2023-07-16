@@ -23,7 +23,6 @@ from telebot_components.stores.language import (
     Language,
     LanguageSelectionMenuConfig,
     LanguageStore,
-    any_text_to_str,
 )
 
 
@@ -51,8 +50,8 @@ def create_menu_bot(token: str):
 
     menu_tree = Menu(
         text={
-            Language.RU: "Привет! Какой опрос ты хочешь пройти?",
-            Language.EN: "Hi! What survey do you want to take?",
+            Language.RU: "<i>Привет!</i> Какой опрос ты хочешь пройти?",
+            Language.EN: "<i>Hi!</i> What survey do you want to take?",
         },
         config=MenuConfig(
             back_label={
@@ -60,6 +59,7 @@ def create_menu_bot(token: str):
                 Language.EN: "🔙 Back",
             },
             lock_after_termination=False,
+            is_text_html=True,
         ),
         menu_items=[
             MenuItem(
@@ -201,13 +201,7 @@ def create_menu_bot(token: str):
 
     @bot.message_handler(commands=["start", "help"])
     async def start_cmd_handler(message: tg.Message):
-        main_menu = menu_handler.get_main_menu()
-        language = await language_store.get_user_language(message.from_user)
-        await bot.send_message(
-            message.from_user.id,
-            any_text_to_str(main_menu.text, language),
-            reply_markup=(main_menu.get_keyboard_markup(language)),
-        )
+        await menu_handler.start_menu(bot, message.from_user)
 
     category_store.setup(bot)
 

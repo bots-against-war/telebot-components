@@ -15,6 +15,7 @@ from telebot_components.stores.language import (
     any_text_to_str,
     vaildate_singlelang_text,
 )
+from telebot_components.utils import telegram_html_escape
 
 ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
 TERMINATE_MENU_CALLBACK_DATA = CallbackData("id", prefix="terminator")
@@ -116,6 +117,7 @@ class MenuItem:
 class MenuConfig:
     back_label: AnyText
     lock_after_termination: bool
+    is_text_html: bool = False
 
 
 class Menu:
@@ -142,6 +144,14 @@ class Menu:
                 back_label="back",
                 lock_after_termination=True,
             )  # backwards compatibility for pre-config code
+
+    def html_text(self, language: MaybeLanguage) -> str:
+        text = any_text_to_str(self.text, language)
+        if not self.config.is_text_html:
+            text = telegram_html_escape(
+                text
+            )  # menu handler always uses parse_mode="HTML", so we need to escape plain text
+        return text
 
     @property
     def id(self) -> str:
@@ -277,6 +287,17 @@ class MenuHandler:
     def get_main_menu(self):
         return self.menu_by_id["0"]
 
+    async def start_menu(self, bot: AsyncTeleBot, user: tg.User) -> None:
+        """Send menu message to the user, starting at the main menu"""
+        main_menu = self.get_main_menu()
+        language = await self.language_store.get_user_language(user) if self.language_store is not None else None
+        await bot.send_message(
+            chat_id=user.id,
+            text=main_menu.html_text(language),
+            reply_markup=main_menu.get_keyboard_markup(language),
+            parse_mode="HTML",
+        )
+
     def setup(
         self,
         bot: AsyncTeleBot,
@@ -291,10 +312,11 @@ class MenuHandler:
             menu = self.menu_by_id[route_to]
             try:
                 await bot.edit_message_text(
-                    text=any_text_to_str(menu.text, language),
+                    text=menu.html_text(language),
                     chat_id=user.id,
                     message_id=call.message.id,
                     reply_markup=menu.get_keyboard_markup(language),
+                    parse_mode="HTML",
                 )
             except ApiHTTPException as e:
                 self.logger.info(f"Error editing message text and reply markup: {e!r}")
