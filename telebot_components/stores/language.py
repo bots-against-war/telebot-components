@@ -124,8 +124,11 @@ class LanguageStore:
     def validate_multilang(self, ml_text: Any):
         validate_multilang_text(ml_text, self.languages)
 
+    async def get_selected_user_language(self, user: types.User) -> Optional[Language]:
+        return await self.user_language_store.load(user.id)
+
     async def get_user_language(self, user: types.User) -> Language:
-        stored_lang = await self.user_language_store.load(user.id)
+        stored_lang = await self.get_selected_user_language(user)
         if stored_lang is not None:
             return stored_lang
         if user.language_code is None:
@@ -144,7 +147,7 @@ class LanguageStore:
         return await self.user_language_store.save(user.id, lang)
 
     def setup(self, bot: AsyncTeleBot, on_language_change: Optional[OnOptionSelected[Language]] = None):
-        @bot.callback_query_handler(callback_data=self.language_callback_data)
+        @bot.callback_query_handler(callback_data=self.language_callback_data, auto_answer=True)
         async def language_selected(call: types.CallbackQuery):
             user = call.from_user
             try:
@@ -153,6 +156,10 @@ class LanguageStore:
             except Exception:
                 await callback_query_processing_error(bot, call, f"corrupted callback query '{call.data}'", self.logger)
                 return
+
+            selected_language = await self.get_selected_user_language(user)
+            if selected_language == language:
+                return  # language not changed, nothing to do
 
             if language not in self.languages:
                 await callback_query_processing_error(bot, call, f"language '{language}' is not supported", self.logger)
@@ -163,13 +170,11 @@ class LanguageStore:
                 await callback_query_processing_error(bot, call, "unable to save selected language", self.logger)
                 return
             try:
-                await bot.answer_callback_query(call.id)
                 await bot.edit_message_reply_markup(
                     user.id, call.message.id, reply_markup=self.markup_for_selected_language(language)
                 )
             except Exception:
-                # exception may be raised when user clicks on the same button and markup is not changed
-                pass
+                self.logger.exception("Error editing message reply markup")
             if on_language_change is not None:
                 try:
                     await on_language_change(bot, call.message, call.from_user, language)
