@@ -15,7 +15,6 @@ from telebot_components.stores.language import (
     any_text_to_str,
     vaildate_singlelang_text,
 )
-
 from telebot_components.utils import telegram_html_escape
 
 ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
@@ -289,6 +288,7 @@ class MenuHandler:
         return self.menu_by_id["0"]
 
     async def start_menu(self, bot: AsyncTeleBot, user: tg.User) -> None:
+        """Send menu message to the user, starting at the main menu"""
         main_menu = self.get_main_menu()
         language = await self.language_store.get_user_language(user) if self.language_store is not None else None
         await bot.send_message(
