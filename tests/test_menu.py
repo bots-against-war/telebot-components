@@ -113,7 +113,7 @@ async def test_menu_handler_basic(example_menu: Menu):
     assert extract_full_kwargs(bot.method_calls.pop("send_message")) == [
         {
             "chat_id": 1312,
-            "text": "example menu =&amp;lt;^_^&amp;gt;=",  # NOTE: properly escaped for parse mode HTML
+            "text": "example menu =&lt;^_^&gt;=",  # NOTE: properly escaped for parse mode HTML
             "reply_markup": tg.InlineKeyboardMarkup(
                 [
                     [tg.InlineKeyboardButton(text="picking game", callback_data="menu:1")],
@@ -202,7 +202,7 @@ async def test_menu_handler_basic(example_menu: Menu):
     await press_button("menu:0")
     assert len(bot.method_calls["edit_message_text"]) == 4
     edit_menu_message_method_call = bot.method_calls["edit_message_text"][3]
-    assert edit_menu_message_method_call.full_kwargs["text"] == "example menu =&amp;lt;^_^&amp;gt;="
+    assert edit_menu_message_method_call.full_kwargs["text"] == "example menu =&lt;^_^&gt;="
     assert edit_menu_message_method_call.full_kwargs["reply_markup"].to_dict() == {
         "inline_keyboard": [
             [{"text": "picking game", "callback_data": "menu:1"}],
