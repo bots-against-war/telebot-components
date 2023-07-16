@@ -303,25 +303,3 @@ async def test_menu_handler_with_language_store(redis: RedisInterface):
         ]
     }
     bot.method_calls.clear()
-
-    async def press_button(callback_data: str):
-        update_json = {
-            "update_id": 19283649187364,
-            "callback_query": {
-                "id": 40198734019872364,
-                "chat_instance": "wtf is this",
-                "from": example_user.to_dict(),
-                "data": callback_data,
-                "message": {
-                    "message_id": 11111,
-                    "from": example_user.to_dict(),
-                    "chat": {
-                        "id": 420,
-                        "type": "private",
-                    },
-                    "date": int(datetime.now().timestamp()),
-                    "text": "menu message placeholder",
-                },
-            },
-        }
-        await bot.process_new_updates([tg.Update.de_json(update_json)])  # type: ignore
