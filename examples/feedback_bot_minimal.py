@@ -18,17 +18,23 @@ from telebot_components.stores.banned_users import BannedUsersStore
 
 
 async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: int):
-    bot_prefix = "feedback-bot-with-forum-topic-per-user"
+    bot_prefix = "example-feedback-bot"
     bot = AsyncTeleBot(token)
 
     logging.basicConfig(level=logging.DEBUG)
 
-    banned_users_store = BannedUsersStore(redis=redis, bot_prefix=bot_prefix, cached=True)
+    banned_store = BannedUsersStore(
+        redis,
+        bot_prefix,
+        cached=False,
+    )
 
     async def welcome(user: tg.User):
-        await bot.send_message(user.id, "hey")
+        await bot.send_message(user.id, "hello")
 
-    @bot.message_handler(commands=["start", "help"], chat_types=[tg_constants.ChatType.private])
+    @bot.message_handler(
+        commands=["start", "help"], chat_types=[tg_constants.ChatType.private], func=banned_store.not_from_banned_user
+    )
     async def start_cmd_handler(message: tg.Message):
         await welcome(message.from_user)
 
@@ -37,14 +43,13 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
         redis=redis,
         bot_prefix=bot_prefix,
         config=FeedbackConfig(
-            forum_topic_per_user=True,
             message_log_to_admin_chat=True,
-            force_category_selection=True,
+            force_category_selection=False,
             hashtags_in_admin_chat=True,
-            hashtag_message_rarer_than=None,
+            hashtag_message_rarer_than=times.FIVE_MINUTES,
             unanswered_hashtag="неотвечено",
             confirm_forwarded_to_admin_rarer_than=times.FIVE_MINUTES,
-            user_anonymization=UserAnonymization.NONE,
+            user_anonymization=UserAnonymization.FULL,
         ),
         anti_spam=AntiSpam(
             redis,
@@ -57,16 +62,17 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
             ),
         ),
         service_messages=ServiceMessages(
-            forwarded_to_admin_ok="forwarded!",
-            you_must_select_category="select category first!",
-            throttling_template="please send no more than {} messages in {}.",
-            copied_to_user_ok="Скопировано в чат с пользователь_ницей ✨",
-            can_not_delete_message="Невозможно удалить сообщение.",
-            deleted_message_ok="Сообщение успешно удалено!",
+            forwarded_to_admin_ok="thanks",
+            you_must_select_category=None,
+            throttling_template="please don't send more than {} messages in {}.",
+            copied_to_user_ok="sent to user",
+            can_not_delete_message="can't delete message",
+            deleted_message_ok="message deleted from chat with user",
         ),
-        banned_users_store=banned_users_store,
+        banned_users_store=banned_store,
     )
     await feedback_handler.setup(bot)
+
     return BotRunner(
         bot_prefix=bot_prefix,
         bot=bot,

@@ -262,14 +262,6 @@ class FeedbackHandler:
         else:
             self.admin_chat_response_actions = admin_chat_response_actions
 
-        if self.banned_users_store is not None:
-            self.admin_chat_response_actions.append(
-                AdminChatAction(
-                    command="/ban",
-                    callback=self._ban_admin_chat_action,
-                    delete_everything_related_to_user_after=True,
-                )
-            )
         self.admin_chat_response_action_by_command = {aca.command: aca for aca in self.admin_chat_response_actions}
 
         # === stores used by the handler ===
@@ -380,6 +372,30 @@ class FeedbackHandler:
                 vaildate_singlelang_text(message)
             else:
                 self.language_store.validate_multilang(message)
+
+    async def _delete_user_related_messages(
+        self, bot: AsyncTeleBot, origin_chat_id: int, initiator_message_id: int
+    ) -> None:
+        if self.config.forum_topic_per_user:
+            user_topic_message_thread_id = await self.message_thread_id_by_user_id_store.load(origin_chat_id)
+            if user_topic_message_thread_id is not None:
+                self.logger.info("Found forum topic for user, deleting it")
+                await bot.delete_forum_topic(self.admin_chat_id, message_thread_id=user_topic_message_thread_id)
+                await self.message_thread_id_by_user_id_store.drop(origin_chat_id)
+                self.logger.info("User forum topic deleted")
+                return
+
+        user_related_message_ids = await self.user_related_messages_store.all(origin_chat_id)
+        user_related_message_ids.add(initiator_message_id)
+        for message_id in user_related_message_ids:
+            try:
+                await bot.delete_message(self.admin_chat_id, message_id)
+                await self.origin_chat_id_store.drop(message_id)
+                await asyncio.sleep(0.5)
+            except Exception:
+                pass
+        await self.user_related_messages_store.drop(origin_chat_id)
+        await self.message_log_store.drop(origin_chat_id)
 
     async def _ban_admin_chat_action(
         self, admin_message: tg.Message, forwarded_message: tg.Message, origin_chat_id: int
@@ -956,23 +972,18 @@ class FeedbackHandler:
                     # admin chat commands
                     if message.text in self.admin_chat_response_action_by_command:
                         if forwarded_msg is None:
-                            raise RuntimeError(
-                                "Admin chat response actions are not supported in per-user forum topics, "
-                                "please try replying to a user's message directly."
-                            )
+                            raise RuntimeError("To execute command, please reply to a user's message directly.")
                         admin_chat_action = self.admin_chat_response_action_by_command[message.text]
                         await admin_chat_action.callback(message, forwarded_msg, origin_chat_id)
                         if admin_chat_action.delete_everything_related_to_user_after:
-                            user_related_message_ids = await self.user_related_messages_store.all(origin_chat_id)
-                            user_related_message_ids.add(message.id)
-                            for message_id in user_related_message_ids:
-                                try:
-                                    await bot.delete_message(self.admin_chat_id, message_id)
-                                    await self.origin_chat_id_store.drop(message_id)
-                                except Exception:
-                                    pass
-                            await self.user_related_messages_store.drop(origin_chat_id)
-                            await self.message_log_store.drop(origin_chat_id)
+                            await self._delete_user_related_messages(
+                                bot=bot, origin_chat_id=origin_chat_id, initiator_message_id=message.id
+                            )
+                    elif message.text.strip() == "/ban" and self.banned_users_store is not None:
+                        await self.banned_users_store.ban_user(user_id=origin_chat_id)
+                        await self._delete_user_related_messages(
+                            bot=bot, origin_chat_id=origin_chat_id, initiator_message_id=message.id
+                        )
                     elif message.text_content.startswith("/log"):
                         try:
                             page_str = extract_arguments(message.text_content) or "1"
@@ -1041,10 +1052,12 @@ class FeedbackHandler:
                         )
                     else:
                         available_commands = list(self.admin_chat_response_action_by_command.keys()) + ["/log"]
+                        if self.banned_users_store is not None:
+                            available_commands.append("/ban")
                         await bot.reply_to(
                             message,
-                            f"Invalid admin chat command: {message.text}; available commands are: "
-                            + ", ".join(available_commands),
+                            f"Invalid admin chat command: {message.text!r}; available commands are: "
+                            + ", ".join(repr(cmd) for cmd in available_commands),
                         )
                 else:
                     # actual response to the user
