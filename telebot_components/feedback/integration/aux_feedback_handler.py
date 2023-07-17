@@ -52,7 +52,7 @@ class _MainFeedbackHandlerIntegration(FeedbackHandlerIntegration):
             aux_admin_chat_message_id
         )
         if main_admin_chat_message_id is None:
-            self.logger.error("Message in aux admin chat has no saved main admin chat message id")
+            self.logger.info("Message in aux admin chat has no saved main admin chat message id, ignoring")
             return
         await self.aux.message_replied_callback(
             UserMessageRepliedFromIntegrationEvent(
@@ -156,7 +156,7 @@ class AuxFeedbackHandlerIntegration(FeedbackHandlerIntegration):
             event.main_admin_chat_message_id
         )
         if aux_admin_chat_message_id is None:
-            self.logger.error("Message in the main admin chat has no saved aux admin chat message id")
+            self.logger.info("Message in the main admin chat has no saved aux admin chat message id, ignoring")
             return
         # from aux feedback handler's POV, aux admin chat msg id is main
         event.main_admin_chat_message_id = aux_admin_chat_message_id
