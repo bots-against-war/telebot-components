@@ -107,8 +107,8 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
             redis=redis,
             bot_prefix=bot_prefix,
             credentials=TrelloIntegrationCredentials(
-                os.environ["TRELLO_USER_API_KEY"],
-                os.environ["TRELLO_USER_TOKEN"],
+                user_api_key=os.environ["TRELLO_USER_API_KEY"],
+                user_token=os.environ["TRELLO_USER_TOKEN"],
                 board_id=os.environ["TRELLO_BOARD_ID"],
             ),
             reply_with_card_comments=False,
