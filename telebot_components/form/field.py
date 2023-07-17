@@ -509,7 +509,7 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
             return parsed_enum
 
     def value_to_str(self, value: Enum, lang: MaybeLanguage) -> str:
-        if not is_any_text(value.value):
+        if is_any_text(value.value):
             return any_text_to_str(value.value, lang)
         else:
             return str(value.value)

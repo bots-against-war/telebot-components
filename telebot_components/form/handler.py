@@ -112,7 +112,9 @@ class FormHandlerConfig:
         if self.keep_existing_field_value_template is None:
             return None
         else:
-            return any_text_to_str(self.keep_existing_field_value_template, language).format(value_dump, self.keep_cmd)
+            return any_text_to_str(self.keep_existing_field_value_template, language).format(
+                telegram_html_escape(value_dump), self.keep_cmd
+            )
 
     def form_starting_msg(self, language: MaybeLanguage) -> str:
         return any_text_to_str(self.form_starting_template, language).format(", ".join(self.cancel_cmds))
