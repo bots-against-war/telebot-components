@@ -9,8 +9,8 @@ class RedisInterface(ABC):
     """Abstract interface for the parts of redis.asyncio.Redis class we're using;
     please update when utilizing new methods.
 
-    Note that Redis must not decode responses and return plain bytes
-    (i.e. do NOT specify decode_responses=True option).
+    Note that this is an interface for Redis configured to not decode responses and return plain bytes
+    (i.e. it must not specify decode_responses=True option).
 
     When using real Redis instance in place of RedisInterface, mypy may complain, but we have to ignore it
     """
@@ -170,6 +170,15 @@ class RedisInterface(ABC):
     @abstractmethod
     async def hvals(self, name: str) -> list[bytes]:
         """Return the list of values within hash ``name``"""
+        ...
+
+    @abstractmethod
+    async def hgetall(self, name: str) -> dict[bytes, bytes]:
+        """
+        Return a Python dict of the hash's name/value pairs
+
+        For more information see https://redis.io/commands/hgetall
+        """
         ...
 
     @abstractmethod

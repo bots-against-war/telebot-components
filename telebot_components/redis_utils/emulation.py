@@ -33,6 +33,7 @@ class RedisEmulation(RedisInterface):
         *args,
         **kwargs,
     ) -> bool:
+        self._evict_if_expired(name)
         self.values[name] = value
         if ex is not None:
             self.key_eviction_time[name] = time_module.time() + ex.total_seconds()
@@ -54,6 +55,8 @@ class RedisEmulation(RedisInterface):
         return self.values.get(name)
 
     async def delete(self, *names: str) -> int:
+        for name in names:
+            self._evict_if_expired(name)
         n_deleted = 0
         for key in names:
             for storage in self._storages:
@@ -189,6 +192,7 @@ class RedisEmulation(RedisInterface):
         value: Optional[bytes] = None,
         mapping: Optional[Mapping[str, bytes]] = None,
     ) -> int:
+        self._evict_if_expired(name)
         if mapping is None:
             if key is None or value is None:
                 raise TypeError("If mapping is not specified, key and value must be set")
@@ -202,12 +206,19 @@ class RedisEmulation(RedisInterface):
     async def hkeys(self, name: str) -> list[bytes]:
         # NOTE: redis client does not decode anything received from Redis by default,
         # so we have to re-encode keys from a hash
+        self._evict_if_expired(name)
         return [key.encode("utf-8") for key in self.hashes.get(name, {}).keys()]
 
     async def hvals(self, name: str) -> list[bytes]:
+        self._evict_if_expired(name)
         return [value for value in self.hashes.get(name, {}).values()]
 
+    async def hgetall(self, name: str) -> dict[bytes, bytes]:
+        self._evict_if_expired(name)
+        return {key.encode("utf-8"): value for key, value in self.hashes.get(name, {}).items()}
+
     async def hdel(self, name: str, *keys: str) -> int:
+        self._evict_if_expired(name)
         count = 0
         hash_ = self.hashes.get(name, {})
         for k in keys:

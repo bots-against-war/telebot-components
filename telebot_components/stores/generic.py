@@ -265,5 +265,10 @@ class KeyDictStore(GenericStore[ValueT]):
         return [self.loader(dump.decode("utf-8")) for dump in value_dumps]
 
     @redis_retry()
+    async def load(self, key: str_able) -> dict[str, ValueT]:
+        raw = await self.redis.hgetall(self._full_key(key))
+        return {raw_key.decode("utf-8"): self.loader(raw_value.decode("utf-8")) for raw_key, raw_value in raw.items()}
+
+    @redis_retry()
     async def remove_subkey(self, key: str_able, subkey: str_able) -> bool:
         return await self.redis.hdel(self._full_key(key), str(subkey)) == 1

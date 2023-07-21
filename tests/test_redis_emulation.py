@@ -187,6 +187,13 @@ async def test_hash_operations(redis: RedisInterface):
     assert await redis.hkeys(KEY) == [b"1", b"2", b"3", b"4"]
     assert await redis.hvals(KEY) == [b"hello", b"world", b"foo", b"bar"]
 
+    assert await redis.hgetall(KEY) == {
+        b"1": b"hello",
+        b"2": b"world",
+        b"3": b"foo",
+        b"4": b"bar",
+    }
+
 
 async def test_rpush_rpop(redis: RedisInterface):
     for i in range(10):
