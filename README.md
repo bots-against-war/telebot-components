@@ -12,7 +12,7 @@ Framework / toolkit for building bots with [telebot](https://github.com/bots-aga
    cd ./baw
    ```
 
-2. The project requires Poerty 1.5.1 (see [installation instruction](https://python-poetry.org/docs/master#installing-with-the-official-installer))).
+2. The project requires Poerty 1.5.1 (see [installation instruction](https://python-poetry.org/docs/master#installing-with-the-official-installer)).
    For example, to install `1.5.1` on Unix, run
    ```bash
    curl -sSL https://install.python-poetry.org | python3 - --version 1.5.1
