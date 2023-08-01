@@ -6,6 +6,7 @@ from io import StringIO
 from typing import Optional
 
 from telebot import AsyncTeleBot
+from telebot_components.utils import telegram_html_escape
 
 
 class TelegramAlertsHandler(logging.Handler):
@@ -14,7 +15,7 @@ class TelegramAlertsHandler(logging.Handler):
     def __init__(self, bot: AsyncTeleBot, channel_id: int, app_name: Optional[str]) -> None:
         super().__init__(level=logging.ERROR)
         self.app_name = app_name
-        self.message_prefix = (self.app_name + "\n") if self.app_name else ""
+        self.message_prefix = ("<b>" + telegram_html_escape(self.app_name) + "</b>\n") if self.app_name else ""
         self.bot = bot
         self.channel_id = channel_id
         self._tasks: set[asyncio.Task] = set()
@@ -25,7 +26,10 @@ class TelegramAlertsHandler(logging.Handler):
     async def _send_error_message(self, message: str):
         try:
             await self.bot.send_message(
-                self.channel_id, self.message_prefix + "\n<pre>" + message + "</pre>", parse_mode="HTML"
+                self.channel_id,
+                self.message_prefix + "\n<pre>" + telegram_html_escape(message) + "</pre>",
+                parse_mode="HTML",
+                auto_split_message=False,
             )
         except Exception:
             try:
@@ -54,7 +58,7 @@ class TelegramAlertsHandler(logging.Handler):
             print(f"{self.__class__.__name__}: Unable to emit message, {e!r}")
 
 
-def configure_alerts(token: str, alerts_channel_id: int, app_name: Optional[str]):
+def configure_alerts(token: str, alerts_channel_id: int, app_name: Optional[str] = None):
     logging.getLogger().addHandler(
         TelegramAlertsHandler(
             bot=AsyncTeleBot(token),
