@@ -24,11 +24,11 @@ ADMIN_OWNER_ID = 0
 
 
 class SecretStore(ABC):
-    def __init__(self, per_user_secrets: bool) -> None:
-        self.per_user_secrets = per_user_secrets
+    def __init__(self, scope_secrets_to_user: bool) -> None:
+        self.scope_secrets_to_user = scope_secrets_to_user
 
     def to_env_specific(self, owner_id: int) -> int:
-        if self.per_user_secrets:
+        if self.scope_secrets_to_user:
             return owner_id
         else:
             return ADMIN_OWNER_ID  # store all secrets as admin secrets
@@ -80,9 +80,9 @@ class RedisSecretStore(SecretStore):
         encryption_key: str,
         secrets_per_user: int,
         secret_max_len: int,
-        per_user_secrets: bool,
+        scope_secrets_to_user: bool,
     ) -> None:
-        super().__init__(per_user_secrets=per_user_secrets)
+        super().__init__(scope_secrets_to_user=scope_secrets_to_user)
         self.fernet = Fernet(encryption_key)
         self.secrets_per_user = secrets_per_user
         self.secret_max_len = secret_max_len
@@ -145,7 +145,7 @@ class FileSecretStore(SecretStore):
     PATH = (Path(__file__).parent / "../secrets.toml").resolve()
 
     def __init__(self) -> None:
-        super().__init__(per_user_secrets=False)
+        super().__init__(scope_secrets_to_user=False)
         try:
             self._secrets: dict[str, str] = toml.load(self.PATH)
         except FileNotFoundError:
