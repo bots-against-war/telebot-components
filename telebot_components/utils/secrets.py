@@ -140,7 +140,7 @@ class RedisSecretStore(SecretStore):
         return await self._store.remove_subkey(self.to_env_specific(owner_id), secret_name)
 
 
-class FileSecretStore(SecretStore):
+class TomlFileSecretStore(SecretStore):
     """File secret storage for local testing"""
 
     def __init__(self, path: Path) -> None:
