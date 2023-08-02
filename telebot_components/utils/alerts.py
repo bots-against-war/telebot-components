@@ -16,7 +16,7 @@ class TelegramAlertsHandler(logging.Handler):
     def __init__(self, bot: AsyncTeleBot, channel_id: int, app_name: Optional[str]) -> None:
         super().__init__(level=logging.ERROR)
         self.app_name = app_name
-        self.message_prefix = ("<b>" + telegram_html_escape(self.app_name) + "</b>\n") if self.app_name else ""
+        self.header = telegram_html_escape(self.app_name) if self.app_name else ""
         self.bot = bot
         self.channel_id = channel_id
         self._tasks: set[asyncio.Task] = set()
@@ -28,24 +28,29 @@ class TelegramAlertsHandler(logging.Handler):
         try:
             await self.bot.send_message(
                 self.channel_id,
-                self.message_prefix + "\n<pre>" + telegram_html_escape(message) + "</pre>",
+                self.header + "\n<pre>" + telegram_html_escape(message) + "</pre>",
                 parse_mode="HTML",
                 auto_split_message=False,
             )
         except Exception:
             try:
                 body = StringIO(initial_value=message)
-                filename_raw = self.message_prefix + message.splitlines()[-1]
+                filename_raw = message.splitlines()[-1]
                 filename = self.NOT_LETTERS_RE.sub("-", filename_raw)
                 filename = filename[:40]
                 filename = f"{filename}-{datetime.now().isoformat(timespec='seconds')}.txt"
-                await self.bot.send_document(self.channel_id, body, visible_file_name=filename)
+                await self.bot.send_document(
+                    self.channel_id,
+                    document=body,
+                    caption=self.header or None,
+                    visible_file_name=filename,
+                )
             except Exception as e:
                 print(f"Error sending alert to Telegram channel: {e!r}")
                 try:
                     await self.bot.send_message(
                         self.channel_id,
-                        self.message_prefix + "⚠️ Failed to send alert, see application logs",
+                        self.header + "\n\n⚠️ Failed to send alert, see application logs",
                     )
                 except Exception:
                     pass
