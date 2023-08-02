@@ -6,6 +6,7 @@ from io import StringIO
 from typing import Optional
 
 from telebot import AsyncTeleBot
+
 from telebot_components.utils import telegram_html_escape
 
 

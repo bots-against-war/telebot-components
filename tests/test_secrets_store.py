@@ -1,7 +1,7 @@
 from cryptography.fernet import Fernet
 
-from telebot_components.utils.secrets import RedisSecretStore
 from telebot_components.redis_utils.emulation import RedisEmulation
+from telebot_components.utils.secrets import RedisSecretStore
 
 
 async def test_redis_secret_store() -> None:
@@ -19,4 +19,3 @@ async def test_redis_secret_store() -> None:
     assert await ss.get_secret("another-example", owner_id) == "hello world"
     assert set(await ss.list_secrets(owner_id)) == {"example", "another-example"}
     assert set(await ss.list_secrets(owner_id + 1)) == set()
-

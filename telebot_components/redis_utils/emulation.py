@@ -1,8 +1,12 @@
+import abc
+import json
+import os
 import time as time_module
 from collections import defaultdict
 from datetime import timedelta
 from fnmatch import fnmatch
-from typing import Coroutine, Mapping, Optional, Union
+from pathlib import Path
+from typing import Any, Callable, Coroutine, Mapping, Optional, Union
 
 from telebot_components.redis_utils.interface import (
     RedisCmdReturn,
@@ -14,16 +18,27 @@ from telebot_components.redis_utils.interface import (
 class RedisEmulation(RedisInterface):
     """Inmemory redis emulation, compliant with interface, useful for local runs and tests."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.values: dict[str, bytes] = dict()
         self.sets: dict[str, set[bytes]] = defaultdict(set)
         self.lists: dict[str, list[bytes]] = defaultdict(list)
         self.hashes: dict[str, dict[str, bytes]] = defaultdict(dict)
-        self._storages = (self.sets, self.values, self.lists)
+        self._storages: tuple[dict[str, Any], ...] = (self.values, self.sets, self.lists, self.hashes)
         self.key_eviction_time: dict[str, float] = dict()
 
     def pipeline(self, transaction: bool = True, shard_hint: Optional[str] = None) -> "RedisPipelineEmulatiom":
         return RedisPipelineEmulatiom(self)
+
+    def _evict_if_expired(self, key: str):
+        if key not in self.key_eviction_time:
+            return
+        evict_at = self.key_eviction_time[key]
+        if time_module.time() <= evict_at:
+            return
+        self.key_eviction_time.pop(key)
+        for storage in self._storages:
+            if key in storage:
+                storage.pop(key)
 
     async def set(
         self,
@@ -38,17 +53,6 @@ class RedisEmulation(RedisInterface):
         if ex is not None:
             self.key_eviction_time[name] = time_module.time() + ex.total_seconds()
         return True
-
-    def _evict_if_expired(self, key: str):
-        if key not in self.key_eviction_time:
-            return
-        evict_at = self.key_eviction_time[key]
-        if time_module.time() <= evict_at:
-            return
-        self.key_eviction_time.pop(key)
-        for storage in self._storages:
-            if key in storage:
-                storage.pop(key)
 
     async def get(self, name: str) -> Optional[bytes]:
         self._evict_if_expired(name)
@@ -232,7 +236,7 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     """Simple pipeline emulation that just stores parent redis emulation coroutines
     in a list and awaits them on execute"""
 
-    def __init__(self, redis: RedisEmulation):
+    def __init__(self, redis: RedisInterface):
         self.redis_em = redis
         self._stack: list[Coroutine[None, None, RedisCmdReturn]] = []
 
@@ -343,3 +347,110 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
                 else:
                     results.append(None)
         return results
+
+
+class PersistentRedisEmulation(RedisInterface):
+    """
+    JSON-based persistent wrapper around regular inmemory RedisEmulation.
+
+    Mypy will complain on this class' instantiation, but you can safely ignore it.
+    """
+
+    # TODO: add lists support, add tests, fix defaultdict creation
+
+    def __init__(
+        self,
+        dirname: str = ".redis-emulation",
+        dump: Callable[[Any], str] = lambda obj: json.dumps(obj, ensure_ascii=False, indent=2),
+        load: Callable[[str], Any] = lambda json_dump: json.loads(json_dump),
+    ) -> None:
+        self.r = RedisEmulation()
+        self.dirname = dirname
+        self.dump = dump
+        self.load = load
+        self.load_persistent_state()
+
+    def load_persistent_state(self) -> None:
+        if self._values_file.exists():
+            self.r.values = {k: v.encode("utf-8") for k, v in self.load(self._values_file.read_text()).items()}
+        if self._lists_file.exists():
+            self.r.lists = defaultdict(
+                list,
+                {k: [item.encode("utf-8") for item in v] for k, v in self.load(self._lists_file.read_text()).items()},
+            )
+        if self._sets_file.exists():
+            self.r.sets = defaultdict(
+                set,
+                {k: {item.encode("utf-8") for item in s} for k, s in self.load(self._sets_file.read_text()).items()},
+            )
+
+        if self._hashes_file.exists():
+            self.r.hashes = defaultdict(
+                dict,
+                {
+                    k: {kk: v.encode("utf-8") for kk, v in d.items()}
+                    for k, d in self.load(self._hashes_file.read_text()).items()
+                },
+            )
+        if self._expiration_times_file.exists():
+            self.r.key_eviction_time = self.load(self._expiration_times_file.read_text())
+
+    def update_persistent_state(self) -> None:
+        self._values_file.write_text(self.dump({k: v.decode("utf-8") for k, v in self.r.values.items()}))
+        self._lists_file.write_text(
+            self.dump({k: [item.decode("utf-8") for item in v] for k, v in self.r.lists.items()})
+        )
+        self._sets_file.write_text(self.dump({k: [item.decode("utf-8") for item in s] for k, s in self.r.sets.items()}))
+        self._hashes_file.write_text(
+            self.dump({k: {kk: v.decode("utf-8") for kk, v in d.items()} for k, d in self.r.hashes.items()})
+        )
+        self._expiration_times_file.write_text(self.dump(self.r.key_eviction_time))
+
+    @property
+    def _persistent_dir(self) -> Path:
+        persistent_dir = Path(os.getcwd()) / self.dirname
+        persistent_dir.mkdir(exist_ok=True)
+        return persistent_dir
+
+    @property
+    def _values_file(self) -> Path:
+        return self._persistent_dir / "values.json"
+
+    @property
+    def _lists_file(self) -> Path:
+        return self._persistent_dir / "lists.json"
+
+    @property
+    def _sets_file(self) -> Path:
+        return self._persistent_dir / "sets.json"
+
+    @property
+    def _hashes_file(self) -> Path:
+        return self._persistent_dir / "hashes.json"
+
+    @property
+    def _expiration_times_file(self) -> Path:
+        return self._persistent_dir / "key_expiration_times.json"
+
+    def pipeline(self, transaction: bool = True, shard_hint: Optional[str] = None) -> RedisPipelineInterface:
+        return RedisPipelineEmulatiom(self)
+
+
+# monkey patching methods on PersistentRedisEmulation
+
+
+def create_persistent_wrapper_method(redis_interface_method_name: str):
+    async def method_wrapper(self: PersistentRedisEmulation, *args, **kwargs):
+        wrapped_func = getattr(self.r, redis_interface_method_name)
+        res = await wrapped_func(*args, **kwargs)
+        self.update_persistent_state()
+        return res
+
+    return method_wrapper
+
+
+for method_name in RedisInterface.__abstractmethods__:
+    if method_name == "pipeline":
+        continue
+    setattr(PersistentRedisEmulation, method_name, create_persistent_wrapper_method(method_name))
+abc.update_abstractmethods(PersistentRedisEmulation)  # type: ignore
