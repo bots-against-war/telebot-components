@@ -4,7 +4,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import toml  # type: ignore
 from cryptography.fernet import Fernet
@@ -21,25 +21,28 @@ class SaveSecretResult:
     message: str
 
 
-ADMIN_OWNER_ID = 0
+OwnerId = Union[str, int]
+
+
+ADMIN_OWNER_ID: OwnerId = 0
 
 
 class SecretStore(ABC):
     def __init__(self, scope_secrets_to_user: bool) -> None:
         self.scope_secrets_to_user = scope_secrets_to_user
 
-    def to_env_specific(self, owner_id: int) -> int:
+    def to_env_specific(self, owner_id: OwnerId) -> OwnerId:
         if self.scope_secrets_to_user:
             return owner_id
         else:
             return ADMIN_OWNER_ID  # store all secrets as admin secrets
 
     @abstractmethod
-    async def get_secret(self, secret_name: str, owner_id: int = ADMIN_OWNER_ID) -> Optional[str]:
+    async def get_secret(self, secret_name: str, owner_id: OwnerId = ADMIN_OWNER_ID) -> Optional[str]:
         """For internal use only -- nevere expose to the user!"""
         ...
 
-    async def get_required_secret(self, secret_name: str, owner_id: int = ADMIN_OWNER_ID) -> str:
+    async def get_required_secret(self, secret_name: str, owner_id: OwnerId = ADMIN_OWNER_ID) -> str:
         secret = await self.get_secret(secret_name, owner_id)
         if secret is None:
             raise RuntimeError(f"Required secret {secret_name!r} ({owner_id = }) not found")
@@ -47,25 +50,25 @@ class SecretStore(ABC):
             return secret
 
     @abstractmethod
-    async def list_secrets(self, owner_id: int = ADMIN_OWNER_ID) -> list[str]:
+    async def list_secrets(self, owner_id: OwnerId = ADMIN_OWNER_ID) -> list[str]:
         """For admin chat only — never expose to the user"""
         ...
 
     @abstractmethod
-    async def list_owners(self) -> list[int]:
+    async def list_owners(self) -> list[OwnerId]:
         ...
 
     @abstractmethod
     async def save_secret(
-        self, secret_name: str, secret_value: str, owner_id: int, allow_update: bool = False
+        self, secret_name: str, secret_value: str, owner_id: OwnerId, allow_update: bool = False
     ) -> SaveSecretResult:
         ...
 
     @abstractmethod
-    async def remove_secret(self, secret_name: str, owner_id: int) -> bool:
+    async def remove_secret(self, secret_name: str, owner_id: OwnerId) -> bool:
         ...
 
-    def user_to_owner_id(self, user_id: int) -> int:
+    def user_to_owner_id(self, user_id: int) -> OwnerId:
         user_id_bytes = str(user_id).encode("utf-8")
         owner_id_bytes = hashlib.sha256(user_id_bytes).digest()
         owner_id = int.from_bytes(owner_id_bytes[:8], byteorder="little")
@@ -99,7 +102,7 @@ class RedisSecretStore(SecretStore):
         # this allows creation of several secret stores for testing
         GenericStore.allow_duplicate_stores(self._store._full_prefix)
 
-    async def get_secret(self, secret_name: str, owner_id: int = ADMIN_OWNER_ID) -> Optional[str]:
+    async def get_secret(self, secret_name: str, owner_id: OwnerId = ADMIN_OWNER_ID) -> Optional[str]:
         encrypted_b64 = await self._store.get_subkey(self.to_env_specific(owner_id), secret_name)
         if encrypted_b64 is None:
             return None
@@ -110,14 +113,14 @@ class RedisSecretStore(SecretStore):
             logger.exception(f"Error decrypting secret {secret_name!r} (belongs to {owner_id = })")
             return None
 
-    async def list_owners(self) -> list[int]:
-        return sorted({self.to_env_specific(int(oid)) for oid in await self._store.list_keys()})
+    async def list_owners(self) -> list[OwnerId]:
+        return sorted({self.to_env_specific(oid) for oid in await self._store.list_keys()})
 
-    async def list_secrets(self, owner_id: int = ADMIN_OWNER_ID) -> list[str]:
+    async def list_secrets(self, owner_id: OwnerId = ADMIN_OWNER_ID) -> list[str]:
         return await self._store.list_subkeys(self.to_env_specific(owner_id))
 
     async def save_secret(
-        self, secret_name: str, secret_value: str, owner_id: int, allow_update: bool = False
+        self, secret_name: str, secret_value: str, owner_id: OwnerId, allow_update: bool = False
     ) -> SaveSecretResult:
         owner_id = self.to_env_specific(owner_id)
         if owner_id != ADMIN_OWNER_ID and len(await self.list_secrets(owner_id)) > self.secrets_per_user:
@@ -136,7 +139,7 @@ class RedisSecretStore(SecretStore):
         else:
             return SaveSecretResult(is_saved=False, message="⚠️ Error saving the secret to database")
 
-    async def remove_secret(self, secret_name: str, owner_id: int) -> bool:
+    async def remove_secret(self, secret_name: str, owner_id: OwnerId) -> bool:
         return await self._store.remove_subkey(self.to_env_specific(owner_id), secret_name)
 
 
@@ -152,19 +155,19 @@ class TomlFileSecretStore(SecretStore):
             logger.warning(f"Secrets file not found, running without secrets: {self.path.absolute()}")
             self._secrets = dict()
 
-    async def get_secret(self, secret_name: str, owner_id: int = ADMIN_OWNER_ID) -> Optional[str]:
+    async def get_secret(self, secret_name: str, owner_id: OwnerId = ADMIN_OWNER_ID) -> Optional[str]:
         return self._secrets.get(secret_name)
 
-    async def list_secrets(self, owner_id: int = ADMIN_OWNER_ID) -> list[str]:
+    async def list_secrets(self, owner_id: OwnerId = ADMIN_OWNER_ID) -> list[str]:
         return list(self._secrets.keys())
 
-    async def list_owners(self) -> list[int]:
+    async def list_owners(self) -> list[OwnerId]:
         return [ADMIN_OWNER_ID]
 
     async def save_secret(
-        self, secret_name: str, secret_value: str, owner_id: int, allow_update: bool = False
+        self, secret_name: str, secret_value: str, owner_id: OwnerId, allow_update: bool = False
     ) -> SaveSecretResult:
         raise NotImplementedError("This is a read-only secret store")
 
-    async def remove_secret(self, secret_name: str, owner_id: int) -> bool:
+    async def remove_secret(self, secret_name: str, owner_id: OwnerId) -> bool:
         raise NotImplementedError("This is a read-only secret store")
