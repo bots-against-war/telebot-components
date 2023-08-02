@@ -1,4 +1,5 @@
 import os
+import shutil
 from typing import AsyncGenerator
 
 import pytest
@@ -7,14 +8,21 @@ import telebot
 from aioresponses import aioresponses
 from redis.asyncio import Redis  # type: ignore
 
-from telebot_components.redis_utils.emulation import RedisEmulation
+from telebot_components.redis_utils.emulation import (
+    PersistentRedisEmulation,
+    RedisEmulation,
+)
 from telebot_components.redis_utils.interface import RedisInterface
+from telebot_components.stores.generic import GenericStore
 from tests.utils import TimeSupplier, using_real_redis
 
+GenericStore.RANDOMIZE_PREFIXES = True
 
-@pytest.fixture
-async def redis() -> AsyncGenerator[RedisInterface, None]:
-    if using_real_redis():
+
+@pytest.fixture(params=["ephemeral_emulation", "persistent_emulation"] if not using_real_redis() else ["real"])
+async def redis(request: pytest.FixtureRequest) -> AsyncGenerator[RedisInterface, None]:
+    redis_type = request.param
+    if redis_type == "real":
         # FIXME: the cleanup does not work properly for some reason...
         redis = Redis.from_url(os.getenv("REDIS_URL"))
         # await redis.flushall()
@@ -39,8 +47,16 @@ async def redis() -> AsyncGenerator[RedisInterface, None]:
             await redis.connection.disconnect()
         except Exception:
             pass
-    else:
+    elif redis_type == "ephemeral_emulation":
         yield RedisEmulation()
+    elif redis_type == "persistent_emulation":
+        redis = PersistentRedisEmulation(dirname=".test-redis-emulation")  # type: ignore
+        shutil.rmtree(redis._persistent_dir, ignore_errors=True)
+        redis.load_persistent_state()
+        yield redis
+        shutil.rmtree(redis._persistent_dir, ignore_errors=True)
+    else:
+        raise RuntimeError(f"Unknown redis type: {redis_type}")
 
 
 @pytest.fixture

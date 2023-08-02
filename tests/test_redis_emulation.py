@@ -166,11 +166,11 @@ async def test_keys(
 
 
 def generate_key_value() -> tuple[str, bytes]:
-    return uuid4().hex, uuid4().bytes
+    return uuid4().hex, uuid4().hex.encode("utf-8")
 
 
 def generate_values(n: int) -> list[bytes]:
-    return [uuid4().bytes for _ in range(n)]
+    return [uuid4().hex.encode("utf-8") for _ in range(n)]
 
 
 async def test_hash_operations(redis: RedisInterface):
