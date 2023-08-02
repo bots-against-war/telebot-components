@@ -49,6 +49,7 @@ locally on real Redis by specifying `REDIS_URL` environment variable before runn
 > **Note**: Tests must be able to find an empty Redis DB to use; they also clean up after themselves.
 
 ### Start example bot
+
 For first start you need to do 3 things:
 1. Use command below to generate environment variables file:
     ```bash
