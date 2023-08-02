@@ -143,14 +143,13 @@ class RedisSecretStore(SecretStore):
 class FileSecretStore(SecretStore):
     """File secret storage for local testing"""
 
-    PATH = (Path(__file__).parent / "../secrets.toml").resolve()
-
-    def __init__(self) -> None:
+    def __init__(self, path: Path) -> None:
         super().__init__(scope_secrets_to_user=False)
+        self.path = path
         try:
-            self._secrets: dict[str, str] = toml.load(self.PATH)
+            self._secrets: dict[str, str] = toml.load(self.path)
         except FileNotFoundError:
-            logger.warning("secrets.toml not found, running without secret store")
+            logger.warning(f"Secrets file not found, running without secrets: {self.path.absolute()}")
             self._secrets = dict()
 
     async def get_secret(self, secret_name: str, owner_id: int = ADMIN_OWNER_ID) -> Optional[str]:
