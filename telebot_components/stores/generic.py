@@ -1,5 +1,6 @@
 import json
 import logging
+import secrets
 from dataclasses import dataclass
 from datetime import timedelta
 from hashlib import md5
@@ -44,6 +45,8 @@ class GenericStore(Generic[T]):
 
     _prefix_registry: ClassVar[set[str]] = set()
 
+    RANDOMIZE_PREFIXES: ClassVar[bool] = False
+
     def __post_init__(self):
         self.logger = logging.getLogger(f"{__name__}[{self.prefix}-{self.name}]")
         # adding prefix hash to allow stores with nested prefixes
@@ -51,6 +54,9 @@ class GenericStore(Generic[T]):
         # we transform them to 'a-0cc17' and 'ab-187ef' and voila
         plain_prefix = f"{self.prefix}-{self.name}"
         prefix_hash = md5(plain_prefix.encode("utf-8")).hexdigest()[:5]
+        if self.RANDOMIZE_PREFIXES:
+            # option for testing that allows creating unlimited number of independent copies for every store
+            prefix_hash += "-RANDOM" + secrets.token_hex(nbytes=8)
         self._full_prefix = f"{plain_prefix}-{prefix_hash}-"
         if self._full_prefix in self._prefix_registry:
             raise ValueError(
