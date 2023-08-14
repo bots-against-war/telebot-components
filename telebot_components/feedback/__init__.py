@@ -1090,7 +1090,7 @@ class FeedbackHandler:
                     if self.config.hashtags_in_admin_chat:
                         await self._remove_unanswered_hashtag(bot, forwarded_msg_id)
                     has_attachments = message.content_type != "text"
-                    await asyncio.gather(
+                    maybe_exceptions = await asyncio.gather(
                         *[
                             integration.handle_user_message_replied_elsewhere(
                                 UserMessageRepliedEvent(
@@ -1106,8 +1106,21 @@ class FeedbackHandler:
                                 )
                             )
                             for integration in self.integrations
-                        ]
+                        ],
+                        return_exceptions=True,
                     )
+                    for maybe_exception, integration in zip(maybe_exceptions, self.integrations):
+                        if maybe_exception is None:
+                            continue
+                        elif isinstance(maybe_exception, Exception):
+                            self.logger.error(
+                                f"Error notifying integration {integration.name()!r}, ignoring: {maybe_exception!r}"
+                            )
+                        else:
+                            self.logger.warning(
+                                f"Unexpected value returned from notifying integration {integration.name()!r}, "
+                                + f"ignoring: {maybe_exception!r}"
+                            )
             except Exception as e:
                 await bot.reply_to(message, f"Something went wrong! {e}")
                 self.logger.exception("Unexpected error while replying to forwarded msg")
