@@ -157,18 +157,19 @@ class LanguageStore:
                 await callback_query_processing_error(bot, call, f"corrupted callback query '{call.data}'", self.logger)
                 return
 
-            selected_language = await self.get_selected_user_language(user)
-            if selected_language == language:
-                return  # language not changed, nothing to do
-
             if language not in self.languages:
                 await callback_query_processing_error(bot, call, f"language '{language}' is not supported", self.logger)
                 return
 
-            language_saved = await self.set_user_language(user, language)
-            if not language_saved:
+            previous_language = await self.get_user_language(user)
+
+            if not await self.set_user_language(user, language):
                 await callback_query_processing_error(bot, call, "unable to save selected language", self.logger)
                 return
+
+            if language == previous_language:
+                return  # language not changed, nothing to do
+
             try:
                 await bot.edit_message_reply_markup(
                     user.id, call.message.id, reply_markup=self.markup_for_selected_language(language)
