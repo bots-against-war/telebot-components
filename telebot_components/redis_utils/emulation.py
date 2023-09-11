@@ -23,8 +23,11 @@ class RedisEmulation(RedisInterface):
         self.sets: dict[str, set[bytes]] = defaultdict(set)
         self.lists: dict[str, list[bytes]] = defaultdict(list)
         self.hashes: dict[str, dict[str, bytes]] = defaultdict(dict)
-        self._storages: tuple[dict[str, Any], ...] = (self.values, self.sets, self.lists, self.hashes)
         self.key_eviction_time: dict[str, float] = dict()
+
+    @property
+    def storages(self) -> tuple[dict[str, Any], ...]:
+        return (self.values, self.sets, self.lists, self.hashes)
 
     def pipeline(self, transaction: bool = True, shard_hint: Optional[str] = None) -> "RedisPipelineEmulatiom":
         return RedisPipelineEmulatiom(self)
@@ -36,7 +39,7 @@ class RedisEmulation(RedisInterface):
         if time_module.time() <= evict_at:
             return
         self.key_eviction_time.pop(key)
-        for storage in self._storages:
+        for storage in self.storages:
             if key in storage:
                 storage.pop(key)
 
@@ -63,7 +66,7 @@ class RedisEmulation(RedisInterface):
             self._evict_if_expired(name)
         n_deleted = 0
         for key in names:
-            for storage in self._storages:
+            for storage in self.storages:
                 if storage.pop(key, None) is not None:
                     n_deleted += 1
         return n_deleted
@@ -170,7 +173,7 @@ class RedisEmulation(RedisInterface):
     async def exists(self, *names: str) -> int:
         n_exist = 0
         for name in names:
-            for storage in self._storages:
+            for storage in self.storages:
                 if name in storage:
                     n_exist += 1
                     break
@@ -183,7 +186,7 @@ class RedisEmulation(RedisInterface):
         and for Redis KEYS: https://redis.io/commands/keys/
         """
         matches: list[bytes] = []
-        for storage in self._storages:
+        for storage in self.storages:
             for key in storage:
                 if fnmatch(key, pattern):
                     matches.append(key.encode("utf-8"))
