@@ -1,13 +1,19 @@
+import datetime
+import enum
+import itertools
 import logging
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional, Union
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.api import ApiHTTPException
 from telebot.callback_data import CallbackData
+from telebot.types import service as tg_service_types
 
+from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.category import Category, CategoryStore
+from telebot_components.stores.generic import KeyValueStore
 from telebot_components.stores.language import (
     AnyText,
     LanguageStore,
@@ -103,6 +109,9 @@ class MenuItem:
                 callback_data=TERMINATE_MENU_CALLBACK_DATA.new(self.id),
             )
 
+    def get_keyboard_button(self, language: MaybeLanguage) -> tg.KeyboardButton:
+        return tg.KeyboardButton(text=any_text_to_str(self.label, language))
+
     def get_inactive_inline_button(self, selected_item_id: str, language: MaybeLanguage):
         button_text = any_text_to_str(self.label, language)
         if self.id == selected_item_id:
@@ -113,11 +122,17 @@ class MenuItem:
         )
 
 
+class MenuMechanism(enum.Enum):
+    INLINE_BUTTONS = "inline_buttons"
+    REPLY_KEYBOARD = "reply_keyboard"
+
+
 @dataclass(frozen=True)
 class MenuConfig:
-    back_label: AnyText
-    lock_after_termination: bool
+    back_label: Optional[AnyText]  # None = no back button = submenu cannot be exited
+    lock_after_termination: bool = False
     is_text_html: bool = False
+    mechanism: MenuMechanism = MenuMechanism.INLINE_BUTTONS
 
 
 class Menu:
@@ -132,6 +147,13 @@ class Menu:
         self.text = text
         self.menu_items = menu_items
         self._explicit_config = config
+
+    @property
+    def displayed_items(self) -> list[MenuItem]:
+        items = self.menu_items.copy()
+        if self.config.back_label is not None and self.parent_menu is not None:
+            items.append(MenuItem(label=self.config.back_label, submenu=self.parent_menu))
+        return items
 
     @property
     def config(self) -> MenuConfig:
@@ -170,18 +192,17 @@ class Menu:
             grandchildren.extend(menu.descendants())
         return children + grandchildren
 
-    def get_keyboard_markup(self, language: MaybeLanguage):
-        keyboard = [[menu_item.get_inline_button(language)] for menu_item in self.menu_items]
-        if self.parent_menu is not None:
-            if isinstance(self.config.back_label, str):
-                keyboard.append(
-                    [MenuItem(label=self.config.back_label, submenu=self.parent_menu).get_inline_button(None)]
-                )
-            else:
-                keyboard.append(
-                    [MenuItem(label=self.config.back_label, submenu=self.parent_menu).get_inline_button(language)]
-                )
-        return tg.InlineKeyboardMarkup(keyboard=keyboard)
+    def get_keyboard_markup(self, language: MaybeLanguage) -> Union[tg.InlineKeyboardMarkup, tg.ReplyKeyboardMarkup]:
+        if self.config.mechanism is MenuMechanism.INLINE_BUTTONS:
+            return tg.InlineKeyboardMarkup(
+                keyboard=[[menu_item.get_inline_button(language)] for menu_item in self.displayed_items]
+            )
+        else:
+            reply_markup = tg.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            # HACK: telebot annotates keyboard as list[list[KeyboardButton]], but actually expectes JSONified versions
+            # of the button objects
+            reply_markup.keyboard = [[item.get_keyboard_button(language).to_dict()] for item in self.displayed_items]
+            return reply_markup
 
     def get_inactive_keyboard_markup(self, selected_item_id: str, language: MaybeLanguage):
         return tg.InlineKeyboardMarkup(
@@ -195,38 +216,69 @@ class Menu:
 class TerminatorContext:
     bot: AsyncTeleBot
     user: tg.User
-    menu_message: tg.Message
+    menu_message: Optional[tg.Message]
     terminator: str
 
 
 @dataclass
 class TerminatorResult:
-    menu_message_text_update: AnyText
+    menu_message_text_update: Optional[AnyText]
     parse_mode: Optional[str] = None
     lock_menu: Optional[bool] = None  # if set, overrides the default lock_after_termination value in Menu config
+
+
+TerminalMenuOptionHandler = Callable[[TerminatorContext], Awaitable[Optional[TerminatorResult]]]
 
 
 class MenuHandler:
     def __init__(
         self,
+        name: str,
         bot_prefix: str,
         menu_tree: Menu,
+        redis: RedisInterface,
         category_store: Optional[CategoryStore] = None,
         language_store: Optional[LanguageStore] = None,
     ):
         self.category_store = category_store
         self.language_store = language_store
+        self.name = name
+        self.redis = redis
 
         self.menus_list: list[Menu] = [menu_tree]
         self.menus_list.extend(menu_tree.descendants())
 
-        self.init_menu_ids()
-        self.init_parent_menu()
+        # initializing menu ids with sequential numbers
+        for i, menu in enumerate(self.menus_list):
+            menu.id = str(i)
+        # initializing links to parent menus for children
+        for menu in self.menus_list:
+            for menu_item in menu.menu_items:
+                menu_item.parent_menu = menu
+                if menu_item.submenu is not None:
+                    menu_item.submenu.parent_menu = menu
+        # validating keyboard button types against menu types
+        self.has_reply_keyboard_menus = False
+        for menu in self.menus_list:
+            if menu.config.mechanism is MenuMechanism.REPLY_KEYBOARD:
+                self.has_reply_keyboard_menus = True
+                for item in menu.menu_items:
+                    if item.link_url is not None:
+                        raise ValueError(
+                            f"Menu {menu} is configured to work on reply keyboards, "
+                            "but contains items with link URL, which only work on inline keyboards"
+                        )
 
         self.menu_by_id: dict[str, Menu] = {m.id: m for m in self.menus_list}
 
-        self.menu_items_list = self.init_item_ids_and_get_item_list()
-        menu_items_with_bound_categories = [mi for mi in self.menu_items_list if mi.bound_category is not None]
+        # initializing menu item ids with sequential numbers
+        all_menu_items: list[MenuItem] = []
+        for menu in self.menus_list:
+            all_menu_items.extend(menu.menu_items)
+        for i, menu_item in enumerate(all_menu_items):
+            menu_item.id = str(i)
+
+        menu_items_with_bound_categories = [mi for mi in all_menu_items if mi.bound_category is not None]
         if menu_items_with_bound_categories:
             if self.category_store is None:
                 raise ValueError(
@@ -244,13 +296,13 @@ class MenuHandler:
                     + f"with the passed category store: {menu_items_with_non_storable_categories}"
                 )
 
-        self.menu_item_by_id: dict[str, MenuItem] = {mi.id: mi for mi in self.menu_items_list}
+        self.menu_item_by_id: dict[str, MenuItem] = {mi.id: mi for mi in all_menu_items}
 
-        menu_texts = [menu.text for menu in self.menus_list]
-        menu_item_labels = [menu_item.label for menu_item in self.menu_items_list]
-        menu_back_labels = [menu.config.back_label for menu in self.menus_list]
-
-        for any_text in menu_texts + menu_item_labels + menu_back_labels:
+        for any_text in itertools.chain(
+            [menu.text for menu in self.menus_list],
+            [menu_item.label for menu_item in all_menu_items],
+            [menu.config.back_label for menu in self.menus_list if menu.config.back_label is not None],
+        ):
             if self.language_store is not None:
                 self.language_store.validate_multilang(any_text)
             else:
@@ -258,68 +310,150 @@ class MenuHandler:
 
         self.logger = logging.getLogger(f"{__name__}[{bot_prefix}]")
 
+        # chat id -> id for the last menu sent to user
+        self.current_menu_store: KeyValueStore[str] = KeyValueStore(
+            name=f"{self.name}-current-menu-id",
+            prefix=bot_prefix,
+            redis=self.redis,
+            expiration_time=datetime.timedelta(hours=12),
+            dumper=str,
+            loader=str,
+        )
+
+    async def get_current_menu(self, chat_id: Union[str, int]) -> Optional[Menu]:
+        current_menu_id = await self.current_menu_store.load(chat_id)
+        if current_menu_id is None:
+            return None
+        else:
+            return self.menu_by_id.get(current_menu_id)
+
     async def get_maybe_language(self, user: tg.User) -> MaybeLanguage:
         if self.language_store is None:
             return None
         else:
             return await self.language_store.get_user_language(user)
 
-    def init_item_ids_and_get_item_list(self) -> list[MenuItem]:
-        item_list: list[MenuItem] = []
-        for menu in self.menus_list:
-            for menu_item in menu.menu_items:
-                item_list.append(menu_item)
-        for i, menu_item in enumerate(item_list):
-            menu_item.id = str(i)
-        return item_list
-
-    def init_menu_ids(self):
-        for i, menu in enumerate(self.menus_list):
-            menu.id = str(i)
-
-    def init_parent_menu(self):
-        for menu in self.menus_list:
-            for menu_item in menu.menu_items:
-                menu_item.parent_menu = menu
-                if menu_item.submenu is not None:
-                    menu_item.submenu.parent_menu = menu
-
     def get_main_menu(self):
         return self.menu_by_id["0"]
 
     async def start_menu(self, bot: AsyncTeleBot, user: tg.User) -> None:
         """Send menu message to the user, starting at the main menu"""
-        main_menu = self.get_main_menu()
-        language = await self.language_store.get_user_language(user) if self.language_store is not None else None
-        await bot.send_message(
-            chat_id=user.id,
-            text=main_menu.html_text(language),
-            reply_markup=main_menu.get_keyboard_markup(language),
-            parse_mode="HTML",
+        await self._route_to_menu(
+            bot=bot,
+            user=user,
+            new_menu=self.get_main_menu(),
         )
 
-    def setup(
+    async def _route_to_menu(
         self,
         bot: AsyncTeleBot,
-        on_terminal_menu_option_selected: Callable[[TerminatorContext], Awaitable[Optional[TerminatorResult]]],
-    ):
-        @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA, auto_answer=True)
-        async def handle_menu(call: tg.CallbackQuery):
-            user = call.from_user
-            language = await self.get_maybe_language(user)
-            data = ROUTE_MENU_CALLBACK_DATA.parse(call.data)
-            route_to = data["route_to"]
-            menu = self.menu_by_id[route_to]
+        user: tg.User,
+        new_menu: Menu,
+        current_menu_message: Optional[tg.Message] = None,
+    ) -> None:
+        language = await self.get_maybe_language(user)
+        await self.current_menu_store.save(user.id, new_menu.id)
+        current_menu = await self.get_current_menu(user.id)
+        if (
+            current_menu_message is not None
+            and current_menu is not None
+            and current_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS
+            and new_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS
+        ):
             try:
                 await bot.edit_message_text(
-                    text=menu.html_text(language),
                     chat_id=user.id,
-                    message_id=call.message.id,
-                    reply_markup=menu.get_keyboard_markup(language),
+                    text=new_menu.html_text(language),
+                    message_id=current_menu_message.id,
+                    reply_markup=new_menu.get_keyboard_markup(language),
                     parse_mode="HTML",
                 )
             except ApiHTTPException as e:
                 self.logger.info(f"Error editing message text and reply markup: {e!r}")
+        else:
+            await bot.send_message(
+                chat_id=user.id,
+                text=new_menu.html_text(language),
+                reply_markup=new_menu.get_keyboard_markup(language),
+                parse_mode="HTML",
+            )
+
+    async def _terminate_menu(
+        self,
+        bot: AsyncTeleBot,
+        user: tg.User,
+        terminal_menu_item_id: str,
+        handler: TerminalMenuOptionHandler,
+        menu_message: Optional[tg.Message] = None,
+    ) -> None:
+        language = await self.get_maybe_language(user)
+        selected_menu_item = self.menu_item_by_id[terminal_menu_item_id]
+        terminator = selected_menu_item.terminator
+        if terminator is None:
+            self.logger.error(f"handle_terminator got non-terminating menu item: {selected_menu_item}")
+            return
+
+        await self.current_menu_store.drop(user.id)
+        if selected_menu_item.bound_category is not None and self.category_store is not None:
+            await self.category_store.save_user_category(user, selected_menu_item.bound_category)
+
+        try:
+            terminator_handler_result = await handler(TerminatorContext(bot, user, menu_message, terminator))
+        except Exception:
+            self.logger.exception("Unexpected error in on_terminal_menu_option_selected callback, ignoring")
+            terminator_handler_result = None
+
+        current_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
+        lock_menu = current_menu.config.lock_after_termination
+        if terminator_handler_result is not None:
+            if terminator_handler_result.lock_menu is not None:
+                lock_menu = terminator_handler_result.lock_menu
+
+            if (
+                terminator_handler_result.menu_message_text_update is not None
+                and menu_message is not None
+                and current_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS
+            ):
+                try:
+                    await bot.edit_message_text(
+                        text=any_text_to_str(terminator_handler_result.menu_message_text_update, language),
+                        chat_id=user.id,
+                        message_id=menu_message.id,
+                        parse_mode=terminator_handler_result.parse_mode,
+                    )
+                except Exception:
+                    self.logger.info(
+                        f"Eror editing menu message with callback returned value {terminator_handler_result!r}",
+                        exc_info=True,
+                    )
+
+        if lock_menu and menu_message is not None and current_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS:
+            try:
+                await bot.edit_message_reply_markup(
+                    chat_id=user.id,
+                    message_id=menu_message.id,
+                    reply_markup=current_menu.get_inactive_keyboard_markup(terminal_menu_item_id, language),
+                )
+            except ApiHTTPException:
+                self.logger.info("Error editing message reply markup", exc_info=True)
+
+    def setup(
+        self,
+        bot: AsyncTeleBot,
+        on_terminal_menu_option_selected: TerminalMenuOptionHandler,
+    ):
+        # handlers for inline menu stuff
+
+        @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA, auto_answer=True)
+        async def handle_menu(call: tg.CallbackQuery):
+            data = ROUTE_MENU_CALLBACK_DATA.parse(call.data)
+            route_to = data["route_to"]
+            await self._route_to_menu(
+                bot=bot,
+                user=call.from_user,
+                new_menu=self.menu_by_id[route_to],
+                current_menu_message=call.message,
+            )
 
         @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA, auto_answer=True)
         async def handle_inactive_menu(call: tg.CallbackQuery):
@@ -327,54 +461,44 @@ class MenuHandler:
 
         @bot.callback_query_handler(callback_data=TERMINATE_MENU_CALLBACK_DATA, auto_answer=True)
         async def handle_terminator(call: tg.CallbackQuery):
-            user = call.from_user
-            language = await self.get_maybe_language(user)
             data = TERMINATE_MENU_CALLBACK_DATA.parse(call.data)
-            selected_menu_item_id = data["id"]
-
-            selected_menu_item = self.menu_item_by_id[selected_menu_item_id]
-            terminator = selected_menu_item.terminator
-            if terminator is None:
-                self.logger.error(f"handle_terminator got non-terminating menu item: {selected_menu_item}")
-                return
-
-            if selected_menu_item.bound_category is not None and self.category_store is not None:
-                await self.category_store.save_user_category(user, selected_menu_item.bound_category)
-
-            try:
-                terminator_callback_result = await on_terminal_menu_option_selected(
-                    TerminatorContext(bot, user, call.message, terminator)
-                )
-            except Exception:
-                self.logger.exception("Unexpected error in on_terminal_menu_option_selected callback, ignoring")
-                terminator_callback_result = None
-
-            if terminator_callback_result is not None:
-                try:
-                    await bot.edit_message_text(
-                        text=any_text_to_str(terminator_callback_result.menu_message_text_update, language),
-                        chat_id=call.message.chat.id,
-                        message_id=call.message.id,
-                        parse_mode=terminator_callback_result.parse_mode,
-                    )
-                except Exception:
-                    self.logger.info(
-                        f"Eror editing menu message with callback returned value {terminator_callback_result!r}",
-                        exc_info=True,
-                    )
-
-            current_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
-            lock_menu = (
-                terminator_callback_result.lock_menu
-                if terminator_callback_result is not None and terminator_callback_result.lock_menu is not None
-                else current_menu.config.lock_after_termination
+            await self._terminate_menu(
+                bot=bot,
+                user=call.from_user,
+                terminal_menu_item_id=data["id"],
+                handler=on_terminal_menu_option_selected,
+                menu_message=call.message,
             )
-            if lock_menu:
-                try:
-                    await bot.edit_message_reply_markup(
-                        chat_id=user.id,
-                        message_id=call.message.id,
-                        reply_markup=current_menu.get_inactive_keyboard_markup(selected_menu_item_id, language),
-                    )
-                except ApiHTTPException:
-                    self.logger.info("Error editing message reply markup", exc_info=True)
+
+        # handler for reply keyboard stuff
+
+        @bot.message_handler(priority=1000)  # high priority to process these first
+        async def try_handle_reply_to_menu(message: tg.Message) -> Optional[tg_service_types.HandlerResult]:
+            continue_result = tg_service_types.HandlerResult(continue_to_other_handlers=True)
+            if not self.has_reply_keyboard_menus:
+                return continue_result
+            current_menu = await self.get_current_menu(message.chat.id)
+            if current_menu is None:
+                return continue_result
+
+            for item in current_menu.displayed_items:
+                item_texts = [item.label] if isinstance(item.label, str) else list(item.label.values())
+                for text in item_texts:
+                    if message.text == text:
+                        if item.submenu is not None:
+                            await self._route_to_menu(
+                                bot=bot,
+                                user=message.from_user,
+                                new_menu=item.submenu,
+                            )
+                            return None
+                        elif item.terminator is not None:
+                            await self._terminate_menu(
+                                bot=bot,
+                                user=message.from_user,
+                                terminal_menu_item_id=item.id,
+                                handler=on_terminal_menu_option_selected,
+                            )
+                            return None
+            else:
+                return continue_result

@@ -10,6 +10,7 @@ from telebot_components.menu.menu import (
     MenuConfig,
     MenuHandler,
     MenuItem,
+    MenuMechanism,
     TerminatorContext,
     TerminatorResult,
 )
@@ -29,7 +30,8 @@ from telebot_components.stores.language import (
 def create_menu_bot(token: str):
     bot_prefix = "example-menu-bot"
     bot = AsyncTeleBot(token)
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
+    redis = RedisEmulation()
 
     good = Category("good")
     bad = Category("bad")
@@ -42,7 +44,7 @@ def create_menu_bot(token: str):
 
     category_store = CategoryStore(
         bot_prefix=bot_prefix,
-        redis=RedisEmulation(),
+        redis=redis,
         categories=[good, bad, ugly],
         category_expiration_time=None,
         on_category_selected=on_category_selected,
@@ -72,6 +74,11 @@ def create_menu_bot(token: str):
                         Language.RU: "Пожалуйста, выберите ваш язык программирования",
                         Language.EN: "Please choose your programming language",
                     },
+                    config=MenuConfig(
+                        back_label={Language.RU: "<-", Language.EN: "<-"},
+                        lock_after_termination=False,
+                        mechanism=MenuMechanism.REPLY_KEYBOARD,
+                    ),
                     menu_items=[
                         MenuItem(
                             label={
@@ -105,6 +112,7 @@ def create_menu_bot(token: str):
                                     Language.RU: "Какой язык семейства C вы используете?",
                                     Language.EN: "Which C family language do you use?",
                                 },
+                                config=MenuConfig(back_label=None, lock_after_termination=False),
                                 menu_items=[
                                     MenuItem(
                                         label={
@@ -176,7 +184,7 @@ def create_menu_bot(token: str):
     )
 
     language_store = LanguageStore(
-        redis=RedisEmulation(),
+        redis=redis,
         bot_prefix=bot_prefix,
         supported_languages=[Language.RU, Language.EN],
         default_language=Language.RU,
@@ -196,7 +204,14 @@ def create_menu_bot(token: str):
         else:
             return None
 
-    menu_handler = MenuHandler(bot_prefix, menu_tree, category_store=category_store, language_store=language_store)
+    menu_handler = MenuHandler(
+        bot_prefix=bot_prefix,
+        name="example-menu",
+        menu_tree=menu_tree,
+        redis=redis,
+        category_store=category_store,
+        language_store=language_store,
+    )
     menu_handler.setup(bot, on_terminal_menu_option_selected)
 
     @bot.message_handler(commands=["start", "help"])
