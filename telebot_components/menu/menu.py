@@ -1,6 +1,5 @@
 import datetime
 import enum
-import functools
 import itertools
 import logging
 from dataclasses import dataclass
