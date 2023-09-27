@@ -10,8 +10,10 @@ from telebot_components.menu.menu import (
     MenuConfig,
     MenuHandler,
     MenuItem,
+    MenuMechanism,
     TerminatorContext,
 )
+from telebot_components.redis_utils.emulation import RedisEmulation
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.language import Language, LanguageStore
 from tests.utils import extract_full_kwargs
@@ -85,6 +87,8 @@ async def test_menu_handler_basic(example_menu: Menu):
     menu_handler = MenuHandler(
         bot_prefix="testing",
         menu_tree=example_menu,
+        name="test-menu-1",
+        redis=RedisEmulation(),
     )
 
     example_user = tg.User(id=1312, is_bot=False, first_name="Max", last_name="Slater")
@@ -257,6 +261,8 @@ async def test_menu_handler_with_language_store(redis: RedisInterface):
         bot_prefix="testing",
         menu_tree=menu,
         language_store=language_store,
+        name="test-menu-with-langs",
+        redis=RedisEmulation(),
     )
 
     async def on_menu_termination(context: TerminatorContext) -> None:
@@ -301,5 +307,143 @@ async def test_menu_handler_with_language_store(redis: RedisInterface):
             [{"text": "one", "callback_data": "terminator:0"}],
             [{"text": "two", "callback_data": "terminator:1"}],
         ]
+    }
+    bot.method_calls.clear()
+
+
+async def test_menu_handler_with_reply_buttons(redis: RedisInterface):
+    bot = MockedAsyncTeleBot(token="1234567")
+
+    catch_all_received_messages: list[tg.Message] = []
+
+    @bot.message_handler()
+    async def catch_all_handler(message: tg.Message):
+        catch_all_received_messages.append(message)
+
+    example_user = tg.User(id=161, is_bot=False, first_name="Ivan", last_name="Ivanov")
+
+    _message_id_counter = 0
+
+    async def _send_message_to_bot(text: str):
+        nonlocal _message_id_counter
+        _message_id_counter += 1
+        await bot.process_new_updates(
+            [
+                tg.Update.de_json(
+                    {
+                        "update_id": 19283649187364,
+                        "message": {
+                            "message_id": _message_id_counter,
+                            "from": example_user.to_dict(),
+                            "chat": {
+                                "id": example_user.id,
+                                "type": "private",
+                            },
+                            "date": int(datetime.now().timestamp()),
+                            "text": text,
+                        },
+                    }
+                )
+            ]
+        )  # type: ignore
+
+    menu = Menu(
+        text="menu",
+        config=MenuConfig(back_label="<-", mechanism=MenuMechanism.REPLY_KEYBOARD),
+        menu_items=[
+            MenuItem(
+                label="one",
+                submenu=Menu(
+                    text="submenu one",
+                    menu_items=[
+                        MenuItem(label="1 sub 1", terminator="1.1"),
+                        MenuItem(label="1 sub 2", terminator="1.2"),
+                    ],
+                ),
+            ),
+            MenuItem(
+                label="no-escape",
+                submenu=Menu(
+                    text="no escape submenu",
+                    config=MenuConfig(back_label=None, mechanism=MenuMechanism.REPLY_KEYBOARD),
+                    menu_items=[
+                        MenuItem(label="red pill", terminator="red"),
+                        MenuItem(label="blue pill", terminator="blue"),
+                    ],
+                ),
+            ),
+        ],
+    )
+
+    menu_handler = MenuHandler(
+        bot_prefix="testing",
+        menu_tree=menu,
+        name="test-menu-on-reply-buttons",
+        redis=RedisEmulation(),
+    )
+
+    async def on_menu_termination(context: TerminatorContext) -> None:
+        pass
+
+    menu_handler.setup(bot, on_terminal_menu_option_selected=on_menu_termination)
+
+    await menu_handler.start_menu(bot, example_user)
+    assert len(bot.method_calls) == 1
+    all_send_message_kw = extract_full_kwargs(bot.method_calls["send_message"])
+    assert len(all_send_message_kw) == 1
+    send_message_kw = all_send_message_kw[0]
+    reply_markup = send_message_kw.pop("reply_markup")
+    assert send_message_kw == {
+        "chat_id": 161,
+        "text": "menu",
+        "parse_mode": "HTML",
+    }
+    assert reply_markup.to_dict() == {
+        "keyboard": [[{"text": "one"}], [{"text": "no-escape"}]],
+        "one_time_keyboard": True,
+        "resize_keyboard": True,
+    }
+    bot.method_calls.clear()
+
+    await _send_message_to_bot(text="one")
+    assert len(bot.method_calls) == 1
+    all_send_message_kw = extract_full_kwargs(bot.method_calls["send_message"])
+    assert len(all_send_message_kw) == 1
+    send_message_kw = all_send_message_kw[0]
+    reply_markup = send_message_kw.pop("reply_markup")
+    assert send_message_kw == {
+        "chat_id": 161,
+        "text": "submenu one",
+        "parse_mode": "HTML",
+    }
+    assert reply_markup.to_dict() == {
+        "keyboard": [[{"text": "1 sub 1"}], [{"text": "1 sub 2"}], [{"text": "<-"}]],
+        "one_time_keyboard": True,
+        "resize_keyboard": True,
+    }
+    bot.method_calls.clear()
+
+    await _send_message_to_bot(text="some random other message not for menu handler")
+    assert len(catch_all_received_messages) == 1
+
+    # back to main menu
+    await _send_message_to_bot(text="<-")
+    bot.method_calls.clear()
+
+    await _send_message_to_bot(text="no-escape")
+    assert len(bot.method_calls) == 1
+    all_send_message_kw = extract_full_kwargs(bot.method_calls["send_message"])
+    assert len(all_send_message_kw) == 1
+    send_message_kw = all_send_message_kw[0]
+    reply_markup = send_message_kw.pop("reply_markup")
+    assert send_message_kw == {
+        "chat_id": 161,
+        "text": "no escape submenu",
+        "parse_mode": "HTML",
+    }
+    assert reply_markup.to_dict() == {
+        "keyboard": [[{"text": "red pill"}], [{"text": "blue pill"}]],
+        "one_time_keyboard": True,
+        "resize_keyboard": True,
     }
     bot.method_calls.clear()
