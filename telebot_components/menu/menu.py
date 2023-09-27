@@ -150,7 +150,7 @@ class Menu:
         self._explicit_config = config
 
     @property
-    def items_with_back(self) -> list[MenuItem]:
+    def displayed_items(self) -> list[MenuItem]:
         items = self.menu_items.copy()
         if self.config.back_label is not None and self.parent_menu is not None:
             items.append(MenuItem(label=self.config.back_label, submenu=self.parent_menu))
@@ -196,13 +196,13 @@ class Menu:
     def get_keyboard_markup(self, language: MaybeLanguage) -> Union[tg.InlineKeyboardMarkup, tg.ReplyKeyboardMarkup]:
         if self.config.mechanism is MenuMechanism.INLINE_BUTTONS:
             return tg.InlineKeyboardMarkup(
-                keyboard=[[menu_item.get_inline_button(language)] for menu_item in self.items_with_back]
+                keyboard=[[menu_item.get_inline_button(language)] for menu_item in self.displayed_items]
             )
         else:
             reply_markup = tg.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
             # HACK: telebot annotates keyboard as list[list[KeyboardButton]], but actually expectes JSONified versions
             # of the button objects
-            reply_markup.keyboard = [[item.get_keyboard_button(language).to_dict()] for item in self.items_with_back]
+            reply_markup.keyboard = [[item.get_keyboard_button(language).to_dict()] for item in self.displayed_items]
             return reply_markup
 
     def get_inactive_keyboard_markup(self, selected_item_id: str, language: MaybeLanguage):
@@ -341,9 +341,8 @@ class MenuHandler:
         """Send menu message to the user, starting at the main menu"""
         await self._route_to_menu(
             bot=bot,
-            new_menu=self.get_main_menu(),
-            current_menu_message=None,
             user=user,
+            new_menu=self.get_main_menu(),
         )
 
     async def _route_to_menu(
@@ -351,35 +350,34 @@ class MenuHandler:
         bot: AsyncTeleBot,
         user: tg.User,
         new_menu: Menu,
-        current_menu_message: Optional[tg.Message],
+        current_menu_message: Optional[tg.Message] = None,
     ) -> None:
         language = await self.get_maybe_language(user)
         await self.current_menu_store.save(user.id, new_menu.id)
-        if current_menu_message is not None:
-            current_menu = await self.get_current_menu(user.id)
-            if (
-                current_menu is not None
-                and current_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS
-                and new_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS
-            ):
-                try:
-                    await bot.edit_message_text(
-                        chat_id=user.id,
-                        text=new_menu.html_text(language),
-                        message_id=current_menu_message.id,
-                        reply_markup=new_menu.get_keyboard_markup(language),
-                        parse_mode="HTML",
-                    )
-                except ApiHTTPException as e:
-                    self.logger.info(f"Error editing message text and reply markup: {e!r}")
-                return
-
-        await bot.send_message(
-            chat_id=user.id,
-            text=new_menu.html_text(language),
-            reply_markup=new_menu.get_keyboard_markup(language),
-            parse_mode="HTML",
-        )
+        current_menu = await self.get_current_menu(user.id)
+        if (
+            current_menu_message is not None
+            and current_menu is not None
+            and current_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS
+            and new_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS
+        ):
+            try:
+                await bot.edit_message_text(
+                    chat_id=user.id,
+                    text=new_menu.html_text(language),
+                    message_id=current_menu_message.id,
+                    reply_markup=new_menu.get_keyboard_markup(language),
+                    parse_mode="HTML",
+                )
+            except ApiHTTPException as e:
+                self.logger.info(f"Error editing message text and reply markup: {e!r}")
+        else:
+            await bot.send_message(
+                chat_id=user.id,
+                text=new_menu.html_text(language),
+                reply_markup=new_menu.get_keyboard_markup(language),
+                parse_mode="HTML",
+            )
 
     async def _terminate_menu(
         self,
@@ -387,7 +385,7 @@ class MenuHandler:
         user: tg.User,
         terminal_menu_item_id: str,
         handler: TerminalMenuOptionHandler,
-        menu_message: Optional[tg.Message],
+        menu_message: Optional[tg.Message] = None,
     ) -> None:
         language = await self.get_maybe_language(user)
         selected_menu_item = self.menu_item_by_id[terminal_menu_item_id]
@@ -484,7 +482,7 @@ class MenuHandler:
             if current_menu is None:
                 return continue_result
 
-            for item in current_menu.items_with_back:
+            for item in current_menu.displayed_items:
                 item_texts = [item.label] if isinstance(item.label, str) else list(item.label.values())
                 for text in item_texts:
                     if message.text == text:
@@ -493,7 +491,6 @@ class MenuHandler:
                                 bot=bot,
                                 user=message.from_user,
                                 new_menu=item.submenu,
-                                current_menu_message=None,
                             )
                             return None
                         elif item.terminator is not None:
@@ -502,7 +499,6 @@ class MenuHandler:
                                 user=message.from_user,
                                 terminal_menu_item_id=item.id,
                                 handler=on_terminal_menu_option_selected,
-                                menu_message=None,
                             )
                             return None
             else:

@@ -329,7 +329,7 @@ async def test_menu_handler_with_reply_buttons(redis: RedisInterface):
         _message_id_counter += 1
         await bot.process_new_updates(
             [
-                tg.Update.de_json(
+                tg.Update.de_json(  # type: ignore
                     {
                         "update_id": 19283649187364,
                         "message": {
