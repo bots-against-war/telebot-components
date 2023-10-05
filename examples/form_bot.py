@@ -28,6 +28,7 @@ from telebot_components.form.handler import (
     FormHandler,
     FormHandlerConfig,
 )
+from telebot_components.language import any_text_to_str
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.language import Language, LanguageStore
 from telebot_components.utils import send_attachment
@@ -386,9 +387,13 @@ async def create_form_bot(redis: RedisInterface, token: str):
         language = await language_store.get_user_language(user)
         await bot.send_message(
             user.id,
-            {Language.RU: "Заполнение формы отменено. Удачи!", Language.EN: "The form has been cancelled. Good luck!"}[
-                language
-            ],
+            any_text_to_str(
+                {
+                    Language.RU: "Заполнение формы отменено. Удачи!",
+                    Language.EN: "The form has been cancelled. Good luck!",
+                },
+                language,
+            ),
         )
 
     async def on_form_completed(context: FormExitContext[FormResultT]):

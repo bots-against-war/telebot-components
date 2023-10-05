@@ -37,7 +37,7 @@ async def create_multilang_bot(token: str):
 
     async def welcome(user: tg.User):
         lang = await language_store.get_user_language(user)
-        await bot.send_message(user.id, f"Your language is: {lang.emoji()}")
+        await bot.send_message(user.id, f"Your language is: {lang!r}")
 
     @bot.message_handler(commands=["start"])
     async def my_language(message: tg.Message) -> None:

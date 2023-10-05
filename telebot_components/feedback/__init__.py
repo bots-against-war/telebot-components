@@ -46,8 +46,8 @@ from telebot_components.stores.generic import (
     KeyValueStore,
 )
 from telebot_components.stores.language import (
+    AnyLanguage,
     AnyText,
-    Language,
     LanguageStore,
     any_text_to_str,
     vaildate_singlelang_text,
@@ -83,7 +83,7 @@ class ServiceMessages:
     def user_facing(self) -> list[Optional[AnyText]]:
         return [self.forwarded_to_admin_ok, self.you_must_select_category, self.throttling_template]
 
-    def throttling(self, anti_spam: AntiSpamConfig, language: Optional[Language]) -> str:
+    def throttling(self, anti_spam: AntiSpamConfig, language: Optional[AnyLanguage]) -> str:
         if self.throttling_template is None:
             raise RuntimeError("throttling_template is not set, please use validate_config method on startup")
         return any_text_to_str(self.throttling_template, language).format(

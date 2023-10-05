@@ -9,6 +9,7 @@ from typing import (
     Callable,
     ClassVar,
     Iterable,
+    Mapping,
     Optional,
     TypeGuard,
     Union,
@@ -95,7 +96,7 @@ def any_language_to_language_data(any_lang: AnyLanguage) -> LanguageData:
 
 MaybeLanguage = Optional[AnyLanguage]  # None = multilang mode is off, using regular strings
 
-MultilangText = dict[AnyLanguage, str]
+MultilangText = Union[Mapping[Language, str], Mapping[LanguageData, str]]
 
 AnyText = Union[str, MultilangText]
 
@@ -154,7 +155,10 @@ def any_text_to_str(t: AnyText, language: MaybeLanguage) -> str:
         else:
             keys_to_check = language_variants(language)
             for key in keys_to_check:
-                localised = t.get(key)
+                # NOTE: this ignore is needed because ideally we would like to type MultilangText as
+                # {Language | LanguageData -> str}, but it fails because Mapping is invariant in regard to key type
+                # so, its type is {Language -> str} | {LanguageData -> str}, but we can .get() anything anyway
+                localised = t.get(key)  # type: ignore
                 if isinstance(localised, str):
                     return localised
             else:
