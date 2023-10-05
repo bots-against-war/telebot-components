@@ -36,6 +36,7 @@ from telebot_components.form.helpers.calendar_keyboard import (
 from telebot_components.language import (
     AnyText,
     Language,
+    LanguageData,
     MaybeLanguage,
     any_text_to_str,
     is_any_text,
@@ -572,6 +573,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
     def __post_init__(self) -> None:
         super().__post_init__()
         self._option_by_hash = {self.option_hash(o): o for o in self.EnumClass}
+        # TODO: check hash uniqueness here!
 
     def custom_value_type(self) -> Type:
         return set[self.EnumClass]  # type: ignore
@@ -580,9 +582,9 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
         if isinstance(option.value, str):
             return md5(option.value.encode("utf-8")).hexdigest()[:8]
         elif isinstance(option.value, dict):
-            for lang in Language:
-                if lang in option.value and isinstance(option.value[lang], str):
-                    return md5(option.value[lang].encode("utf-8")).hexdigest()[:8]
+            for lang, localization in sorted(option.value.items()):
+                if isinstance(lang, (Language, LanguageData)) and isinstance(localization, str):
+                    return md5(localization.encode("utf-8")).hexdigest()[:8]
         raise ValueError("Every Enum option must either string or Language -> str dict")
 
     def value_to_str(self, value: set[Enum], language: MaybeLanguage) -> str:

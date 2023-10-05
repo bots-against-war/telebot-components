@@ -68,6 +68,14 @@ class LanguageData:
         else:
             return False
 
+    def __lt__(self, other: Any) -> bool:  # support orderin
+        if isinstance(other, LanguageData):
+            return self.code < other.code
+        elif isinstance(other, Language):
+            return self.code < other.value
+        else:
+            raise ValueError("Language data can only be compared (lexicographically) with other language data")
+
     _DATA: ClassVar[Optional[dict[str, "LanguageData"]]] = None
 
     @classmethod
