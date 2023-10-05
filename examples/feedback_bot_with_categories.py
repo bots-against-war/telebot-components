@@ -17,6 +17,7 @@ from telebot_components.feedback.trello_integration import (
     TrelloIntegration,
     TrelloIntegrationCredentials,
 )
+from telebot_components.language import LanguageChangeContext
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
 from telebot_components.stores.category import Category, CategoryStore
@@ -164,10 +165,10 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
         trello_integration=trello_integration,
     )
 
-    async def on_language_selected(bot: AsyncTeleBot, menu_message: tg.Message, user: tg.User, new_option: Language):
-        await welcome(user)
+    async def on_language_selected(context: LanguageChangeContext):
+        await welcome(context.user)
 
-    language_store.setup(bot, on_language_change=on_language_selected)
+    await language_store.setup(bot, on_language_change=on_language_selected)
 
     async def on_category_selected(bot: AsyncTeleBot, menu_message: tg.Message, user: tg.User, new_option: Category):
         language = await language_store.get_user_language(user)

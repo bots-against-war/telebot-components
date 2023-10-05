@@ -33,7 +33,7 @@ from telebot_components.form.helpers.calendar_keyboard import (
     SelectableDates,
     calendar_keyboard,
 )
-from telebot_components.stores.language import (
+from telebot_components.language import (
     AnyText,
     Language,
     MaybeLanguage,

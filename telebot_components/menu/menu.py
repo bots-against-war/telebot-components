@@ -11,16 +11,16 @@ from telebot.api import ApiHTTPException
 from telebot.callback_data import CallbackData
 from telebot.types import service as tg_service_types
 
-from telebot_components.redis_utils.interface import RedisInterface
-from telebot_components.stores.category import Category, CategoryStore
-from telebot_components.stores.generic import KeyValueStore
-from telebot_components.stores.language import (
+from telebot_components.language import (
     AnyText,
-    LanguageStore,
+    LanguageStoreInterface,
     MaybeLanguage,
     any_text_to_str,
     vaildate_singlelang_text,
 )
+from telebot_components.redis_utils.interface import RedisInterface
+from telebot_components.stores.category import Category, CategoryStore
+from telebot_components.stores.generic import KeyValueStore
 from telebot_components.utils import telegram_html_escape
 
 ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
@@ -217,6 +217,7 @@ class TerminatorContext:
     bot: AsyncTeleBot
     user: tg.User
     menu_message: Optional[tg.Message]
+    menu_message_id: Optional[int]
     terminator: str
 
 
@@ -238,7 +239,7 @@ class MenuHandler:
         menu_tree: Menu,
         redis: RedisInterface,
         category_store: Optional[CategoryStore] = None,
-        language_store: Optional[LanguageStore] = None,
+        language_store: Optional[LanguageStoreInterface] = None,
     ):
         self.category_store = category_store
         self.language_store = language_store
@@ -311,13 +312,22 @@ class MenuHandler:
         self.logger = logging.getLogger(f"{__name__}[{bot_prefix}]")
 
         # chat id -> id for the last menu sent to user
-        self.current_menu_store: KeyValueStore[str] = KeyValueStore(
+        self.current_menu_store = KeyValueStore[str](
             name=f"{self.name}-current-menu-id",
             prefix=bot_prefix,
             redis=self.redis,
             expiration_time=datetime.timedelta(hours=12),
             dumper=str,
             loader=str,
+        )
+        # chat id -> last sent menu message id
+        self.last_menu_message_id_store = KeyValueStore[int](
+            name=f"{self.name}-menu-message",
+            prefix=bot_prefix,
+            redis=self.redis,
+            expiration_time=datetime.timedelta(hours=12),
+            dumper=str,
+            loader=int,
         )
 
     async def get_current_menu(self, chat_id: Union[str, int]) -> Optional[Menu]:
@@ -342,6 +352,7 @@ class MenuHandler:
             bot=bot,
             user=user,
             new_menu=self.get_main_menu(),
+            current_menu_message_id=None,
         )
 
     async def _route_to_menu(
@@ -349,13 +360,13 @@ class MenuHandler:
         bot: AsyncTeleBot,
         user: tg.User,
         new_menu: Menu,
-        current_menu_message: Optional[tg.Message] = None,
+        current_menu_message_id: Optional[int],
     ) -> None:
         language = await self.get_maybe_language(user)
         await self.current_menu_store.save(user.id, new_menu.id)
         current_menu = await self.get_current_menu(user.id)
         if (
-            current_menu_message is not None
+            current_menu_message_id is not None
             and current_menu is not None
             and current_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS
             and new_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS
@@ -364,19 +375,20 @@ class MenuHandler:
                 await bot.edit_message_text(
                     chat_id=user.id,
                     text=new_menu.html_text(language),
-                    message_id=current_menu_message.id,
+                    message_id=current_menu_message_id,
                     reply_markup=new_menu.get_keyboard_markup(language),
                     parse_mode="HTML",
                 )
             except ApiHTTPException as e:
                 self.logger.info(f"Error editing message text and reply markup: {e!r}")
         else:
-            await bot.send_message(
+            new_menu_message = await bot.send_message(
                 chat_id=user.id,
                 text=new_menu.html_text(language),
                 reply_markup=new_menu.get_keyboard_markup(language),
                 parse_mode="HTML",
             )
+            await self.last_menu_message_id_store.save(user.id, new_menu_message.id)
 
     async def _terminate_menu(
         self,
@@ -384,8 +396,12 @@ class MenuHandler:
         user: tg.User,
         terminal_menu_item_id: str,
         handler: TerminalMenuOptionHandler,
-        menu_message: Optional[tg.Message] = None,
+        # these duplicate each other but are used in different contexts
+        menu_message: Optional[tg.Message],
+        menu_message_id: Optional[int],
     ) -> None:
+        menu_message_id = menu_message_id or (menu_message.id if menu_message is not None else None)
+
         language = await self.get_maybe_language(user)
         selected_menu_item = self.menu_item_by_id[terminal_menu_item_id]
         terminator = selected_menu_item.terminator
@@ -398,7 +414,15 @@ class MenuHandler:
             await self.category_store.save_user_category(user, selected_menu_item.bound_category)
 
         try:
-            terminator_handler_result = await handler(TerminatorContext(bot, user, menu_message, terminator))
+            terminator_handler_result = await handler(
+                TerminatorContext(
+                    bot=bot,
+                    user=user,
+                    terminator=terminator,
+                    menu_message=menu_message,
+                    menu_message_id=menu_message_id,
+                )
+            )
         except Exception:
             self.logger.exception("Unexpected error in on_terminal_menu_option_selected callback, ignoring")
             terminator_handler_result = None
@@ -409,29 +433,25 @@ class MenuHandler:
             if terminator_handler_result.lock_menu is not None:
                 lock_menu = terminator_handler_result.lock_menu
 
-            if (
-                terminator_handler_result.menu_message_text_update is not None
-                and menu_message is not None
-                and current_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS
-            ):
+            if terminator_handler_result.menu_message_text_update is not None and (menu_message is not None):
                 try:
                     await bot.edit_message_text(
                         text=any_text_to_str(terminator_handler_result.menu_message_text_update, language),
                         chat_id=user.id,
-                        message_id=menu_message.id,
+                        message_id=menu_message_id,
                         parse_mode=terminator_handler_result.parse_mode,
                     )
                 except Exception:
                     self.logger.info(
-                        f"Eror editing menu message with callback returned value {terminator_handler_result!r}",
+                        f"Error editing menu message with text from {terminator_handler_result!r}",
                         exc_info=True,
                     )
 
-        if lock_menu and menu_message is not None and current_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS:
+        if lock_menu and menu_message_id is not None and current_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS:
             try:
                 await bot.edit_message_reply_markup(
                     chat_id=user.id,
-                    message_id=menu_message.id,
+                    message_id=menu_message_id,
                     reply_markup=current_menu.get_inactive_keyboard_markup(terminal_menu_item_id, language),
                 )
             except ApiHTTPException:
@@ -452,7 +472,7 @@ class MenuHandler:
                 bot=bot,
                 user=call.from_user,
                 new_menu=self.menu_by_id[route_to],
-                current_menu_message=call.message,
+                current_menu_message_id=call.message.id,
             )
 
         @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA, auto_answer=True)
@@ -468,6 +488,7 @@ class MenuHandler:
                 terminal_menu_item_id=data["id"],
                 handler=on_terminal_menu_option_selected,
                 menu_message=call.message,
+                menu_message_id=call.message.id,
             )
 
         # handler for reply keyboard stuff
@@ -490,6 +511,7 @@ class MenuHandler:
                                 bot=bot,
                                 user=message.from_user,
                                 new_menu=item.submenu,
+                                current_menu_message_id=await self.last_menu_message_id_store.load(message.chat.id),
                             )
                             return None
                         elif item.terminator is not None:
@@ -498,6 +520,8 @@ class MenuHandler:
                                 user=message.from_user,
                                 terminal_menu_item_id=item.id,
                                 handler=on_terminal_menu_option_selected,
+                                menu_message=None,
+                                menu_message_id=await self.last_menu_message_id_store.load(message.chat.id),
                             )
                             return None
             else:

@@ -43,12 +43,12 @@ async def test_get_user_language_basic(
     user = tg.User.de_json(user_json)
 
     language = await language_store.get_user_language(user)
-    assert language is expected_language
+    assert language == expected_language
     for lang in language_store.languages:
         await language_store.set_user_language(user, lang)
         assert await language_store.get_user_language(user) == lang
 
-    with pytest.raises(ValueError, match="Can't set user language to unsupported value <Language.PL: 'pl'>"):
+    with pytest.raises(ValueError, match="Can't set user language to unsupported value "):
         await language_store.set_user_language(user, Language.PL)
 
     with pytest.raises(ValueError, match="Can't set user language to unsupported value 'this is wrong'"):
@@ -124,7 +124,7 @@ async def test_language_store_markup(
             select_with_checkmark=checkmark_select,
         ),
     )
-    language_store.setup(bot)
+    await language_store.setup(bot)
 
     user_json = {"id": 131242069, "is_bot": False, "first_name": "user"}
     user = tg.User.de_json(user_json)
@@ -166,4 +166,4 @@ async def test_language_store_markup(
     )
     assert button_clicked_update is not None
     await bot.process_new_updates([button_clicked_update])
-    assert await language_store.get_user_language(user) is expected_selected_language
+    assert await language_store.get_user_language(user) == expected_selected_language

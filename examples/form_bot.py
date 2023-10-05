@@ -289,7 +289,7 @@ simple_sequential_form = Form(
 )
 
 
-def create_form_bot(redis: RedisInterface, token: str):
+async def create_form_bot(redis: RedisInterface, token: str):
     bot = AsyncTeleBot(token)
     bot_prefix = "example-form-bot"
 
@@ -404,7 +404,7 @@ def create_form_bot(redis: RedisInterface, token: str):
             await send_attachment(bot, context.last_update.from_user.id, attachment=photo)
 
     form_handler.setup(bot, on_form_completed, on_form_cancelled)
-    language_store.setup(bot)
+    await language_store.setup(bot)
 
     async def on_aux_form_completed(context: FormExitContext[dict]):
         await bot.send_message(context.last_update.from_user.id, "Success! Thank you :)")
@@ -431,12 +431,11 @@ if __name__ == "__main__":
     redis_url = os.environ.get("REDIS_URL")
     redis = Redis.from_url(redis_url) if redis_url is not None else RedisEmulation()
 
-    bot_runner = create_form_bot(
-        redis=redis,
-        token=os.environ["TOKEN"],
-    )
-
     async def main():
+        bot_runner = await create_form_bot(
+            redis=redis,
+            token=os.environ["TOKEN"],
+        )
         print(await bot_runner.bot.get_me())
         await bot_runner.run_polling()
 

@@ -1,158 +1,183 @@
 import logging
 from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Optional, TypeGuard, Union
+from typing import Any, Iterable, Optional
 
 from telebot import AsyncTeleBot, types
 from telebot.callback_data import CallbackData
 
 from telebot_components.constants import times
+
+# unused imports are for backwards compatbility
+from telebot_components.language import (  # noqa: F401
+    AnyLanguage,
+    AnyText,
+    Language,
+    LanguageChangeContext,
+    LanguageChangeHandler,
+    LanguageData,
+    LanguageStoreInterface,
+    MaybeLanguage,
+    MultilangText,
+    any_language_to_language_data,
+    any_text_to_str,
+    is_any_text,
+    is_multilang_text,
+    vaildate_singlelang_text,
+    validate_multilang_text,
+)
+from telebot_components.menu import MenuHandler
+from telebot_components.menu.menu import (
+    Menu,
+    MenuConfig,
+    MenuItem,
+    MenuMechanism,
+    TerminatorContext,
+    TerminatorResult,
+)
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import KeyValueStore
-from telebot_components.stores.types import OnOptionSelected
 from telebot_components.stores.utils import callback_query_processing_error
-
-
-class Language(Enum):
-    """IETF language tags, same as used by Telegram
-    https://en.wikipedia.org/wiki/IETF_language_tag
-
-    Add your languages here on demand.
-    """
-
-    EN = "en"
-    UK = "uk"
-    RU = "ru"
-    PL = "pl"
-
-    def __str__(self) -> str:
-        return self.value
-
-    def emoji(self) -> str:
-        known_emoji = {
-            Language.EN: "🇬🇧",
-            Language.UK: "🇺🇦",
-            Language.RU: "🇷🇺",
-            Language.PL: "🇵🇱",
-        }
-        return known_emoji.get(self, str(self).upper())
-
-
-MaybeLanguage = Optional[Language]  # None = multilang mode is off, using regular strings
-
-
-MultilangText = dict[Language, str]
-
-AnyText = Union[str, MultilangText]
-
-
-def is_multilang_text(t: Any) -> TypeGuard[MultilangText]:
-    if not isinstance(t, dict):
-        return False
-    for key, value in t.items():
-        if not isinstance(key, Language):
-            return False
-        if not isinstance(value, str):
-            return False
-    return True
-
-
-def is_any_text(t: Any) -> TypeGuard[AnyText]:
-    return is_multilang_text(t) or isinstance(t, str)
-
-
-def validate_multilang_text(t: Any, languages: list[Language]) -> MultilangText:
-    if not is_multilang_text(t):
-        raise TypeError(f"Not a multilang text: {t}")
-    for language in languages:
-        if language not in t:
-            raise ValueError(f"Multilang text misses localisation to '{language}': {t}")
-    return t
-
-
-def vaildate_singlelang_text(t: Any) -> str:
-    if not isinstance(t, str):
-        raise TypeError(f"Single language text must be a string, found {type(t).__name__}: {t}")
-    return t
-
-
-def any_text_to_str(t: AnyText, language: MaybeLanguage) -> str:
-    if language is None:
-        if isinstance(t, str):
-            return t
-        else:
-            raise ValueError("MultilangText requires a valid Language for localisation")
-    else:
-        if isinstance(t, str):
-            raise ValueError("Plain string text requires language=None")
-        else:
-            localised_t = t.get(language)
-            if not isinstance(localised_t, str):
-                raise ValueError(f"No valid localisation found for language '{language}'")
-            return localised_t
+from telebot_components.utils.strings import telegram_html_escape
 
 
 @dataclass
 class LanguageSelectionMenuConfig:
     emojj_buttons: bool  # if False (legacy), language codes are used: "RU"
     select_with_checkmark: bool  # if False (legacy), brackets are used: "[ EN ]"
+    prompt: Optional[MultilangText] = None
+    is_prompt_html: bool = False
 
 
-class LanguageStore:
+class LanguageStore(LanguageStoreInterface):
     def __init__(
         self,
         redis: RedisInterface,
         bot_prefix: str,
-        supported_languages: list[Language],
-        default_language: Language,
-        menu_config: LanguageSelectionMenuConfig = LanguageSelectionMenuConfig(True, True),
+        supported_languages: Iterable[AnyLanguage],
+        default_language: AnyLanguage,
+        menu_config: LanguageSelectionMenuConfig = LanguageSelectionMenuConfig(
+            emojj_buttons=True,
+            select_with_checkmark=True,
+            prompt=None,
+            is_prompt_html=False,
+        ),
     ):
-        self.user_language_store = KeyValueStore[Language](
+        self.user_language_store = KeyValueStore[LanguageData](
             name="user-language",
             prefix=bot_prefix,
             redis=redis,
             expiration_time=times.FOREVER,
-            dumper=str,
-            loader=Language,
+            dumper=lambda ld: ld.code,
+            loader=LanguageData.lookup,
         )
         self.logger = logging.getLogger(f"{__name__}[{bot_prefix}]")
-        self.languages = supported_languages
-        self.default_language = default_language
+        self.languages = [any_language_to_language_data(lang) for lang in supported_languages]
+        self.default_language = any_language_to_language_data(default_language)
         self.language_callback_data = CallbackData("code", prefix="lang")
         self.menu_config = menu_config
 
-    def validate_multilang(self, ml_text: Any):
-        validate_multilang_text(ml_text, self.languages)
+        self.reply_keyboard_lang_selector_menu_handler: Optional[MenuHandler] = None
+        if self.menu_config.prompt is not None:
+            self.validate_multilang(self.menu_config.prompt)
+            self.reply_keyboard_lang_selector_menu_handler = MenuHandler(
+                name="language-store-reply-kbd-selector",
+                bot_prefix=bot_prefix,
+                menu_tree=Menu(
+                    text=self.menu_config.prompt,
+                    config=MenuConfig(
+                        back_label=None,
+                        lock_after_termination=False,
+                        is_text_html=self.menu_config.is_prompt_html,
+                        mechanism=MenuMechanism.REPLY_KEYBOARD,
+                    ),
+                    menu_items=[
+                        MenuItem(
+                            label={lang: self._language_label(language) for lang in self.languages},
+                            terminator=language.code,
+                        )
+                        for language in self.languages
+                    ],
+                ),
+                redis=redis,
+                language_store=self,
+            )
 
-    async def get_selected_user_language(self, user: types.User) -> Optional[Language]:
+    async def send_inline_selector(
+        self,
+        bot: AsyncTeleBot,
+        user: types.User,
+    ) -> None:
+        if self.menu_config.prompt is None:
+            raise ValueError("To use send_inline_selector method, prompt must be specified in the menu config")
+        language = await self.get_user_language(user)
+        localized = any_text_to_str(self.menu_config.prompt, language=language)
+        if self.menu_config.is_prompt_html:
+            text = localized
+        else:
+            text = telegram_html_escape(localized)
+        await bot.send_message(
+            chat_id=user.id,
+            text=text,
+            reply_markup=self.markup_for_selected_language(selected_language=language),
+        )
+
+    async def send_reply_keyboard_selector(self, bot: AsyncTeleBot, user: types.User) -> None:
+        if self.reply_keyboard_lang_selector_menu_handler is None:
+            raise ValueError("To use send_reply_keyboard_selector method, prompt must be specified in the menu config")
+        await self.reply_keyboard_lang_selector_menu_handler.start_menu(bot, user)
+
+    def validate_multilang(self, ml_text: Any):
+        validate_multilang_text(ml_text, list(self.languages))
+
+    async def get_selected_user_language(self, user: types.User) -> Optional[LanguageData]:
         return await self.user_language_store.load(user.id)
 
-    async def get_user_language(self, user: types.User) -> Language:
+    async def get_user_language(self, user: types.User) -> LanguageData:
         stored_lang = await self.get_selected_user_language(user)
         if stored_lang is not None:
             return stored_lang
         if user.language_code is None:
             return self.default_language
         try:
-            user_interface_language = Language(user.language_code.lower())
+            user_interface_language = LanguageData.lookup(user.language_code)
             if user_interface_language in self.languages:
                 return user_interface_language
         except ValueError:
+            # user interface's language code is not in Language enum
             pass
         return self.default_language
 
-    async def set_user_language(self, user: types.User, lang: Language) -> bool:
-        if lang not in self.languages:
-            raise ValueError(f"Can't set user language to unsupported value {lang!r}")
-        return await self.user_language_store.save(user.id, lang)
+    async def set_user_language(self, user: types.User, language_data: AnyLanguage) -> bool:
+        language_data = any_language_to_language_data(language_data)
+        if language_data not in self.languages:
+            raise ValueError(f"Can't set user language to unsupported value {language_data!r}")
+        return await self.user_language_store.save(user.id, language_data)
 
-    def setup(self, bot: AsyncTeleBot, on_language_change: Optional[OnOptionSelected[Language]] = None):
+    async def setup(self, bot: AsyncTeleBot, on_language_change: Optional[LanguageChangeHandler] = None):
+        async def safe_on_language_change(
+            message: Optional[types.Message], message_id: Optional[int], user: types.User, language: LanguageData
+        ) -> None:
+            if on_language_change is None:
+                return
+            try:
+                await on_language_change(
+                    LanguageChangeContext(
+                        bot=bot,
+                        message=message,
+                        message_id=message_id,
+                        user=user,
+                        language=language,
+                    )
+                )
+            except Exception:
+                self.logger.exception("Error in on_language_change callback, ignoring")
+
         @bot.callback_query_handler(callback_data=self.language_callback_data, auto_answer=True)
         async def language_selected(call: types.CallbackQuery):
             user = call.from_user
             try:
                 data = self.language_callback_data.parse(call.data)
-                language = Language(data["code"])
+                language = LanguageData.lookup(data["code"])
             except Exception:
                 await callback_query_processing_error(bot, call, f"corrupted callback query '{call.data}'", self.logger)
                 return
@@ -176,16 +201,49 @@ class LanguageStore:
                 )
             except Exception:
                 self.logger.exception("Error editing message reply markup")
-            if on_language_change is not None:
-                try:
-                    await on_language_change(bot, call.message, call.from_user, language)
-                except Exception:
-                    self.logger.exception("Error in on_language_change callback")
 
-    def markup_for_selected_language(self, selected_language: Language):
-        def get_lang_text(lang: Language) -> str:
-            lang_str = lang.emoji() if self.menu_config.emojj_buttons else str(lang).upper()
-            if lang is selected_language:
+            await safe_on_language_change(
+                message=call.message,
+                message_id=call.message.id,
+                user=call.from_user,
+                language=language,
+            )
+
+        if self.reply_keyboard_lang_selector_menu_handler is not None:
+
+            async def on_language_selected(context: TerminatorContext) -> Optional[TerminatorResult]:
+                selected_language = LanguageData.lookup(context.terminator)
+                previous_language = await self.get_user_language(context.user)
+                await self.set_user_language(context.user, selected_language)
+                if selected_language == previous_language:
+                    return None
+                await safe_on_language_change(
+                    message=context.menu_message,
+                    message_id=context.menu_message_id,
+                    user=context.user,
+                    language=selected_language,
+                )
+                return TerminatorResult(
+                    # the same text but it will be localized differently now!
+                    menu_message_text_update=self.menu_config.prompt,
+                    parse_mode="HTML" if self.menu_config.is_prompt_html else None,
+                )
+
+            self.reply_keyboard_lang_selector_menu_handler.setup(
+                bot,
+                on_terminal_menu_option_selected=on_language_selected,
+            )
+
+    def _language_label(self, language: LanguageData) -> str:
+        if self.menu_config.emojj_buttons and language.emoji is not None:
+            return language.emoji
+        else:
+            return language.code.upper()
+
+    def markup_for_selected_language(self, selected_language: LanguageData):
+        def get_lang_text(lang: LanguageData) -> str:
+            lang_str = self._language_label(lang)
+            if lang == selected_language:
                 if self.menu_config.select_with_checkmark:
                     lang_str = "✅ " + lang_str
                 else:
@@ -196,7 +254,8 @@ class LanguageStore:
             [
                 [
                     types.InlineKeyboardButton(
-                        text=get_lang_text(lang), callback_data=self.language_callback_data.new(code=lang.value)
+                        text=get_lang_text(lang),
+                        callback_data=self.language_callback_data.new(code=lang.code),
                     )
                     for lang in self.languages
                 ]
@@ -210,16 +269,16 @@ class LanguageStore:
 
 
 class DummyLanguageStore(LanguageStore):
-    def __init__(self, language: Language):
+    def __init__(self, language: LanguageData):
         self.constant_language = language
 
-    async def get_user_language(self, user: types.User) -> Language:
+    async def get_user_language(self, user: types.User) -> LanguageData:
         return self.constant_language
 
-    async def set_user_language(self, user: types.User, lang: Language) -> bool:
+    async def set_user_language(self, user: types.User, lang: AnyLanguage) -> bool:
         raise NotImplementedError("You can't save user language in a dummy language store")
 
-    def setup(self, bot: AsyncTeleBot, on_language_change: Optional[OnOptionSelected[Language]] = None):
+    async def setup(self, bot: AsyncTeleBot, on_language_change: Optional[LanguageChangeHandler] = None):
         pass
 
     async def markup_for_user(

@@ -8,15 +8,15 @@ from telebot import AsyncTeleBot
 from telebot import types as tg
 from telebot.callback_data import CallbackData
 
-from telebot_components.redis_utils.interface import RedisInterface
-from telebot_components.stores.generic import KeyValueStore
-from telebot_components.stores.language import (
+from telebot_components.language import (
     AnyText,
-    LanguageStore,
+    LanguageStoreInterface,
     MaybeLanguage,
     any_text_to_str,
     vaildate_singlelang_text,
 )
+from telebot_components.redis_utils.interface import RedisInterface
+from telebot_components.stores.generic import KeyValueStore
 from telebot_components.stores.types import OnOptionSelected
 from telebot_components.stores.utils import callback_query_processing_error
 
@@ -49,7 +49,7 @@ class CategoryStore:
         categories: list[Category],
         category_expiration_time: Optional[timedelta],
         default_category: Optional[Category] = None,
-        language_store: Optional[LanguageStore] = None,
+        language_store: Optional[LanguageStoreInterface] = None,
         mark_selected: Callable[[str], str] = lambda caption: "✅ " + caption,
         on_category_selected: Optional[Callable[[CategorySelectedContext], Awaitable[None]]] = None,
     ):
