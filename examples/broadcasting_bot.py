@@ -16,8 +16,6 @@ def create_broadcsting_bot(redis: RedisInterface, token: str, admin_chat_id: int
 
     broadcast_handler = BroadcastHandler(redis, bot_prefix)
 
-    logging.basicConfig(level=logging.DEBUG)
-
     @bot.message_handler(commands=["topics"])
     async def list_topics_cmd_handler(message: tg.Message):
         topics = await broadcast_handler.topics()
@@ -78,6 +76,7 @@ if __name__ == "__main__":
     from telebot_components.redis_utils.interface import RedisInterface
 
     load_dotenv()
+    logging.basicConfig(level=logging.INFO)
 
     redis_url = os.environ.get("REDIS_URL")
     redis: RedisInterface

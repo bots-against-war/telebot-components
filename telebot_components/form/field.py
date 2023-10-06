@@ -582,9 +582,14 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
         if isinstance(option.value, str):
             return md5(option.value.encode("utf-8")).hexdigest()[:8]
         elif isinstance(option.value, dict):
-            for lang, localization in sorted(option.value.items()):
+            md5_hash = md5()
+            is_hash_initialized = False
+            for lang, localization in option.value.items():
                 if isinstance(lang, (Language, LanguageData)) and isinstance(localization, str):
-                    return md5(localization.encode("utf-8")).hexdigest()[:8]
+                    is_hash_initialized = True
+                    md5_hash.update(localization.encode("utf-8"))
+            if is_hash_initialized:
+                return md5_hash.hexdigest()[:8]
         raise ValueError("Every Enum option must either string or Language -> str dict")
 
     def value_to_str(self, value: set[Enum], language: MaybeLanguage) -> str:
