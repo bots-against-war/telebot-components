@@ -8,6 +8,7 @@ from aioresponses import aioresponses
 from telebot import AsyncTeleBot
 from telebot import types as tg
 
+from telebot_components.language import LanguageData
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.language import (
     Language,
@@ -94,6 +95,33 @@ async def test_get_user_language_basic(
             [{"text": "RU", "callback_data": "lang:ru"}, {"text": "[ EN ]", "callback_data": "lang:en"}],
             "lang:en",
             Language.EN,
+        ),
+        pytest.param(
+            [Language.RU, LanguageData.lookup("hy"), LanguageData.lookup("uk"), LanguageData.lookup("kk")],
+            Language.RU,
+            True,
+            True,
+            [
+                {"text": "✅ 🇷🇺", "callback_data": "lang:ru"},
+                {"text": "🇦🇲", "callback_data": "lang:hy"},
+                {"text": "🇺🇦", "callback_data": "lang:uk"},
+                {"text": "🇰🇿", "callback_data": "lang:kk"},
+            ],
+            "lang:hy",
+            LanguageData.lookup("hy"),
+        ),
+        pytest.param(
+            [LanguageData.lookup("en"), LanguageData.lookup("de"), LanguageData.lookup("fr")],
+            Language.EN,
+            False,
+            True,
+            [
+                {"text": "✅ EN", "callback_data": "lang:en"},
+                {"text": "DE", "callback_data": "lang:de"},
+                {"text": "FR", "callback_data": "lang:fr"},
+            ],
+            "lang:fr",
+            LanguageData.lookup("fr"),
         ),
     ],
 )
