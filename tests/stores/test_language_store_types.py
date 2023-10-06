@@ -2,6 +2,7 @@ from typing import Any, Optional, Type
 
 import pytest
 
+from telebot_components.language import AnyLanguage
 from telebot_components.stores.language import (
     AnyText,
     Language,
@@ -29,7 +30,9 @@ def test_any_text_to_str(any_text: AnyText, language: MaybeLanguage, expected_st
         pytest.param("hello world", Language.RU, "Plain string text requires language=None"),
         pytest.param({}, Language.RU, "No valid localisation found for language 'ru'"),
         pytest.param({Language.RU: "текст"}, Language.EN, "No valid localisation found for language 'en'"),
-        pytest.param({Language.RU: "текст"}, None, "MultilangText requires a valid Language for localisation"),
+        pytest.param(
+            {Language.RU: "текст"}, None, "MultilangText requires a valid Language / LanguageData for localisation"
+        ),
     ],
 )
 def test_any_text_to_str_value_errors(any_text: Any, language: MaybeLanguage, expected_error_message: str):
@@ -87,7 +90,7 @@ def test_any_text_to_str_value_errors(any_text: Any, language: MaybeLanguage, ex
 )
 def test_multilang_text_validation(
     ml_text: Any,
-    languages: list[Language],
+    languages: list[AnyLanguage],
     expected_error_message: Optional[str],
     ErrorClass: Optional[Type[Exception]],
 ):

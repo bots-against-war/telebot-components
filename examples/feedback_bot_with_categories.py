@@ -17,6 +17,7 @@ from telebot_components.feedback.trello_integration import (
     TrelloIntegration,
     TrelloIntegrationCredentials,
 )
+from telebot_components.language import LanguageChangeContext, any_text_to_str
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
 from telebot_components.stores.category import Category, CategoryStore
@@ -82,7 +83,7 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
         language = await language_store.get_user_language(user)
         await bot.send_message(
             user.id,
-            WELCOME_MESSAGE[language],
+            any_text_to_str(WELCOME_MESSAGE, language),
             reply_markup=(await category_store.markup_for_user_localised(user, language)),
         )
 
@@ -164,15 +165,18 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
         trello_integration=trello_integration,
     )
 
-    async def on_language_selected(bot: AsyncTeleBot, menu_message: tg.Message, user: tg.User, new_option: Language):
-        await welcome(user)
+    async def on_language_selected(context: LanguageChangeContext):
+        await welcome(context.user)
 
-    language_store.setup(bot, on_language_change=on_language_selected)
+    await language_store.setup(bot, on_language_change=on_language_selected)
 
     async def on_category_selected(bot: AsyncTeleBot, menu_message: tg.Message, user: tg.User, new_option: Category):
         language = await language_store.get_user_language(user)
         await bot.send_message(
-            user.id, ON_CATEGORY_SELECTED_MESSAGE[language].format(new_option.get_localized_button_caption(language))
+            user.id,
+            any_text_to_str(ON_CATEGORY_SELECTED_MESSAGE, language).format(
+                new_option.get_localized_button_caption(language)
+            ),
         )
 
     category_store.setup(bot, on_category_selected=on_category_selected)
