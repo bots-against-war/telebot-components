@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from telebot import AsyncTeleBot
@@ -16,7 +17,6 @@ from telebot_components.stores.language import (
 async def create_multilang_bot(token: str):
     bot_prefix = "language-selectors-bot"
     bot = AsyncTeleBot(token)
-    logging.basicConfig(level=logging.DEBUG)
     redis = RedisEmulation()
 
     language_store = LanguageStore(
@@ -63,11 +63,11 @@ async def create_multilang_bot(token: str):
 
 
 if __name__ == "__main__":
-    import asyncio
     import os
 
     from dotenv import load_dotenv
 
+    logging.basicConfig(level=logging.DEBUG)
     load_dotenv()
 
     async def main() -> None:
