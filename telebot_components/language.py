@@ -52,7 +52,7 @@ class Language(Enum):
 class LanguageData:
     code: str  # IETF code in lowercase, same as used in Telegram
     name: str
-    emoji: Optional[str]
+    emoji: Optional[str] = None
 
     def __str__(self) -> str:
         return self.code
@@ -79,13 +79,17 @@ class LanguageData:
     _DATA: ClassVar[Optional[dict[str, "LanguageData"]]] = None
 
     @classmethod
-    def lookup(cls, code: str) -> "LanguageData":
+    def all(cls) -> dict[str, "LanguageData"]:
         if cls._DATA is None:
             with open(Path(__file__).parent / "data/language_data.json") as f:
                 raw_data = json.load(f)
             language_data_list = [LanguageData(**item) for item in raw_data]
             cls._DATA = {lang.code: lang for lang in language_data_list}
-        ld = cls._DATA.get(code.lower())
+        return cls._DATA
+
+    @classmethod
+    def lookup(cls, code: str) -> "LanguageData":
+        ld = cls.all().get(code.lower())
         if ld is None:
             raise KeyError(f"Unexpected language code: {code!r}")
         else:

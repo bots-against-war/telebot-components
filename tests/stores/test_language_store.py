@@ -111,6 +111,15 @@ async def test_get_user_language_basic(
             LanguageData.lookup("hy"),
         ),
         pytest.param(
+            [LanguageData.lookup("blt"), LanguageData.lookup("en")],
+            LanguageData.lookup("en"),
+            True,
+            True,
+            [{"text": "BLT", "callback_data": "lang:blt"}, {"text": "✅ 🇬🇧", "callback_data": "lang:en"}],
+            "lang:blt",
+            LanguageData.lookup("blt"),
+        ),
+        pytest.param(
             [LanguageData.lookup("en"), LanguageData.lookup("de"), LanguageData.lookup("fr")],
             Language.EN,
             False,
