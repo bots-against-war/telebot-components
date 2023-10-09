@@ -427,35 +427,46 @@ class MenuHandler:
             self.logger.exception("Unexpected error in on_terminal_menu_option_selected callback, ignoring")
             terminator_handler_result = None
 
-        current_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
-        lock_menu = current_menu.config.lock_after_termination
+        terminal_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
+        lock_menu = terminal_menu.config.lock_after_termination
         if terminator_handler_result is not None:
             if terminator_handler_result.lock_menu is not None:
                 lock_menu = terminator_handler_result.lock_menu
 
-            if terminator_handler_result.menu_message_text_update is not None and (menu_message is not None):
-                try:
-                    await bot.edit_message_text(
-                        text=any_text_to_str(terminator_handler_result.menu_message_text_update, language),
-                        chat_id=user.id,
-                        message_id=menu_message_id,
-                        parse_mode=terminator_handler_result.parse_mode,
-                    )
-                except Exception:
-                    self.logger.info(
-                        f"Error editing menu message with text from {terminator_handler_result!r}",
-                        exc_info=True,
-                    )
+            if terminator_handler_result.menu_message_text_update is not None:
+                reason: Optional[str] = None
+                if menu_message_id is None:
+                    reason = "message id is not passed to _teminate_menu"
+                elif terminal_menu.config.mechanism is MenuMechanism.REPLY_KEYBOARD:
+                    reason = "last menu is on reply keyboards and such messages can't be updated"
 
-        if lock_menu and menu_message_id is not None and current_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS:
+                if reason is not None:
+                    self.logger.error(
+                        f"Terminator handler returned menu message text update, but we can't update it because {reason}"
+                    )
+                else:
+                    try:
+                        await bot.edit_message_text(
+                            text=any_text_to_str(terminator_handler_result.menu_message_text_update, language),
+                            chat_id=user.id,
+                            message_id=menu_message_id,
+                            parse_mode=terminator_handler_result.parse_mode,
+                        )
+                    except Exception:
+                        self.logger.info(
+                            f"Error editing menu message with text from {terminator_handler_result!r}",
+                            exc_info=True,
+                        )
+
+        if lock_menu and menu_message_id is not None and terminal_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS:
             try:
                 await bot.edit_message_reply_markup(
                     chat_id=user.id,
                     message_id=menu_message_id,
-                    reply_markup=current_menu.get_inactive_keyboard_markup(terminal_menu_item_id, language),
+                    reply_markup=terminal_menu.get_inactive_keyboard_markup(terminal_menu_item_id, language),
                 )
             except ApiHTTPException:
-                self.logger.info("Error editing message reply markup", exc_info=True)
+                self.logger.info("Error locking menu", exc_info=True)
 
     def setup(
         self,

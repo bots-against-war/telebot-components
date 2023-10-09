@@ -32,7 +32,6 @@ from telebot_components.menu.menu import (
     MenuItem,
     MenuMechanism,
     TerminatorContext,
-    TerminatorResult,
 )
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import KeyValueStore
@@ -46,6 +45,15 @@ class LanguageSelectionMenuConfig:
     select_with_checkmark: bool  # if False (legacy), brackets are used: "[ EN ]"
     prompt: Optional[MultilangText] = None
     is_prompt_html: bool = False
+
+    def html_menu_prompt(self, language: AnyLanguage) -> str:
+        if self.prompt is None:
+            raise ValueError("To use this method, prompt must be specified in the menu config")
+        localized = any_text_to_str(self.prompt, language=language)
+        if self.is_prompt_html:
+            return localized
+        else:
+            return telegram_html_escape(localized)
 
 
 class LanguageStore(LanguageStoreInterface):
@@ -107,17 +115,10 @@ class LanguageStore(LanguageStoreInterface):
         bot: AsyncTeleBot,
         user: types.User,
     ) -> None:
-        if self.menu_config.prompt is None:
-            raise ValueError("To use send_inline_selector method, prompt must be specified in the menu config")
         language = await self.get_user_language(user)
-        localized = any_text_to_str(self.menu_config.prompt, language=language)
-        if self.menu_config.is_prompt_html:
-            text = localized
-        else:
-            text = telegram_html_escape(localized)
         await bot.send_message(
             chat_id=user.id,
-            text=text,
+            text=self.menu_config.html_menu_prompt(language),
             reply_markup=self.markup_for_selected_language(selected_language=language),
         )
 
@@ -196,9 +197,19 @@ class LanguageStore(LanguageStoreInterface):
                 return  # language not changed, nothing to do
 
             try:
-                await bot.edit_message_reply_markup(
-                    user.id, call.message.id, reply_markup=self.markup_for_selected_language(language)
-                )
+                if self.menu_config.prompt is not None:
+                    await bot.edit_message_text(
+                        chat_id=user.id,
+                        message_id=call.message.id,
+                        text=self.menu_config.html_menu_prompt(language=language),
+                        reply_markup=self.markup_for_selected_language(language),
+                    )
+                else:
+                    await bot.edit_message_reply_markup(
+                        chat_id=user.id,
+                        message_id=call.message.id,
+                        reply_markup=self.markup_for_selected_language(language),
+                    )
             except Exception:
                 self.logger.exception("Error editing message reply markup")
 
@@ -211,7 +222,7 @@ class LanguageStore(LanguageStoreInterface):
 
         if self.reply_keyboard_lang_selector_menu_handler is not None:
 
-            async def on_language_selected(context: TerminatorContext) -> Optional[TerminatorResult]:
+            async def on_language_selected(context: TerminatorContext) -> None:
                 selected_language = LanguageData.lookup(context.terminator)
                 previous_language = await self.get_user_language(context.user)
                 await self.set_user_language(context.user, selected_language)
@@ -222,11 +233,6 @@ class LanguageStore(LanguageStoreInterface):
                     message_id=context.menu_message_id,
                     user=context.user,
                     language=selected_language,
-                )
-                return TerminatorResult(
-                    # the same text but it will be localized differently now!
-                    menu_message_text_update=self.menu_config.prompt,
-                    parse_mode="HTML" if self.menu_config.is_prompt_html else None,
                 )
 
             self.reply_keyboard_lang_selector_menu_handler.setup(
