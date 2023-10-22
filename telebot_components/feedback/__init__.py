@@ -35,6 +35,7 @@ from telebot_components.feedback.integration.interface import (
 from telebot_components.feedback.integration.trello import TrelloIntegration
 from telebot_components.feedback.types import UserMessageRepliedEvent
 from telebot_components.form.field import TelegramAttachment
+from telebot_components.language import MaybeLanguage
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.banned_users import BannedUsersStore
 from telebot_components.stores.category import CategoryStore
@@ -70,6 +71,8 @@ class ServiceMessages:
     you_must_select_category: Optional[AnyText] = None
     # e.g. "⚠️ Пожалуйста, не присылайте больше {} сообщений в течение {}!"
     throttling_template: Optional[AnyText] = None
+    # when failed to forward user's message
+    something_went_wrong: Optional[AnyText] = None
 
     # messages in admin chat (not localised!)
     # e.g. "Скопировано в чат с пользователь_ницей!"
@@ -81,7 +84,12 @@ class ServiceMessages:
 
     @property
     def user_facing(self) -> list[Optional[AnyText]]:
-        return [self.forwarded_to_admin_ok, self.you_must_select_category, self.throttling_template]
+        return [
+            self.forwarded_to_admin_ok,
+            self.you_must_select_category,
+            self.throttling_template,
+            self.something_went_wrong,
+        ]
 
     def throttling(self, anti_spam: AntiSpamConfig, language: Optional[AnyLanguage]) -> str:
         if self.throttling_template is None:
@@ -171,13 +179,14 @@ class FeedbackConfig:
     # how many messages to forward in one go on /log command
     message_log_page_size: int = 30
 
-    # [⚠️ experimental] create new forum topic per new user
+    # create new forum topic per new user
     forum_topic_per_user: bool = False
 
-    # if set, admins can reply to users by just writing to their topic, no need to use Telegram message reply
+    # if forum topic per user is set, admins can reply to users by just writing to their topic,
+    # no need to use Telegram message reply
     any_message_in_user_topic_is_reply: bool = True
 
-    user_forum_topic_lifetime: timedelta = timedelta(days=30)
+    user_forum_topic_lifetime: timedelta = timedelta(days=90)
 
     def __post_init__(self):
         if self.full_user_anonymization:
@@ -522,7 +531,45 @@ class FeedbackHandler:
         elif self.config.user_anonymization is UserAnonymization.LEGACY:
             return user.full_name  # it's shown on message forward anyway
 
+    async def get_maybe_language(self, user: tg.User) -> MaybeLanguage:
+        if self.language_store is not None:
+            return await self.language_store.get_user_language(user)
+        else:
+            return None
+
     async def _handle_user_message(
+        self,
+        bot: AsyncTeleBot,
+        user: tg.User,
+        message_forwarder: Callable[[Optional[int]], Awaitable[MessageForwarderResult]],
+        user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
+        send_user_identifier: bool,
+        export_to_integrations: bool = True,
+    ) -> Optional[int]:
+        try:
+            return await self._handle_user_message_or_fail(
+                bot=bot,
+                user=user,
+                message_forwarder=message_forwarder,
+                user_replier=user_replier,
+                send_user_identifier=send_user_identifier,
+                export_to_integrations=export_to_integrations,
+            )
+        except Exception:
+            if self.service_messages.something_went_wrong is not None:
+                try:
+                    await bot.send_message(
+                        chat_id=user.id,
+                        text=any_text_to_str(
+                            self.service_messages.something_went_wrong,
+                            await self.get_maybe_language(user),
+                        ),
+                    )
+                except Exception:
+                    pass
+            raise
+
+    async def _handle_user_message_or_fail(
         self,
         bot: AsyncTeleBot,
         user: tg.User,
@@ -537,10 +584,7 @@ class FeedbackHandler:
         if anti_spam_status is AntiSpamStatus.SOFT_BAN:
             return None
 
-        if self.language_store is not None:
-            language = await self.language_store.get_user_language(user)
-        else:
-            language = None
+        language = await self.get_maybe_language(user)
         if anti_spam_status is AntiSpamStatus.THROTTLING:
             anti_spam = cast(AntiSpam, self.anti_spam)  # only real AntiSpam can return this status
             await user_replier(self.service_messages.throttling(anti_spam.config, language), None)
