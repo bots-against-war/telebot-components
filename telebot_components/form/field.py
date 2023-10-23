@@ -34,7 +34,7 @@ from telebot_components.form.helpers.calendar_keyboard import (
     SelectableDates,
     calendar_keyboard,
 )
-from telebot_components.form.types import FormSegmentCondition
+from telebot_components.form.types import FormBranchCondition
 from telebot_components.language import (
     AnyText,
     Language,
@@ -104,7 +104,7 @@ class NextFieldGetter(Generic[FieldValueT]):
 
     @classmethod
     def from_condition_list(
-        cls, conditions: list[tuple[str, FormSegmentCondition]], fallback: Optional[str]
+        cls, conditions: list[tuple[str, FormBranchCondition]], fallback: Optional[str]
     ) -> "NextFieldGetter":
         if not conditions:
             return cls.by_name(fallback) if fallback is not None else cls.form_end()

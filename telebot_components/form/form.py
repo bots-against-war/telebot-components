@@ -21,7 +21,7 @@ from telebot_components.form.field import (
     FormFieldResultFormattingOpts,
     NextFieldGetter,
 )
-from telebot_components.form.types import FormSegmentCondition
+from telebot_components.form.types import FormBranchCondition
 from telebot_components.language import any_text_to_str
 from telebot_components.stores.language import MaybeLanguage
 
@@ -31,7 +31,7 @@ FieldName = Optional[str]
 @dataclass
 class FormBranch:
     members: list[Union[FormField, "FormBranch"]]
-    condition: FormSegmentCondition
+    condition: FormBranchCondition
 
     @property
     def start_field_name(self) -> str:
@@ -150,7 +150,7 @@ class Form:
                 from_ = vertices_without_incoming_edges.pop(0)
                 if from_ is not None:
                     topologically_sorted.append(from_)
-                tos = next_field_names.get(from_)
+                tos = self.next_field_names.get(from_)
                 if tos is None:
                     continue
                 tos = tos.copy()
@@ -178,36 +178,36 @@ class Form:
             raise ValueError(f"First member of a segmented form must be a field, found {first_field}")
 
         fields: list[FormField] = [first_field]
-        branch_segments: list[FormBranch] = []
+        current_branches: list[FormBranch] = []
         members_with_padding: list[Union[FormField, FormBranch, None]] = [*members[1:], None]
         for member in members_with_padding:
-            if isinstance(member, FormField) or member is None:
-                next_field_name = member.name if member is not None else after_segment
-                if branch_segments:
-                    # the first field after branching segments, need to process them
-                    fields[-1].next_field_getter = NextFieldGetter.from_condition_list(
-                        [(s.start_field_name, s.condition) for s in branch_segments],
-                        fallback=next_field_name,
-                    )
-                    for segment in branch_segments:
-                        fields.extend(cls._flatten_segment_members(segment.members, after_segment=next_field_name))
-                    branch_segments.clear()
-                else:
-                    # regular sequential fields
-                    fields[-1].next_field_getter = NextFieldGetter.by_name(next_field_name)
-                if member is not None:
-                    fields.append(member)
+            if isinstance(member, FormBranch):
+                current_branches.append(member)
+                continue
+            next_field_name = member.name if member is not None else after_segment
+            if current_branches:
+                # done parsing current branches, time to process them
+                fields[-1].next_field_getter = NextFieldGetter.from_condition_list(
+                    [(s.start_field_name, s.condition) for s in current_branches],
+                    fallback=next_field_name,
+                )
+                for segment in current_branches:
+                    fields.extend(cls._flatten_segment_members(segment.members, after_segment=next_field_name))
+                current_branches.clear()
             else:
-                # another branching segment, will process after
-                branch_segments.append(member)
+                # regular sequential fields
+                fields[-1].next_field_getter = NextFieldGetter.by_name(next_field_name)
+            if member is not None:
+                fields.append(member)
 
         return fields
 
     @classmethod
     def branching(cls, top_level_members: list[Union[FormField, "FormBranch"]]) -> "Form":
         """
-        Segmented form is a simplified way to configure form with branching, using a generally linear flow with segments
-        predicated upon condition on previous field's value.
+        Branching form is a simplified way to configure form, using a generally linear flow with braches entered
+        with condition on previous field's value. After branch is completed, the form "merges" back and proceeds
+        sequentially.
         """
         return Form(
             fields=cls._flatten_segment_members(
