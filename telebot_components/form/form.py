@@ -11,8 +11,8 @@ from typing import (  # type: ignore
     Mapping,
     Optional,
     Type,
+    Union,
     _TypedDictMeta,
-    cast,
     get_args,
 )
 
@@ -21,9 +21,23 @@ from telebot_components.form.field import (
     FormFieldResultFormattingOpts,
     NextFieldGetter,
 )
+from telebot_components.form.types import FormSegmentCondition
+from telebot_components.language import any_text_to_str
 from telebot_components.stores.language import MaybeLanguage
 
 FieldName = Optional[str]
+
+
+@dataclass
+class FormBranch:
+    members: list[Union[FormField, "FormBranch"]]
+    condition: FormSegmentCondition
+
+    @property
+    def start_field_name(self) -> str:
+        if not isinstance(self.members[0], FormField):
+            raise ValueError(f"First segment member must be a field, found {self.members[0]}")
+        return self.members[0].name
 
 
 class Form:
@@ -42,7 +56,7 @@ class Form:
 
         self.allow_cyclic = allow_cyclic
 
-        # copying fields to avoid modifying user's objects
+        # copy fields to avoid modifying user's objects; this allows safely reusing one field in multiple forms
         self.fields = [copy.deepcopy(f) for f in fields]
         if start_field is None:
             start_field = next(iter(fields))
@@ -56,18 +70,18 @@ class Form:
                 else:
                     field.next_field_getter = NextFieldGetter.form_end()
 
-        # validating field name uniqueness
+        # validate field name uniqueness
         field_names = [f.name for f in self.fields]
         for fn in field_names:
             if field_names.count(fn) > 1:
                 raise ValueError(f"All fields must have unique names, but there is at least one duplicate: {fn}!")
 
-        # binding next field getters so that they can look up next form field by its name
+        # bind next field getters so that they can look up next form field by its name
         self.fields_by_name = {f.name: f for f in self.fields}
         for f in self.fields:
             f.get_next_field_getter().fields_by_name = self.fields_by_name
 
-        # validating that field graph is connected and that the start field has no incoming edges
+        # validate that field graph is connected and that the start field has no incoming edges
         reachable_field_names = set(
             chain.from_iterable(f.get_next_field_getter().possible_next_field_names for f in self.fields)
         )
@@ -97,6 +111,12 @@ class Form:
         self.next_field_names: dict[FieldName, set[FieldName]] = {
             f.name: set(f.get_next_field_getter().possible_next_field_names) for f in self.fields
         }
+        self_cycling_fields = [fname for fname, next_fnames in self.next_field_names.items() if fname in next_fnames]
+        if not self.allow_cyclic and self_cycling_fields:
+            raise ValueError(
+                "Field(s) are referencing themself as possible "
+                + f"next field: {self_cycling_fields} ({self.next_field_names = })"
+            )
         self.prev_field_names: dict[FieldName, set[FieldName]] = defaultdict(set)
         for field_name, nexts in self.next_field_names.items():
             for next_ in nexts:
@@ -145,6 +165,60 @@ class Form:
             self.topologically_sorted_field_names: Optional[list[str]] = topologically_sorted
         else:
             self.topologically_sorted_field_names = None
+
+    @classmethod
+    def _flatten_segment_members(
+        cls,
+        members: list[Union[FormField, FormBranch]],
+        after_segment: FieldName,
+    ) -> list[FormField]:
+        members = members.copy()  # no need for deepcopy since the function is itself recursive
+        first_field = members[0]
+        if not isinstance(first_field, FormField):
+            raise ValueError(f"First member of a segmented form must be a field, found {first_field}")
+
+        fields: list[FormField] = [first_field]
+        branch_segments: list[FormBranch] = []
+        members_with_padding: list[Union[FormField, FormBranch, None]] = [*members[1:], None]
+        for member in members_with_padding:
+            if isinstance(member, FormField) or member is None:
+                next_field_name = member.name if member is not None else after_segment
+                if branch_segments:
+                    # the first field after branching segments, need to process them
+                    fields[-1].next_field_getter = NextFieldGetter.from_condition_list(
+                        [(s.start_field_name, s.condition) for s in branch_segments],
+                        fallback=next_field_name,
+                    )
+                    for segment in branch_segments:
+                        fields.extend(
+                            cls._flatten_segment_members(segment.members, after_segment=next_field_name)
+                        )
+                    branch_segments.clear()
+                else:
+                    # regular sequential fields
+                    fields[-1].next_field_getter = NextFieldGetter.by_name(next_field_name)
+                if member is not None:
+                    fields.append(member)
+            else:
+                # another branching segment, will process after
+                branch_segments.append(member)
+
+        return fields
+
+    @classmethod
+    def branching(cls, top_level_members: list[Union[FormField, "FormBranch"]]) -> "Form":
+        """
+        Segmented form is a simplified way to configure form with branching, using a generally linear flow with segments
+        predicated upon condition on previous field's value.
+        """
+        return Form(
+            fields=cls._flatten_segment_members(
+                top_level_members,
+                after_segment=None,  # end form
+            ),
+            start_field=None,
+            allow_cyclic=False,
+        )
 
     @staticmethod
     def _field_value_type(field: FormField) -> Any:
@@ -208,35 +282,62 @@ class Form:
             lines.append(indent + f"{field.name}: {field_type_str}")
         return "\n".join(lines)
 
-    def result_to_html(self, result: Mapping[str, Any], lang: MaybeLanguage) -> str:
+    def result_to_html(
+        self,
+        result: Mapping[str, Any],
+        lang: MaybeLanguage,
+        omitted_fields_count_template: Optional[str] = "<i>+{} omitted</i>",
+    ) -> str:
+        formatting_opts: dict[str, FormFieldResultFormattingOpts] = dict()
         for f in self.fields:
-            if f.result_formatting_opts is None:
-                raise ValueError(
-                    f"Can't convert result to telegram message, field {f.name!r} does not have formatting opts"
-                )
+            if isinstance(f.result_formatting_opts, FormFieldResultFormattingOpts):
+                formatting_opts[f.name] = f.result_formatting_opts
+            elif f.result_formatting_opts:
+                formatting_opts[f.name] = FormFieldResultFormattingOpts(descr=f.query_message, is_multiline=False)
 
-        lines: list[str] = []
+        blocks: list[str] = []
+        omitted_field_count = 0
         field_names = self.topologically_sorted_field_names or sorted([f.name for f in self.fields])
         for field_name in field_names:
             field = self.fields_by_name[field_name]
-            formatting_opts = cast(FormFieldResultFormattingOpts, field.result_formatting_opts)
-            field_descr = formatting_opts.descr
+
             if field_name not in result:
                 if self.globally_required_fields is not None and field_name in self.globally_required_fields:
                     raise ValueError(f"Globally required field {field_name!r} not found in result")
                 else:
                     continue
+
+            opts = formatting_opts.get(field_name)
+            if opts is None:
+                omitted_field_count += 1
+                continue
+
+            field_descr_str: str
+            if isinstance(opts.descr, str):
+                field_descr_str = opts.descr
+            else:
+                try:
+                    field_descr_str = any_text_to_str(opts.descr, lang)
+                except Exception:
+                    field_descr_str = any_text_to_str(
+                        opts.descr,
+                        next(iter(opts.descr.keys())),  # type: ignore
+                    )
+
             field_value = result[field_name]
-            field_value_formatter = formatting_opts.value_formatter or field.value_to_str
+            field_value_formatter = opts.value_formatter or field.value_to_str
             if field_value is not None:
-                lines.append(
+                blocks.append(
                     format_named_value(
-                        field_descr,
+                        field_descr_str,
                         field_value_formatter(field_value, lang),
-                        single_line=not formatting_opts.is_multiline,
+                        single_line=not opts.is_multiline,
                     )
                 )
-        return "\n".join(lines)
+
+        if omitted_field_count and omitted_fields_count_template is not None:
+            blocks.append(omitted_fields_count_template.format(omitted_field_count))
+        return "\n".join(blocks)
 
     def result_to_export(self, result: Mapping[str, Any]) -> dict[Any, Any]:
         exported: dict[Any, Any] = dict()

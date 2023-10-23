@@ -3,7 +3,7 @@ import html
 import logging
 from enum import Enum
 from pprint import pformat
-from typing import Any, Optional, TypedDict
+from typing import Optional, TypedDict
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -77,7 +77,7 @@ date_field = DateMenuField(
 )
 
 
-def after_age_field(u: tg.User, v: Any) -> str:
+def after_age_field(u: tg.User, v: Optional[int], v_id: Optional[str]) -> str:
     if isinstance(v, int):
         if v < 16:
             return "favorite_subject"

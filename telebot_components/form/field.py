@@ -2,6 +2,7 @@ import asyncio
 import copy
 import dataclasses
 import datetime
+import hashlib
 import logging
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
@@ -33,6 +34,7 @@ from telebot_components.form.helpers.calendar_keyboard import (
     SelectableDates,
     calendar_keyboard,
 )
+from telebot_components.form.types import FormSegmentCondition
 from telebot_components.language import (
     AnyText,
     Language,
@@ -41,6 +43,7 @@ from telebot_components.language import (
     any_text_to_str,
     is_any_text,
 )
+from telebot_components.utils import TelegramAttachment, log_errors
 
 logger = logging.getLogger(__name__)
 
@@ -56,27 +59,33 @@ class BadFieldValueError(Exception):
 class NextFieldGetter(Generic[FieldValueT]):
     """Service class to forward-reference the next field in a form"""
 
-    next_field_name_getter: Callable[[tg.User, Optional[FieldValueT]], Optional[str]]
+    #                                    user, value/None-if-skipped, value string id (see value_id on field)
+    next_field_name_getter: Callable[[tg.User, Optional[FieldValueT], Optional[str]], Optional[str]]
     # used for startup form connectedness validation
     possible_next_field_names: list[Optional[str]]
     # filled on Form object initialization
     fields_by_name: Optional[Dict[str, "FormField"]] = None
 
-    async def __call__(self, user: tg.User, value: Optional[FieldValueT]) -> Optional["FormField"]:
+    async def __call__(
+        self, current_field_name: str, user: tg.User, value: Optional[FieldValueT]
+    ) -> Optional["FormField"]:
         if self.fields_by_name is None:
             raise RuntimeError(
                 "Next field getter hasn't been properly initialized, "
                 + "did you forget to pass your fields in a Form object?"
             )
-        next_field_name = self.next_field_name_getter(user, value)
+        current_field = self.fields_by_name[current_field_name]
+        next_field_name = self.next_field_name_getter(
+            user, value, current_field.value_id(value) if value is not None else None
+        )
         if next_field_name is None:
             return None
         else:
             return self.fields_by_name[next_field_name]
 
     @classmethod
-    def by_name(cls, name: str) -> "NextFieldGetter":
-        return NextFieldGetter(lambda u, v: name, possible_next_field_names=[name])
+    def by_name(cls, name: Optional[str]) -> "NextFieldGetter":
+        return NextFieldGetter(lambda u, v, v_id: name, possible_next_field_names=[name])
 
     @classmethod
     def by_mapping(
@@ -85,19 +94,49 @@ class NextFieldGetter(Generic[FieldValueT]):
         possible_next_field_names = [next_field_name for v, next_field_name in value_to_next_field_name.items()]
         possible_next_field_names.append(default)
         return NextFieldGetter(
-            lambda u, v: value_to_next_field_name.get(v, default), possible_next_field_names=possible_next_field_names
+            lambda u, v, v_id: value_to_next_field_name.get(v, default),
+            possible_next_field_names=possible_next_field_names,
         )
 
     @classmethod
     def form_end(cls) -> "NextFieldGetter":
-        return NextFieldGetter(lambda u, v: None, possible_next_field_names=[None])
+        return NextFieldGetter.by_name(None)
+
+    @classmethod
+    def from_condition_list(
+        cls, conditions: list[tuple[str, FormSegmentCondition]], fallback: Optional[str]
+    ) -> "NextFieldGetter":
+        if not conditions:
+            return cls.by_name(fallback) if fallback is not None else cls.form_end()
+
+        def next_field_name_getter(_: tg.User, __: Optional[FieldValueT], value_id: Optional[str]) -> Optional[str]:
+            for possible_next_field_name, condition in conditions:
+                if (isinstance(condition, str) and value_id == condition) or (
+                    callable(condition)
+                    and log_errors(
+                        logger,
+                        errmsg=f"Error testing condition for possible next field {possible_next_field_name!r}",
+                        return_on_error=False,
+                    )(condition)(value_id)
+                ):
+                    return possible_next_field_name
+            return fallback
+
+        possible_next_field_names: list[Union[str, None]] = [
+            possible_next_field_name for possible_next_field_name, _ in conditions
+        ]
+        possible_next_field_names.append(fallback)
+        return NextFieldGetter(
+            next_field_name_getter=next_field_name_getter,
+            possible_next_field_names=possible_next_field_names,
+        )
 
 
 @dataclass
 class FormFieldResultFormattingOpts(Generic[FieldValueT]):
     """Options specifying how to format field's result to HTML (e.g. telegram message)"""
 
-    descr: str  # used for telegram message formatting
+    descr: AnyText  # used for telegram message formatting
     is_multiline: bool = False
     value_formatter: Optional[
         Callable[[FieldValueT, MaybeLanguage], str]
@@ -139,10 +178,11 @@ class FormField(Generic[FieldValueT]):
     # should contain 1 '{}' for field value
     echo_result_template: Optional[AnyText] = dataclass_field(default=None, kw_only=True)
 
-    # None (default) means sequential form flow
     next_field_getter: Optional[NextFieldGetter[FieldValueT]] = dataclass_field(default=None, kw_only=True)
 
-    result_formatting_opts: Optional[FormFieldResultFormattingOpts] = dataclass_field(default=None, kw_only=True)
+    result_formatting_opts: Optional[Union[FormFieldResultFormattingOpts, bool]] = dataclass_field(
+        default=None, kw_only=True
+    )
     export_opts: Optional[FormFieldResultExportOpts] = dataclass_field(default=None, kw_only=True)
 
     def __post_init__(self):
@@ -187,7 +227,11 @@ class FormField(Generic[FieldValueT]):
         return self.query_message
 
     def value_to_str(self, value: FieldValueT, language: MaybeLanguage) -> str:
-        """Fields can override this to specify the default human-readable formatting of the field value."""
+        """Human-readable string formatting of the value"""
+        return self.value_id(value)
+
+    def value_id(self, value: FieldValueT) -> str:
+        """Machine-readable string identitier for the value"""
         return str(value)
 
     def get_result_message(self, value: FieldValueT, language: MaybeLanguage) -> Optional[str]:
@@ -309,6 +353,9 @@ class DateField(FormField[date]):
     def value_to_str(self, value: date, lang: MaybeLanguage) -> str:
         return value.strftime("%d.%m.%Y")
 
+    def value_id(self, value: date) -> str:
+        return value.isoformat()
+
 
 @dataclass
 class TimeField(FormField[time]):
@@ -323,8 +370,8 @@ class TimeField(FormField[time]):
     def value_to_str(self, value: time, lang: MaybeLanguage) -> str:
         return value.isoformat(timespec="minutes")
 
-
-TelegramAttachment = Union[list[tg.PhotoSize], tg.Video, tg.Animation, tg.Audio, tg.Document]
+    def value_id(self, value: time) -> str:
+        return value.isoformat()
 
 
 _users_uploading_media_group: set[int] = set()
@@ -382,6 +429,14 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
 
     def value_to_str(self, value: list[TelegramAttachment], language: MaybeLanguage) -> str:
         return f"{len(value)} attachments"
+
+    def value_id(self, value: list[TelegramAttachment]) -> str:
+        hash_ = hashlib.md5()
+        for attachment in value:
+            file_ids = [ps.file_id for ps in attachment] if isinstance(attachment, list) else [attachment.file_id]
+            for file_id in file_ids:
+                hash_.update(file_id.encode("utf-8"))
+        return hash_.hexdigest()
 
     async def process_message(
         self, message: tg.Message, language: MaybeLanguage
@@ -515,6 +570,9 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
         else:
             return str(value.value)
 
+    def value_id(self, value: Enum) -> str:
+        return value.name
+
 
 EnumField = SingleSelectField  # backward compatibility
 
@@ -595,6 +653,9 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
     def value_to_str(self, value: set[Enum], language: MaybeLanguage) -> str:
         selected_str = [any_text_to_str(opt.value, language) for opt in value]
         return ", ".join(sorted(selected_str))
+
+    def value_id(self, value: set[Enum]) -> str:
+        return ",".join(sorted(opt.name for opt in value))
 
     @property
     def total_pages(self) -> int:
@@ -779,3 +840,6 @@ class DateMenuField(StrictlyInlineFormField[date]):
 
     def value_to_str(self, value: date, lang: MaybeLanguage) -> str:
         return value.strftime("%d.%m.%Y")
+
+    def value_id(self, value: date) -> str:
+        return value.isoformat()
