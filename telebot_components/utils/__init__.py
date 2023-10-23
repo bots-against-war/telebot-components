@@ -13,7 +13,6 @@ from telebot import AsyncTeleBot
 from telebot import types as tg
 
 from telebot_components.constants.emoji import EMOJI
-from telebot_components.form.field import TelegramAttachment
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +146,9 @@ class LockRegistry:
             return maybe_lock
 
 
+TelegramAttachment = Union[list[tg.PhotoSize], tg.Video, tg.Animation, tg.Audio, tg.Document]
+
+
 async def send_attachment(
     bot: AsyncTeleBot,
     chat_id: Union[int, str],
@@ -240,3 +242,22 @@ def restart_on_errors(function: AsyncFunctionT) -> AsyncFunctionT:
                 logger.exception(f"Unexpected error in {function.__qualname__}, restarting")
 
     return decorated  # type: ignore
+
+
+ReturnT = TypeVar("ReturnT")
+FunctionT = Callable[..., ReturnT]
+
+
+def log_errors(logger: logging.Logger, errmsg: str, return_on_error: ReturnT) -> Callable[[FunctionT], FunctionT]:
+    def decorator(func: FunctionT) -> FunctionT:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> ReturnT:
+            try:
+                return func(*args, **kwargs)
+            except Exception:
+                logger.exception(errmsg)
+                return return_on_error
+
+        return wrapper  # type: ignore
+
+    return decorator

@@ -265,7 +265,11 @@ class FormState(Generic[FormResultT]):
         if form_handler_config.echo_filled_field and result_msg is not None:
             reply_paragraphs.append(result_msg)
 
-        next_field = await self.current_field.get_next_field_getter()(message.from_user, value)
+        next_field = await self.current_field.get_next_field_getter()(
+            user=message.from_user,
+            value=value,
+            current_field_name=self.current_field.name,
+        )
         if next_field is None:
             return _FormStateUpdateEffect(
                 _FormAction.COMPLETE,
@@ -310,7 +314,9 @@ class FormState(Generic[FormResultT]):
         form_action = _FormAction.KEEP_GOING
         if field_result.complete_field:
             next_field = await self.current_field.get_next_field_getter()(
-                user=call.from_user, value=field_result.new_field_value
+                user=call.from_user,
+                value=field_result.new_field_value,
+                current_field_name=self.current_field.name,
             )
             if next_field is None:
                 form_action = _FormAction.COMPLETE
