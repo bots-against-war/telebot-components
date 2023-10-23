@@ -13,7 +13,7 @@ from telebot_components.form.field import (
     PlainTextField,
     SingleSelectField,
 )
-from telebot_components.form.form import FormBranch, Form
+from telebot_components.form.form import Form, FormBranch
 from telebot_components.form.handler import (
     FormExitContext,
     FormHandler,
@@ -80,7 +80,7 @@ form = Form.branching(
 form.print_graph()
 
 
-async def create_form_bot_2():
+async def create_branching_form_bot():
     bot_prefix = "form-bot-2"
     redis = RedisEmulation()
     form_handler = FormHandler(
@@ -118,7 +118,7 @@ async def create_form_bot_2():
 if __name__ == "__main__":
 
     async def main() -> None:
-        br = await create_form_bot_2()
+        br = await create_branching_form_bot()
         await br.run_polling()
 
     asyncio.run(main())

@@ -4,13 +4,14 @@ from enum import Enum
 import pytest
 
 from telebot_components.form.field import (
+    FormField,
     FormFieldResultExportOpts,
     FormFieldResultFormattingOpts,
     NextFieldGetter,
     PlainTextField,
     SingleSelectField,
 )
-from telebot_components.form.form import Form
+from telebot_components.form.form import Form, FormBranch
 from telebot_components.stores.language import MaybeLanguage
 
 DUMMY_FORM_FIELD_KW = {"required": True, "query_message": "aaa", "empty_text_error_msg": "fail :("}
@@ -104,7 +105,8 @@ def test_form_graph_analysis(
     assert_equal_multiline_text(f.generate_result_type(), expected_result_type)
 
 
-def test_form_result_processing() -> None:
+@pytest.mark.parametrize("with_omitted_fields", [True, False])
+def test_form_result_processing(with_omitted_fields: bool) -> None:
     class GDPRConsent(Enum):
         YES = "yes"
         NO = "no"
@@ -118,47 +120,55 @@ def test_form_result_processing() -> None:
         else:
             return "🧐"
 
-    form = Form(
-        [
-            PlainTextField(
-                "message",
-                result_formatting_opts=FormFieldResultFormattingOpts(descr="Message"),
-                export_opts=FormFieldResultExportOpts(column="A"),
-                **DUMMY_FORM_FIELD_KW,  # type: ignore
+    fields: list[FormField] = [
+        PlainTextField(
+            "message",
+            result_formatting_opts=FormFieldResultFormattingOpts(descr="Message"),
+            export_opts=FormFieldResultExportOpts(column="A"),
+            **DUMMY_FORM_FIELD_KW,  # type: ignore
+        ),
+        PlainTextField(
+            "name",
+            result_formatting_opts=FormFieldResultFormattingOpts(descr="Name"),
+            export_opts=FormFieldResultExportOpts(column="B", value_processor=lambda s: s.upper()),
+            **DUMMY_FORM_FIELD_KW,  # type: ignore
+        ),
+        SingleSelectField(
+            "gdrp",
+            result_formatting_opts=FormFieldResultFormattingOpts(
+                descr="GDRP OK?",
+                value_formatter=format_gdrp_consent,
             ),
-            PlainTextField(
-                "name",
-                result_formatting_opts=FormFieldResultFormattingOpts(descr="Name"),
-                export_opts=FormFieldResultExportOpts(column="B", value_processor=lambda s: s.upper()),
-                **DUMMY_FORM_FIELD_KW,  # type: ignore
+            export_opts=FormFieldResultExportOpts(
+                column="C",
+                value_mapping={
+                    GDPRConsent.YES: "+",
+                    GDPRConsent.NO: "-",
+                    GDPRConsent.MAYBE: "?",
+                },
             ),
-            SingleSelectField(
-                "gdrp",
-                result_formatting_opts=FormFieldResultFormattingOpts(
-                    descr="GDRP OK?",
-                    value_formatter=format_gdrp_consent,
-                ),
-                export_opts=FormFieldResultExportOpts(
-                    column="C",
-                    value_mapping={
-                        GDPRConsent.YES: "+",
-                        GDPRConsent.NO: "-",
-                        GDPRConsent.MAYBE: "?",
-                    },
-                ),
-                required=True,
-                query_message="?",
-                EnumClass=GDPRConsent,
-                invalid_enum_value_error_msg="",
-            ),
+            required=True,
+            query_message="?",
+            EnumClass=GDPRConsent,
+            invalid_enum_value_error_msg="",
+        ),
+        PlainTextField(
+            "long_description",
+            result_formatting_opts=FormFieldResultFormattingOpts(descr="Description", is_multiline=True),
+            export_opts=None,
+            **DUMMY_FORM_FIELD_KW,  # type: ignore
+        ),
+    ]
+
+    if with_omitted_fields:
+        fields.append(
             PlainTextField(
-                "long_description",
-                result_formatting_opts=FormFieldResultFormattingOpts(descr="Description", is_multiline=True),
+                "extra_info",
                 export_opts=None,
                 **DUMMY_FORM_FIELD_KW,  # type: ignore
-            ),
-        ]
-    )
+            )
+        )
+    form = Form(fields)
 
     form_result = {
         "message": "Hello world",
@@ -166,6 +176,8 @@ def test_form_result_processing() -> None:
         "gdrp": GDPRConsent.MAYBE,
         "long_description": "Lorem ipsum yada yada yada",
     }
+    if with_omitted_fields:
+        form_result["extra_info"] = "hi"
 
     telegram_msg_html = form.result_to_html(form_result, lang=None)
     expected_msg = """
@@ -173,8 +185,9 @@ def test_form_result_processing() -> None:
         <b>Name</b>: Igor
         <b>GDRP OK?</b>: 🧐
         <b>Description</b>
-        Lorem ipsum yada yada yada
-    """
+        Lorem ipsum yada yada yada"""
+    if with_omitted_fields:
+        expected_msg += "\n        <i>+1 omitted</i>"
     assert_equal_multiline_text(telegram_msg_html, expected_msg)
 
     assert form.result_to_export(form_result) == {"A": "Hello world", "B": "IGOR", "C": "?"}
@@ -188,3 +201,56 @@ def assert_equal_multiline_text(t1: str, t2: str) -> None:
         return s
 
     assert preproc(t1) == preproc(t2)
+
+
+def test_branching_form_constructor() -> None:
+    def field(name: str) -> FormField:
+        return PlainTextField(name=name, required=True, query_message=name, empty_text_error_msg="qwerty")
+
+    f = Form.branching(
+        [
+            field("A"),
+            field("B"),
+            FormBranch(
+                [
+                    field("C"),
+                    field("D"),
+                    field("E"),
+                ],
+                condition="branch-1",
+            ),
+            FormBranch(
+                [
+                    field("F"),
+                    field("G"),
+                ],
+                condition="branch-2",
+            ),
+            FormBranch(
+                [
+                    field("foo"),
+                    FormBranch([field("foo-sub-1"), field("foo-sub-2")], condition="sub-branch-3-1"),
+                    field("bar"),
+                ],
+                condition="branch-3",
+            ),
+            field("final field 1"),
+            field("final field 2"),
+        ]
+    )
+
+    assert f.next_field_names == {
+        "A": {"B"},
+        "B": {"foo", "F", "C", "final field 1"},
+        "C": {"D"},
+        "D": {"E"},
+        "E": {"final field 1"},
+        "F": {"G"},
+        "G": {"final field 1"},
+        "foo": {"bar", "foo-sub-1"},
+        "foo-sub-1": {"foo-sub-2"},
+        "foo-sub-2": {"bar"},
+        "bar": {"final field 1"},
+        "final field 1": {"final field 2"},
+        "final field 2": {None},
+    }

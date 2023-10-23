@@ -140,8 +140,8 @@ class Form:
 
         # topological sort to validate acyclicity + for nice rendering
         if not self.allow_cyclic:
-            next_field_names = self.next_field_names.copy()
-            prev_field_names = self.prev_field_names.copy()
+            next_field_names = copy.deepcopy(self.next_field_names)
+            prev_field_names = copy.deepcopy(self.prev_field_names)
             topologically_sorted: list[str] = []
             # NOTE: this is semantically set, but we use list for predictability
             vertices_without_incoming_edges: list[Optional[str]] = [self.start_field.name]
@@ -150,7 +150,7 @@ class Form:
                 from_ = vertices_without_incoming_edges.pop(0)
                 if from_ is not None:
                     topologically_sorted.append(from_)
-                tos = self.next_field_names.get(from_)
+                tos = next_field_names.get(from_)
                 if tos is None:
                     continue
                 tos = tos.copy()
@@ -190,9 +190,7 @@ class Form:
                         fallback=next_field_name,
                     )
                     for segment in branch_segments:
-                        fields.extend(
-                            cls._flatten_segment_members(segment.members, after_segment=next_field_name)
-                        )
+                        fields.extend(cls._flatten_segment_members(segment.members, after_segment=next_field_name))
                     branch_segments.clear()
                 else:
                     # regular sequential fields
