@@ -1,5 +1,6 @@
 import datetime
 import enum
+import hashlib
 import itertools
 import logging
 from dataclasses import dataclass
@@ -55,6 +56,7 @@ class MenuItem:
             raise ValueError("A category can only be bound to terminal menu items")
 
         self._id: Optional[str] = None
+        self._legacy_id: Optional[str] = None
         self._parent_menu: Optional["Menu"] = None
 
     def __str__(self) -> str:
@@ -81,6 +83,16 @@ class MenuItem:
     @id.setter
     def id(self, id: str):
         self._id = id
+
+    @property
+    def legacy_id(self) -> str:
+        if self._legacy_id is None:
+            raise RuntimeError("MenuItem object was not properly initialized.")
+        return self._legacy_id
+
+    @legacy_id.setter
+    def legacy_id(self, legacy_id: str):
+        self._legacy_id = legacy_id
 
     @property
     def parent_menu(self) -> "Menu":
@@ -114,7 +126,7 @@ class MenuItem:
 
     def get_inactive_inline_button(self, selected_item_id: str, language: MaybeLanguage):
         button_text = any_text_to_str(self.label, language)
-        if self.id == selected_item_id:
+        if selected_item_id in [self.id, self.legacy_id]:
             button_text = "✅ " + button_text
         return tg.InlineKeyboardButton(
             text=button_text,
@@ -142,11 +154,12 @@ class Menu:
         menu_items: list[MenuItem],
         config: Optional[MenuConfig] = None,
     ):
-        self._id: Optional[str] = None
         self.parent_menu: Optional["Menu"] = None
         self.text = text
         self.menu_items = menu_items
         self._explicit_config = config
+        self._id: Optional[str] = None
+        self._legacy_id: Optional[str] = None
 
     @property
     def displayed_items(self) -> list[MenuItem]:
@@ -184,6 +197,16 @@ class Menu:
     @id.setter
     def id(self, id: str):
         self._id = id
+
+    @property
+    def legacy_id(self) -> str:
+        if self._legacy_id is None:
+            raise RuntimeError("Menu object was not properly initialized.")
+        return self._legacy_id
+
+    @legacy_id.setter
+    def legacy_id(self, legacy_id: str):
+        self._legacy_id = legacy_id
 
     def descendants(self) -> list["Menu"]:
         children = [mi.submenu for mi in self.menu_items if mi.submenu is not None]
@@ -251,7 +274,8 @@ class MenuHandler:
 
         # initializing menu ids with sequential numbers
         for i, menu in enumerate(self.menus_list):
-            menu.id = str(i)
+            menu.id = self.generate_id(i, is_legacy=False)
+            menu.legacy_id = self.generate_id(i, is_legacy=True)
         # initializing links to parent menus for children
         for menu in self.menus_list:
             for menu_item in menu.menu_items:
@@ -270,14 +294,25 @@ class MenuHandler:
                             "but contains items with link URL, which only work on inline keyboards"
                         )
 
-        self.menu_by_id: dict[str, Menu] = {m.id: m for m in self.menus_list}
+        self.menu_by_id = dict(
+            itertools.chain.from_iterable(
+                [
+                    [
+                        (menu.id, menu),
+                        (menu.legacy_id, menu),
+                    ]
+                    for menu in self.menus_list
+                ],
+            )
+        )
 
         # initializing menu item ids with sequential numbers
         all_menu_items: list[MenuItem] = []
         for menu in self.menus_list:
             all_menu_items.extend(menu.menu_items)
         for i, menu_item in enumerate(all_menu_items):
-            menu_item.id = str(i)
+            menu_item.id = self.generate_id(i, is_legacy=False)
+            menu_item.legacy_id = self.generate_id(i, is_legacy=True)
 
         menu_items_with_bound_categories = [mi for mi in all_menu_items if mi.bound_category is not None]
         if menu_items_with_bound_categories:
@@ -297,7 +332,17 @@ class MenuHandler:
                     + f"with the passed category store: {menu_items_with_non_storable_categories}"
                 )
 
-        self.menu_item_by_id: dict[str, MenuItem] = {mi.id: mi for mi in all_menu_items}
+        self.menu_item_by_id = dict(
+            itertools.chain.from_iterable(
+                [
+                    [
+                        (menu_item.id, menu_item),
+                        (menu_item.legacy_id, menu_item),
+                    ]
+                    for menu_item in all_menu_items
+                ],
+            )
+        )
 
         for any_text in itertools.chain(
             [menu.text for menu in self.menus_list],
@@ -330,6 +375,13 @@ class MenuHandler:
             loader=int,
         )
 
+    def generate_id(self, sequential_idx: int, is_legacy: bool) -> str:
+        if is_legacy:
+            return str(sequential_idx)
+        else:
+            name_hash = hashlib.md5(self.name.encode("utf-8")).hexdigest()[:16]
+            return f"{name_hash}-{sequential_idx}"
+
     async def get_current_menu(self, chat_id: Union[str, int]) -> Optional[Menu]:
         current_menu_id = await self.current_menu_store.load(chat_id)
         if current_menu_id is None:
@@ -344,7 +396,7 @@ class MenuHandler:
             return await self.language_store.get_user_language(user)
 
     def get_main_menu(self):
-        return self.menu_by_id["0"]
+        return self.menu_by_id[self.generate_id(0, is_legacy=False)]
 
     async def start_menu(self, bot: AsyncTeleBot, user: tg.User) -> None:
         """Send menu message to the user, starting at the main menu"""
@@ -399,7 +451,11 @@ class MenuHandler:
         # these duplicate each other but are used in different contexts
         menu_message: Optional[tg.Message],
         menu_message_id: Optional[int],
-    ) -> None:
+    ) -> Optional[tg_service_types.HandlerResult]:
+        if terminal_menu_item_id not in self.menu_item_by_id:
+            # probably an item from another menu, let them catch it
+            return tg_service_types.HandlerResult(continue_to_other_handlers=True)
+
         menu_message_id = menu_message_id or (menu_message.id if menu_message is not None else None)
 
         language = await self.get_maybe_language(user)
@@ -407,7 +463,7 @@ class MenuHandler:
         terminator = selected_menu_item.terminator
         if terminator is None:
             self.logger.error(f"handle_terminator got non-terminating menu item: {selected_menu_item}")
-            return
+            return None
 
         await self.current_menu_store.drop(user.id)
         if selected_menu_item.bound_category is not None and self.category_store is not None:
@@ -468,6 +524,8 @@ class MenuHandler:
             except ApiHTTPException:
                 self.logger.info("Error locking menu", exc_info=True)
 
+        return None
+
     def setup(
         self,
         bot: AsyncTeleBot,
@@ -476,13 +534,15 @@ class MenuHandler:
         # handlers for inline menu stuff
 
         @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA, auto_answer=True)
-        async def handle_menu(call: tg.CallbackQuery):
+        async def handle_menu(call: tg.CallbackQuery) -> Optional[tg_service_types.HandlerResult]:
             data = ROUTE_MENU_CALLBACK_DATA.parse(call.data)
-            route_to = data["route_to"]
-            await self._route_to_menu(
+            new_menu_id = data["route_to"]
+            if new_menu_id not in self.menu_by_id:
+                return tg_service_types.HandlerResult(continue_to_other_handlers=True)
+            return await self._route_to_menu(
                 bot=bot,
                 user=call.from_user,
-                new_menu=self.menu_by_id[route_to],
+                new_menu=self.menu_by_id[new_menu_id],
                 current_menu_message_id=call.message.id,
             )
 
@@ -491,9 +551,9 @@ class MenuHandler:
             pass
 
         @bot.callback_query_handler(callback_data=TERMINATE_MENU_CALLBACK_DATA, auto_answer=True)
-        async def handle_terminator(call: tg.CallbackQuery):
+        async def handle_terminator(call: tg.CallbackQuery) -> Optional[tg_service_types.HandlerResult]:
             data = TERMINATE_MENU_CALLBACK_DATA.parse(call.data)
-            await self._terminate_menu(
+            return await self._terminate_menu(
                 bot=bot,
                 user=call.from_user,
                 terminal_menu_item_id=data["id"],
@@ -526,7 +586,7 @@ class MenuHandler:
                             )
                             return None
                         elif item.terminator is not None:
-                            await self._terminate_menu(
+                            return await self._terminate_menu(
                                 bot=bot,
                                 user=message.from_user,
                                 terminal_menu_item_id=item.id,
@@ -534,6 +594,5 @@ class MenuHandler:
                                 menu_message=None,
                                 menu_message_id=await self.last_menu_message_id_store.load(message.chat.id),
                             )
-                            return None
             else:
                 return continue_result
