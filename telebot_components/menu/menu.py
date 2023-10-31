@@ -523,7 +523,7 @@ class MenuHandler:
                 )
             except ApiHTTPException:
                 self.logger.info("Error locking menu", exc_info=True)
-        
+
         return None
 
     def setup(
