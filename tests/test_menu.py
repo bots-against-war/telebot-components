@@ -82,12 +82,19 @@ def example_menu() -> Menu:
     )
 
 
-async def test_menu_handler_basic(example_menu: Menu):
+@pytest.mark.parametrize(
+    "legacy_id_in_buttons",
+    [
+        True,
+        False,
+    ],
+)
+async def test_menu_handler_basic(example_menu: Menu, legacy_id_in_buttons: bool):
     bot = MockedAsyncTeleBot(token="")
     menu_handler = MenuHandler(
         bot_prefix="testing",
         menu_tree=example_menu,
-        name="test-menu-1",
+        name="test-menu-basic",
         redis=RedisEmulation(),
     )
 
@@ -107,8 +114,8 @@ async def test_menu_handler_basic(example_menu: Menu):
     assert main_menu.text == "example menu =<^_^>="
     assert main_menu.get_keyboard_markup(None).to_dict() == {
         "inline_keyboard": [
-            [{"text": "picking game", "callback_data": "menu:1"}],
-            [{"text": "feedback", "callback_data": "terminator:1"}],
+            [{"text": "picking game", "callback_data": "menu:55a8b659b3cd3593-1"}],
+            [{"text": "feedback", "callback_data": "terminator:55a8b659b3cd3593-1"}],
         ]
     }
 
@@ -120,8 +127,8 @@ async def test_menu_handler_basic(example_menu: Menu):
             "text": "example menu =&lt;^_^&gt;=",  # NOTE: properly escaped for parse mode HTML
             "reply_markup": tg.InlineKeyboardMarkup(
                 [
-                    [tg.InlineKeyboardButton(text="picking game", callback_data="menu:1")],
-                    [tg.InlineKeyboardButton(text="feedback", callback_data="terminator:1")],
+                    [tg.InlineKeyboardButton(text="picking game", callback_data="menu:55a8b659b3cd3593-1")],
+                    [tg.InlineKeyboardButton(text="feedback", callback_data="terminator:55a8b659b3cd3593-1")],
                 ]
             ),
             "parse_mode": "HTML",
@@ -151,11 +158,11 @@ async def test_menu_handler_basic(example_menu: Menu):
         }
         await bot.process_new_updates([tg.Update.de_json(update_json)])  # type: ignore
 
-    await press_button("terminator:1")
+    await press_button("terminator:1" if legacy_id_in_buttons else "terminator:55a8b659b3cd3593-1")
     assert seen_terminators == ["send_feedback"]
     assert not terminator_context_check_failed
 
-    await press_button("menu:1")
+    await press_button("menu:1" if legacy_id_in_buttons else "menu:55a8b659b3cd3593-1")
     assert len(bot.method_calls["edit_message_text"]) == 1
     edit_menu_message_method_call = bot.method_calls["edit_message_text"][0]
     assert (
@@ -163,64 +170,64 @@ async def test_menu_handler_basic(example_menu: Menu):
     )  # not escaped, true html
     assert edit_menu_message_method_call.full_kwargs["reply_markup"].to_dict() == {
         "inline_keyboard": [
-            [{"text": "color", "callback_data": "menu:2"}],
-            [{"text": "animal", "callback_data": "terminator:3"}],
+            [{"text": "color", "callback_data": "menu:55a8b659b3cd3593-2"}],
+            [{"text": "animal", "callback_data": "terminator:55a8b659b3cd3593-3"}],
             [{"text": "sound", "url": "https://cool-sound-picking-game.net"}],
-            [{"text": "<-", "callback_data": "menu:0"}],
+            [{"text": "<-", "callback_data": "menu:55a8b659b3cd3593-0"}],
         ]
     }
 
-    await press_button("menu:2")
+    await press_button("menu:2" if legacy_id_in_buttons else "menu:55a8b659b3cd3593-2")
     assert len(bot.method_calls["edit_message_text"]) == 2
     edit_menu_message_method_call = bot.method_calls["edit_message_text"][1]
     assert edit_menu_message_method_call.full_kwargs["text"] == "pick color"
     assert edit_menu_message_method_call.full_kwargs["reply_markup"].to_dict() == {
         "inline_keyboard": [
-            [{"text": "red", "callback_data": "terminator:5"}],
-            [{"text": "green", "callback_data": "terminator:6"}],
-            [{"text": "blue", "callback_data": "terminator:7"}],
-            [{"text": "black", "callback_data": "menu:1"}],
+            [{"text": "red", "callback_data": "terminator:55a8b659b3cd3593-5"}],
+            [{"text": "green", "callback_data": "terminator:55a8b659b3cd3593-6"}],
+            [{"text": "blue", "callback_data": "terminator:55a8b659b3cd3593-7"}],
+            [{"text": "black", "callback_data": "menu:55a8b659b3cd3593-1"}],
         ]
     }
 
-    await press_button("menu:1")
+    await press_button("menu:1" if legacy_id_in_buttons else "menu:55a8b659b3cd3593-1")
     assert len(bot.method_calls["edit_message_text"]) == 3
     edit_menu_message_method_call = bot.method_calls["edit_message_text"][2]
     assert edit_menu_message_method_call.full_kwargs["text"] == "<b>what do you want to pick?</b>"
     assert edit_menu_message_method_call.full_kwargs["reply_markup"].to_dict() == {
         "inline_keyboard": [
-            [{"text": "color", "callback_data": "menu:2"}],
-            [{"text": "animal", "callback_data": "terminator:3"}],
+            [{"text": "color", "callback_data": "menu:55a8b659b3cd3593-2"}],
+            [{"text": "animal", "callback_data": "terminator:55a8b659b3cd3593-3"}],
             [{"text": "sound", "url": "https://cool-sound-picking-game.net"}],
-            [{"text": "<-", "callback_data": "menu:0"}],
+            [{"text": "<-", "callback_data": "menu:55a8b659b3cd3593-0"}],
         ]
     }
 
-    await press_button("terminator:3")
+    await press_button("terminator:3" if legacy_id_in_buttons else "terminator:55a8b659b3cd3593-3")
     assert len(bot.method_calls["edit_message_text"]) == 3
     assert seen_terminators == ["send_feedback", "pick_animal"]
     assert not terminator_context_check_failed
 
     # back to the main menu
 
-    await press_button("menu:0")
+    await press_button("menu:0" if legacy_id_in_buttons else "menu:55a8b659b3cd3593-0")
     assert len(bot.method_calls["edit_message_text"]) == 4
     edit_menu_message_method_call = bot.method_calls["edit_message_text"][3]
     assert edit_menu_message_method_call.full_kwargs["text"] == "example menu =&lt;^_^&gt;="
     assert edit_menu_message_method_call.full_kwargs["reply_markup"].to_dict() == {
         "inline_keyboard": [
-            [{"text": "picking game", "callback_data": "menu:1"}],
-            [{"text": "feedback", "callback_data": "terminator:1"}],
+            [{"text": "picking game", "callback_data": "menu:55a8b659b3cd3593-1"}],
+            [{"text": "feedback", "callback_data": "terminator:55a8b659b3cd3593-1"}],
         ]
     }
 
-    await press_button("menu:1")
-    await press_button("menu:2")
+    await press_button("menu:1" if legacy_id_in_buttons else "menu:55a8b659b3cd3593-1")
+    await press_button("menu:2" if legacy_id_in_buttons else "menu:55a8b659b3cd3593-2")
     assert len(bot.method_calls["edit_message_text"]) == 6
     edit_menu_message_method_call = bot.method_calls["edit_message_text"][5]
     assert edit_menu_message_method_call.full_kwargs["text"] == "pick color"
 
-    await press_button("terminator:6")
+    await press_button("terminator:6" if legacy_id_in_buttons else "terminator:55a8b659b3cd3593-6")
     assert len(bot.method_calls["edit_message_text"]) == 6
     assert len(bot.method_calls["edit_message_reply_markup"]) == 1
     edit_reply_markup_calls = bot.method_calls["edit_message_reply_markup"][0]
@@ -283,8 +290,8 @@ async def test_menu_handler_with_language_store(redis: RedisInterface):
     }
     assert reply_markup.to_dict() == {
         "inline_keyboard": [
-            [{"text": "один", "callback_data": "terminator:0"}],
-            [{"text": "два", "callback_data": "terminator:1"}],
+            [{"text": "один", "callback_data": "terminator:52744b22f922b564-0"}],
+            [{"text": "два", "callback_data": "terminator:52744b22f922b564-1"}],
         ]
     }
     bot.method_calls.clear()
@@ -304,8 +311,8 @@ async def test_menu_handler_with_language_store(redis: RedisInterface):
     }
     assert reply_markup.to_dict() == {
         "inline_keyboard": [
-            [{"text": "one", "callback_data": "terminator:0"}],
-            [{"text": "two", "callback_data": "terminator:1"}],
+            [{"text": "one", "callback_data": "terminator:52744b22f922b564-0"}],
+            [{"text": "two", "callback_data": "terminator:52744b22f922b564-1"}],
         ]
     }
     bot.method_calls.clear()
