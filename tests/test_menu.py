@@ -240,6 +240,127 @@ async def test_menu_handler_basic(example_menu: Menu, legacy_id_in_buttons: bool
     }
 
 
+async def test_several_menus_per_bot(redis: RedisInterface) -> None:
+    bot_prefix = "test-1312"
+    redis = RedisEmulation()
+    bot = MockedAsyncTeleBot(token="")
+
+    menu_handler_1 = MenuHandler(
+        bot_prefix=bot_prefix,
+        menu_tree=Menu(
+            text="menu 1",
+            menu_items=[
+                MenuItem(label="option 1", terminator="menu 1 opt 1"),
+                MenuItem(label="option 2", terminator="menu 1 opt 2"),
+            ],
+            config=MenuConfig(back_label="<-"),
+        ),
+        name="menu-handler-1",
+        redis=redis,
+    )
+    menu_handler_2 = MenuHandler(
+        bot_prefix=bot_prefix,
+        menu_tree=Menu(
+            text="menu 2",
+            menu_items=[
+                MenuItem(label="option 1", terminator="menu 2 opt 1"),
+                MenuItem(label="option 2", terminator="menu 2 opt 2"),
+                MenuItem(label="option 3", terminator="menu 2 opt 3"),
+            ],
+            config=MenuConfig(back_label="<-"),
+        ),
+        name="menu-handler-2",
+        redis=redis,
+    )
+
+    example_user = tg.User(id=1337, is_bot=False, first_name="Jane", last_name="Doe")
+    seen_terminators: List[str] = []
+    terminator_context_check_failed = False
+
+    async def on_menu_termination(context: TerminatorContext) -> None:
+        seen_terminators.append(context.terminator)
+        nonlocal terminator_context_check_failed
+        if not (context.bot is bot and context.user.to_dict() == example_user.to_dict()):
+            terminator_context_check_failed = True
+
+    menu_handler_1.setup(bot, on_menu_termination)
+    menu_handler_2.setup(bot, on_menu_termination)
+
+    async def press_button(callback_data: str):
+        update_json = {
+            "update_id": 19283649187364,
+            "callback_query": {
+                "id": 40198734019872364,
+                "chat_instance": "wtf is this",
+                "from": example_user.to_dict(),
+                "data": callback_data,
+                "message": {
+                    "message_id": 11111,
+                    "from": example_user.to_dict(),
+                    "chat": {
+                        "id": 420,
+                        "type": "private",
+                    },
+                    "date": int(datetime.now().timestamp()),
+                    "text": "menu message placeholder",
+                },
+            },
+        }
+        await bot.process_new_updates([tg.Update.de_json(update_json)])  # type: ignore
+
+    # using first menu
+    await menu_handler_1.start_menu(bot, example_user)
+    assert len(bot.method_calls) == 1
+    assert extract_full_kwargs(bot.method_calls.pop("send_message")) == [
+        {
+            "chat_id": 1337,
+            "text": "menu 1",
+            "reply_markup": tg.InlineKeyboardMarkup(
+                [
+                    [tg.InlineKeyboardButton(text="option 1", callback_data="terminator:efa8ddb0b524eb41-0")],
+                    [tg.InlineKeyboardButton(text="option 2", callback_data="terminator:efa8ddb0b524eb41-1")],
+                ]
+            ),
+            "parse_mode": "HTML",
+        }
+    ]
+    bot.method_calls.clear()
+
+    # ... and second one
+    await menu_handler_2.start_menu(bot, example_user)
+    assert len(bot.method_calls) == 1
+    assert extract_full_kwargs(bot.method_calls.pop("send_message")) == [
+        {
+            "chat_id": 1337,
+            "text": "menu 2",
+            "reply_markup": tg.InlineKeyboardMarkup(
+                [
+                    [tg.InlineKeyboardButton(text="option 1", callback_data="terminator:84c76de37c5679e0-0")],
+                    [tg.InlineKeyboardButton(text="option 2", callback_data="terminator:84c76de37c5679e0-1")],
+                    [tg.InlineKeyboardButton(text="option 3", callback_data="terminator:84c76de37c5679e0-2")],
+                ]
+            ),
+            "parse_mode": "HTML",
+        }
+    ]
+    bot.method_calls.clear()
+
+    await press_button("terminator:efa8ddb0b524eb41-0")
+    await press_button("terminator:efa8ddb0b524eb41-1")
+    await press_button("terminator:84c76de37c5679e0-0")
+    await press_button("terminator:84c76de37c5679e0-1")
+    await press_button("terminator:84c76de37c5679e0-2")
+
+    assert seen_terminators == [
+        "menu 1 opt 1",
+        "menu 1 opt 2",
+        "menu 2 opt 1",
+        "menu 2 opt 2",
+        "menu 2 opt 3",
+    ]
+    assert not terminator_context_check_failed
+
+
 async def test_menu_handler_with_language_store(redis: RedisInterface):
     bot = MockedAsyncTeleBot(token="")
     example_user = tg.User(id=161, is_bot=False, first_name="Piotr", last_name="Kropotkin", language_code="ru")
