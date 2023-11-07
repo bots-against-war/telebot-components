@@ -483,7 +483,11 @@ class FormHandler(Generic[FormResultT]):
                 await bot.answer_callback_query(call.id)
 
     async def start(
-        self, bot: AsyncTeleBot, user: tg.User, initial_form_result: Optional[FormResultT] = None
+        self,
+        bot: AsyncTeleBot,
+        user: tg.User,
+        initial_form_result: Optional[FormResultT] = None,
+        separate_field_prompt_message: bool = False,
     ) -> tg.Message:
         initial_form_state = FormState(
             current_field=self.form.start_field,
@@ -491,14 +495,28 @@ class FormHandler(Generic[FormResultT]):
         )
         await self.form_state_store.save(user.id, initial_form_state)
         language = await self.get_maybe_language(user)
-        return await bot.send_message(
-            user.id,
-            text=join_paragraphs(
-                [
-                    self.config.form_starting_msg(language),
-                    await initial_form_state.get_current_query_message(user, language, self.config),
-                ]
-            ),
-            reply_markup=initial_form_state.get_current_reply_markup(language),
-            parse_mode="HTML",
-        )
+
+        if not separate_field_prompt_message:
+            return await bot.send_message(
+                user.id,
+                text=join_paragraphs(
+                    [
+                        self.config.form_starting_msg(language),
+                        await initial_form_state.get_current_query_message(user, language, self.config),
+                    ]
+                ),
+                reply_markup=initial_form_state.get_current_reply_markup(language),
+                parse_mode="HTML",
+            )
+        else:
+            await bot.send_message(
+                user.id,
+                text=self.config.form_starting_msg(language),
+                parse_mode="HTML",
+            )
+            return await bot.send_message(
+                user.id,
+                text=await initial_form_state.get_current_query_message(user, language, self.config),
+                reply_markup=initial_form_state.get_current_reply_markup(language),
+                parse_mode="HTML",
+            )
