@@ -57,6 +57,21 @@ async def test_get_user_language_basic(
 
 
 @pytest.mark.parametrize(
+    "code, expected_lang_data",
+    [
+        pytest.param("ru", LanguageData.lookup("ru")),
+        pytest.param("en", LanguageData.lookup("en")),
+        pytest.param("En", LanguageData.lookup("en")),
+        pytest.param("En-gb", LanguageData.lookup("en")),
+        pytest.param("hy-am", LanguageData.lookup("hy")),
+        pytest.param("ru-a-b-c-f-afg-b-sfb", LanguageData.lookup("ru")),
+    ],
+)
+def test_language_data_lookup(code: str, expected_lang_data: LanguageData) -> None:
+    assert LanguageData.lookup(code) == expected_lang_data
+
+
+@pytest.mark.parametrize(
     "supported_languages, default_language, emoji_buttons, checkmark_select, "
     + "expected_inline_keyboard_row, clicked_callback_data, expected_selected_language",
     [
