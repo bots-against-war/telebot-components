@@ -144,7 +144,7 @@ class LanguageStore(LanguageStoreInterface):
             if user_interface_language in self.languages:
                 return user_interface_language
         except Exception:
-            # user interface's language code is not in Language enum
+            # unexpected user interface's language code
             pass
         return self.default_language
 
