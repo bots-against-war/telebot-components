@@ -89,7 +89,9 @@ class LanguageData:
 
     @classmethod
     def lookup(cls, code: str) -> "LanguageData":
-        ld = cls.all().get(code.lower())
+        code = code.lower()
+        code = code.split("-")[0]
+        ld = cls.all().get(code)
         if ld is None:
             raise KeyError(f"Unexpected language code: {code!r}")
         else:
