@@ -143,8 +143,8 @@ class LanguageStore(LanguageStoreInterface):
             user_interface_language = LanguageData.lookup(user.language_code)
             if user_interface_language in self.languages:
                 return user_interface_language
-        except ValueError:
-            # user interface's language code is not in Language enum
+        except Exception:
+            # unexpected user interface's language code
             pass
         return self.default_language
 
