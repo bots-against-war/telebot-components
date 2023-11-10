@@ -52,6 +52,7 @@ class Language(Enum):
 class LanguageData:
     code: str  # IETF code in lowercase, same as used in Telegram
     name: str
+    local_name: Optional[str] = None
     emoji: Optional[str] = None
 
     def __str__(self) -> str:
@@ -68,7 +69,7 @@ class LanguageData:
         else:
             return False
 
-    def __lt__(self, other: Any) -> bool:  # support orderin
+    def __lt__(self, other: Any) -> bool:  # support ordering by lang code
         if isinstance(other, LanguageData):
             return self.code < other.code
         elif isinstance(other, Language):

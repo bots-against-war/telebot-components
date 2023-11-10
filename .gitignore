@@ -214,4 +214,5 @@ env.sh
 temp.py
 scripts/*.json
 scripts/*.tsv
+scripts/data
 .DS_Store

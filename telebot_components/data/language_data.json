@@ -2,7 +2,8 @@
   {
     "code": "ar",
     "name": "Arabic",
-    "emoji": "🇸🇦"
+    "emoji": "🇸🇦",
+    "local_name": "العربية"
   },
   {
     "code": "az",
@@ -17,7 +18,8 @@
   {
     "code": "bg",
     "name": "Bulgarian",
-    "emoji": "🇧🇬"
+    "emoji": "🇧🇬",
+    "local_name": "Български"
   },
   {
     "code": "bs",
@@ -32,17 +34,20 @@
   {
     "code": "cs",
     "name": "Czech",
-    "emoji": "🇨🇿"
+    "emoji": "🇨🇿",
+    "local_name": "Čeština"
   },
   {
     "code": "da",
     "name": "Danish",
-    "emoji": "🇩🇰"
+    "emoji": "🇩🇰",
+    "local_name": "Dansk"
   },
   {
     "code": "de",
     "name": "German",
-    "emoji": "🇩🇪"
+    "emoji": "🇩🇪",
+    "local_name": "Deutsch"
   },
   {
     "code": "el",
@@ -52,12 +57,14 @@
   {
     "code": "en",
     "name": "English",
-    "emoji": "🇬🇧"
+    "emoji": "🇬🇧",
+    "local_name": "English"
   },
   {
     "code": "es",
     "name": "Spanish",
-    "emoji": "🇪🇸"
+    "emoji": "🇪🇸",
+    "local_name": "Español"
   },
   {
     "code": "et",
@@ -67,12 +74,14 @@
   {
     "code": "fi",
     "name": "Finnish",
-    "emoji": "🇫🇮"
+    "emoji": "🇫🇮",
+    "local_name": "Suomi"
   },
   {
     "code": "fr",
     "name": "French",
-    "emoji": "🇫🇷"
+    "emoji": "🇫🇷",
+    "local_name": "Français"
   },
   {
     "code": "ga",
@@ -82,7 +91,8 @@
   {
     "code": "he",
     "name": "Hebrew",
-    "emoji": "🇮🇱"
+    "emoji": "🇮🇱",
+    "local_name": "עברית"
   },
   {
     "code": "hi",
@@ -92,7 +102,8 @@
   {
     "code": "hr",
     "name": "Croatian",
-    "emoji": "🇭🇷"
+    "emoji": "🇭🇷",
+    "local_name": "Hrvatski"
   },
   {
     "code": "hu",
@@ -107,22 +118,26 @@
   {
     "code": "id",
     "name": "Indonesian",
-    "emoji": "🇮🇩"
+    "emoji": "🇮🇩",
+    "local_name": "Bahasa indonesia"
   },
   {
     "code": "is",
     "name": "Icelandic",
-    "emoji": "🇮🇸"
+    "emoji": "🇮🇸",
+    "local_name": "Íslenska"
   },
   {
     "code": "it",
     "name": "Italian",
-    "emoji": "🇮🇹"
+    "emoji": "🇮🇹",
+    "local_name": "Italiano"
   },
   {
     "code": "ja",
     "name": "Japanese",
-    "emoji": "🇯🇵"
+    "emoji": "🇯🇵",
+    "local_name": "日本語"
   },
   {
     "code": "ka",
@@ -137,12 +152,14 @@
   {
     "code": "kk",
     "name": "Kazakh",
-    "emoji": "🇰🇿"
+    "emoji": "🇰🇿",
+    "local_name": "Қазақ"
   },
   {
     "code": "ko",
     "name": "Korean",
-    "emoji": "🇰🇷"
+    "emoji": "🇰🇷",
+    "local_name": "한국어"
   },
   {
     "code": "ky",
@@ -177,7 +194,8 @@
   {
     "code": "nl",
     "name": "Dutch",
-    "emoji": "🇳🇱"
+    "emoji": "🇳🇱",
+    "local_name": "Nederlands"
   },
   {
     "code": "no",
@@ -192,22 +210,26 @@
   {
     "code": "pl",
     "name": "Polish",
-    "emoji": "🇵🇱"
+    "emoji": "🇵🇱",
+    "local_name": "Polski"
   },
   {
     "code": "pt",
     "name": "Portuguese",
-    "emoji": "🇵🇹"
+    "emoji": "🇵🇹",
+    "local_name": "Português"
   },
   {
     "code": "ro",
     "name": "Romanian",
-    "emoji": "🇷🇴"
+    "emoji": "🇷🇴",
+    "local_name": "Română"
   },
   {
     "code": "ru",
     "name": "Russian",
-    "emoji": "🇷🇺"
+    "emoji": "🇷🇺",
+    "local_name": "Русский"
   },
   {
     "code": "rw",
@@ -217,7 +239,8 @@
   {
     "code": "sk",
     "name": "Slovak",
-    "emoji": "🇸🇰"
+    "emoji": "🇸🇰",
+    "local_name": "Slovenský"
   },
   {
     "code": "sl",
@@ -232,7 +255,8 @@
   {
     "code": "sr",
     "name": "Serbian",
-    "emoji": "🇷🇸"
+    "emoji": "🇷🇸",
+    "local_name": "Српски or srpski"
   },
   {
     "code": "sv",
@@ -257,7 +281,8 @@
   {
     "code": "uk",
     "name": "Ukrainian",
-    "emoji": "🇺🇦"
+    "emoji": "🇺🇦",
+    "local_name": "Українська"
   },
   {
     "code": "uz",
@@ -267,12 +292,14 @@
   {
     "code": "vi",
     "name": "Vietnamese",
-    "emoji": "🇻🇳"
+    "emoji": "🇻🇳",
+    "local_name": "Tiếng việt"
   },
   {
     "code": "zh",
     "name": "Chinese",
-    "emoji": "🇨🇳"
+    "emoji": "🇨🇳",
+    "local_name": "简体中文"
   },
   {
     "code": "aa",
@@ -696,7 +723,8 @@
   },
   {
     "code": "af",
-    "name": "Afrikaans"
+    "name": "Afrikaans",
+    "local_name": "Afrikaans"
   },
   {
     "code": "afb",
@@ -3896,7 +3924,8 @@
   },
   {
     "code": "br",
-    "name": "Breton"
+    "name": "Breton",
+    "local_name": "Brezhoneg"
   },
   {
     "code": "bra",
@@ -4768,7 +4797,8 @@
   },
   {
     "code": "ca",
-    "name": "Catalan"
+    "name": "Catalan",
+    "local_name": "Català"
   },
   {
     "code": "caa",
@@ -7592,7 +7622,8 @@
   },
   {
     "code": "eu",
-    "name": "Basque"
+    "name": "Basque",
+    "local_name": "Euskara"
   },
   {
     "code": "eve",
@@ -7632,7 +7663,8 @@
   },
   {
     "code": "fa",
-    "name": "Persian"
+    "name": "Persian",
+    "local_name": "فارسی"
   },
   {
     "code": "faa",
@@ -7948,7 +7980,8 @@
   },
   {
     "code": "fur",
-    "name": "Friulian"
+    "name": "Friulian",
+    "local_name": "Furlan"
   },
   {
     "code": "fut",
@@ -8592,7 +8625,8 @@
   },
   {
     "code": "gl",
-    "name": "Galician"
+    "name": "Galician",
+    "local_name": "Galego"
   },
   {
     "code": "glb",
@@ -11172,7 +11206,8 @@
   },
   {
     "code": "jv",
-    "name": "Javanese"
+    "name": "Javanese",
+    "local_name": "Basa jawa"
   },
   {
     "code": "jvd",
@@ -13360,7 +13395,8 @@
   },
   {
     "code": "kw",
-    "name": "Cornish"
+    "name": "Cornish",
+    "local_name": "Kernewek"
   },
   {
     "code": "kwa",
@@ -14644,7 +14680,8 @@
   },
   {
     "code": "lo",
-    "name": "Lao"
+    "name": "Lao",
+    "local_name": "ພາສາລາວ"
   },
   {
     "code": "loa",
@@ -15852,7 +15889,8 @@
   },
   {
     "code": "mi",
-    "name": "Maori"
+    "name": "Maori",
+    "local_name": "Māori"
   },
   {
     "code": "mia",
@@ -16144,7 +16182,8 @@
   },
   {
     "code": "ml",
-    "name": "Malayalam"
+    "name": "Malayalam",
+    "local_name": "മലയാളം"
   },
   {
     "code": "mla",
@@ -20244,7 +20283,8 @@
   },
   {
     "code": "pap",
-    "name": "Papiamento"
+    "name": "Papiamento",
+    "local_name": "Papiamentu"
   },
   {
     "code": "paq",
@@ -22996,7 +23036,8 @@
   },
   {
     "code": "si",
-    "name": "Sinhala"
+    "name": "Sinhala",
+    "local_name": "සිංහල"
   },
   {
     "code": "sia",
@@ -23992,7 +24033,8 @@
   },
   {
     "code": "su",
-    "name": "Sundanese"
+    "name": "Sundanese",
+    "local_name": "Basa sunda"
   },
   {
     "code": "sua",
@@ -24336,7 +24378,8 @@
   },
   {
     "code": "ta",
-    "name": "Tamil"
+    "name": "Tamil",
+    "local_name": "தமிழ்"
   },
   {
     "code": "taa",
@@ -25396,7 +25439,8 @@
   },
   {
     "code": "tn",
-    "name": "Tswana"
+    "name": "Tswana",
+    "local_name": "Setswana"
   },
   {
     "code": "tna",
@@ -25816,7 +25860,8 @@
   },
   {
     "code": "ts",
-    "name": "Tsonga"
+    "name": "Tsonga",
+    "local_name": "Xitsonga"
   },
   {
     "code": "tsa",
@@ -26968,7 +27013,8 @@
   },
   {
     "code": "ve",
-    "name": "Venda"
+    "name": "Venda",
+    "local_name": "Tshivenḓa"
   },
   {
     "code": "vec",
@@ -28468,7 +28514,8 @@
   },
   {
     "code": "xh",
-    "name": "Xhosa"
+    "name": "Xhosa",
+    "local_name": "Isixhosa"
   },
   {
     "code": "xha",
@@ -29684,7 +29731,8 @@
   },
   {
     "code": "yi",
-    "name": "Yiddish"
+    "name": "Yiddish",
+    "local_name": "ייִדיש"
   },
   {
     "code": "yia",
@@ -30992,7 +31040,8 @@
   },
   {
     "code": "zu",
-    "name": "Zulu"
+    "name": "Zulu",
+    "local_name": "Isizulu"
   },
   {
     "code": "zua",
