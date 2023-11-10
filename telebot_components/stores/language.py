@@ -1,6 +1,7 @@
+import enum
 import logging
 from dataclasses import dataclass
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, Union
 
 from telebot import AsyncTeleBot, types
 from telebot.callback_data import CallbackData
@@ -39,12 +40,48 @@ from telebot_components.stores.utils import callback_query_processing_error
 from telebot_components.utils.strings import telegram_html_escape
 
 
+class LanguageLabelPart(enum.Enum):
+    EMOJI = "emoji"
+    CODE = "code"
+    NAME_EN = "name_en"
+    NAME_LOCAL = "name_local"
+
+
 @dataclass
 class LanguageSelectionMenuConfig:
-    emojj_buttons: bool  # if False (legacy), language codes are used: "RU"
-    select_with_checkmark: bool  # if False (legacy), brackets are used: "[ EN ]"
+    emojj_buttons: bool = False
+    # if False (legacy), brackets are used: "[ EN ]"
+    select_with_checkmark: bool = True
     prompt: Optional[MultilangText] = None
     is_prompt_html: bool = False
+
+    language_label_template: Optional[list[Union[str, LanguageLabelPart]]] = None
+
+    def __post_init__(self) -> None:
+        if self.emojj_buttons and self.language_label_template is not None:
+            raise RuntimeError("emoji buttons and button template options are mutually exclusive")
+
+        if self.language_label_template:
+            self._effective_language_label_template = self.language_label_template
+        elif self.emojj_buttons:
+            self._effective_language_label_template = [LanguageLabelPart.EMOJI]
+        else:
+            self._effective_language_label_template = [LanguageLabelPart.CODE]
+
+    def language_label(self, lang: LanguageData) -> str:
+        str_parts: list[str] = []
+        for part in self._effective_language_label_template:
+            if isinstance(part, str):
+                str_parts.append(part)
+            elif part is LanguageLabelPart.EMOJI:
+                str_parts.append(lang.emoji or lang.code.upper())
+            elif part is LanguageLabelPart.CODE:
+                str_parts.append(lang.code.upper())
+            elif part is LanguageLabelPart.NAME_EN:
+                str_parts.append(lang.name)
+            elif part is LanguageLabelPart.NAME_LOCAL:
+                str_parts.append(lang.local_name or lang.name)
+        return "".join(str_parts)
 
     def html_menu_prompt(self, language: AnyLanguage) -> str:
         if self.prompt is None:
@@ -100,7 +137,7 @@ class LanguageStore(LanguageStoreInterface):
                     ),
                     menu_items=[
                         MenuItem(
-                            label={lang: self._language_label(language) for lang in self.languages},
+                            label={lang: self.menu_config.language_label(language) for lang in self.languages},
                             terminator=language.code,
                         )
                         for language in self.languages
@@ -240,15 +277,9 @@ class LanguageStore(LanguageStoreInterface):
                 on_terminal_menu_option_selected=on_language_selected,
             )
 
-    def _language_label(self, language: LanguageData) -> str:
-        if self.menu_config.emojj_buttons and language.emoji is not None:
-            return language.emoji
-        else:
-            return language.code.upper()
-
     def markup_for_selected_language(self, selected_language: LanguageData):
         def get_lang_text(lang: LanguageData) -> str:
-            lang_str = self._language_label(lang)
+            lang_str = self.menu_config.language_label(lang)
             if lang == selected_language:
                 if self.menu_config.select_with_checkmark:
                     lang_str = "✅ " + lang_str
