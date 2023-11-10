@@ -226,7 +226,32 @@ async def test_language_store_markup(
     "lang_label_templ, language, expected_label",
     [
         pytest.param([LanguageLabelPart.CODE], LanguageData.lookup("ru"), "RU"),
-        # TODO
+        pytest.param([LanguageLabelPart.EMOJI], LanguageData.lookup("ru"), "🇷🇺"),
+        pytest.param([LanguageLabelPart.NAME_EN], LanguageData.lookup("ru"), "Russian"),
+        pytest.param([LanguageLabelPart.NAME_LOCAL], LanguageData.lookup("ru"), "Русский"),
+        pytest.param(
+            [LanguageLabelPart.NAME_LOCAL],
+            LanguageData.lookup("ade"),
+            "Adele",
+            id="no local name available, english used",
+        ),
+        pytest.param(
+            [LanguageLabelPart.EMOJI, " ", LanguageLabelPart.NAME_LOCAL], LanguageData.lookup("uk"), "🇺🇦 Українська"
+        ),
+        pytest.param(
+            [
+                LanguageLabelPart.EMOJI,
+                " ",
+                LanguageLabelPart.NAME_LOCAL,
+                " (",
+                LanguageLabelPart.NAME_EN,
+                ", ",
+                LanguageLabelPart.CODE,
+                ")",
+            ],
+            LanguageData.lookup("uk"),
+            "🇺🇦 Українська (Ukrainian, UK)",
+        ),
     ],
 )
 def test_complex_lang_label_schemes(lang_label_templ: list, language: LanguageData, expected_label: str) -> None:

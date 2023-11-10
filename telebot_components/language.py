@@ -36,13 +36,8 @@ class Language(Enum):
         return self.value
 
     def emoji(self) -> str:
-        known_emoji = {
-            Language.EN: "🇬🇧",
-            Language.UK: "🇺🇦",
-            Language.RU: "🇷🇺",
-            Language.PL: "🇵🇱",
-        }
-        return known_emoji.get(self, str(self).upper())
+        ld = self.as_data()
+        return ld.emoji or ld.code.upprt()
 
     def as_data(self) -> "LanguageData":
         return LanguageData.lookup(self.value)
@@ -91,7 +86,7 @@ class LanguageData:
     @classmethod
     def lookup(cls, code: str) -> "LanguageData":
         code = code.lower()
-        code = code.split("-")[0]
+        code = code.split("-")[0]  # strip codes like "en-gb" to macrolanguages ("en")
         ld = cls.all().get(code)
         if ld is None:
             raise KeyError(f"Unexpected language code: {code!r}")
