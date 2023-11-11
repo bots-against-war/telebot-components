@@ -12,6 +12,7 @@ from telebot_components.language import LanguageData
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.language import (
     Language,
+    LanguageLabelPart,
     LanguageSelectionMenuConfig,
     LanguageStore,
 )
@@ -219,3 +220,40 @@ async def test_language_store_markup(
     assert button_clicked_update is not None
     await bot.process_new_updates([button_clicked_update])
     assert await language_store.get_user_language(user) == expected_selected_language
+
+
+@pytest.mark.parametrize(
+    "lang_label_templ, language, expected_label",
+    [
+        pytest.param([LanguageLabelPart.CODE], LanguageData.lookup("ru"), "RU"),
+        pytest.param([LanguageLabelPart.EMOJI], LanguageData.lookup("ru"), "🇷🇺"),
+        pytest.param([LanguageLabelPart.NAME_EN], LanguageData.lookup("ru"), "Russian"),
+        pytest.param([LanguageLabelPart.NAME_LOCAL], LanguageData.lookup("ru"), "Русский"),
+        pytest.param(
+            [LanguageLabelPart.NAME_LOCAL],
+            LanguageData.lookup("ade"),
+            "Adele",
+            id="no local name available, english used",
+        ),
+        pytest.param(
+            [LanguageLabelPart.EMOJI, " ", LanguageLabelPart.NAME_LOCAL], LanguageData.lookup("uk"), "🇺🇦 Українська"
+        ),
+        pytest.param(
+            [
+                LanguageLabelPart.EMOJI,
+                " ",
+                LanguageLabelPart.NAME_LOCAL,
+                " (",
+                LanguageLabelPart.NAME_EN,
+                ", ",
+                LanguageLabelPart.CODE,
+                ")",
+            ],
+            LanguageData.lookup("uk"),
+            "🇺🇦 Українська (Ukrainian, UK)",
+        ),
+    ],
+)
+def test_complex_lang_label_schemes(lang_label_templ: list, language: LanguageData, expected_label: str) -> None:
+    config = LanguageSelectionMenuConfig(language_label_template=lang_label_templ)
+    assert config.language_label(language) == expected_label
