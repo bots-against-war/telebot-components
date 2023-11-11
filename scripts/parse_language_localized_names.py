@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-import bs4
-import requests
+import bs4  # type: ignore
+import requests  # type: ignore
 
 if __name__ == "__main__":
     scripts_dir = Path(__file__).parent

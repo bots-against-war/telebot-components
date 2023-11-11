@@ -37,7 +37,7 @@ class Language(Enum):
 
     def emoji(self) -> str:
         ld = self.as_data()
-        return ld.emoji or ld.code.upprt()
+        return ld.emoji or ld.code.upper()
 
     def as_data(self) -> "LanguageData":
         return LanguageData.lookup(self.value)
