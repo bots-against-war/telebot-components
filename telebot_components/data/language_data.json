@@ -8,12 +8,14 @@
   {
     "code": "az",
     "name": "Azerbaijani",
-    "emoji": "🇦🇿"
+    "emoji": "🇦🇿",
+    "local_name": "Azərbaycan dili"
   },
   {
     "code": "be",
     "name": "Belarusian",
-    "emoji": "🇧🇾"
+    "emoji": "🇧🇾",
+    "local_name": "Беларуская"
   },
   {
     "code": "bg",
@@ -24,12 +26,14 @@
   {
     "code": "bs",
     "name": "Bosnian",
-    "emoji": "🇧🇦"
+    "emoji": "🇧🇦",
+    "local_name": "Bosanski"
   },
   {
     "code": "cnr",
     "name": "Montenegrin",
-    "emoji": "🇲🇪"
+    "emoji": "🇲🇪",
+    "local_name": "Crnogorski"
   },
   {
     "code": "cs",
@@ -51,8 +55,9 @@
   },
   {
     "code": "el",
-    "name": "Modern Greek (1453-)",
-    "emoji": "🇬🇷"
+    "name": "Modern Greek",
+    "emoji": "🇬🇷",
+    "local_name": "Ελληνικά"
   },
   {
     "code": "en",
@@ -69,7 +74,8 @@
   {
     "code": "et",
     "name": "Estonian",
-    "emoji": "🇪🇪"
+    "emoji": "🇪🇪",
+    "local_name": "Eesti keel"
   },
   {
     "code": "fi",
@@ -86,7 +92,8 @@
   {
     "code": "ga",
     "name": "Irish",
-    "emoji": "🇮🇪"
+    "emoji": "🇮🇪",
+    "local_name": "Gaeilge"
   },
   {
     "code": "he",
@@ -97,7 +104,8 @@
   {
     "code": "hi",
     "name": "Hindi",
-    "emoji": "🇮🇳"
+    "emoji": "🇮🇳",
+    "local_name": "मानक हिन्दी"
   },
   {
     "code": "hr",
@@ -108,12 +116,14 @@
   {
     "code": "hu",
     "name": "Hungarian",
-    "emoji": "🇭🇺"
+    "emoji": "🇭🇺",
+    "local_name": "Magyar nyelv"
   },
   {
     "code": "hy",
     "name": "Armenian",
-    "emoji": "🇦🇲"
+    "emoji": "🇦🇲",
+    "local_name": "հայերեն"
   },
   {
     "code": "id",
@@ -142,7 +152,8 @@
   {
     "code": "ka",
     "name": "Georgian",
-    "emoji": "🇬🇪"
+    "emoji": "🇬🇪",
+    "local_name": "ქართული"
   },
   {
     "code": "ken",
@@ -163,33 +174,39 @@
   },
   {
     "code": "ky",
-    "name": "Kirghiz",
-    "emoji": "🇰🇬"
+    "name": "Kyrgyz",
+    "emoji": "🇰🇬",
+    "local_name": "Кыргыз"
   },
   {
     "code": "lt",
     "name": "Lithuanian",
-    "emoji": "🇱🇹"
+    "emoji": "🇱🇹",
+    "local_name": "Lietuvių"
   },
   {
     "code": "lv",
     "name": "Latvian",
-    "emoji": "🇱🇻"
+    "emoji": "🇱🇻",
+    "local_name": "Latviešu"
   },
   {
     "code": "mk",
     "name": "Macedonian",
-    "emoji": "🇲🇰"
+    "emoji": "🇲🇰",
+    "local_name": "Македонски"
   },
   {
     "code": "mn",
     "name": "Mongolian",
-    "emoji": "🇲🇳"
+    "emoji": "🇲🇳",
+    "local_name": "Монгол"
   },
   {
     "code": "mt",
     "name": "Maltese",
-    "emoji": "🇲🇹"
+    "emoji": "🇲🇹",
+    "local_name": "Malti"
   },
   {
     "code": "nl",
@@ -200,12 +217,14 @@
   {
     "code": "no",
     "name": "Norwegian",
-    "emoji": "🇳🇴"
+    "emoji": "🇳🇴",
+    "local_name": "Norsk"
   },
   {
     "code": "pes",
     "name": "Iranian Persian",
-    "emoji": "🇮🇷"
+    "emoji": "🇮🇷",
+    "local_name": "فارسی"
   },
   {
     "code": "pl",
@@ -245,12 +264,14 @@
   {
     "code": "sl",
     "name": "Slovenian",
-    "emoji": "🇸🇮"
+    "emoji": "🇸🇮",
+    "local_name": "Slovenščina"
   },
   {
     "code": "sq",
     "name": "Albanian",
-    "emoji": "🇦🇱"
+    "emoji": "🇦🇱",
+    "local_name": "Shqip"
   },
   {
     "code": "sr",
@@ -261,7 +282,8 @@
   {
     "code": "sv",
     "name": "Swedish",
-    "emoji": "🇸🇪"
+    "emoji": "🇸🇪",
+    "local_name": "Svenska"
   },
   {
     "code": "tg",
@@ -271,12 +293,14 @@
   {
     "code": "tk",
     "name": "Turkmen",
-    "emoji": "🇹🇲"
+    "emoji": "🇹🇲",
+    "local_name": "Türkmençe"
   },
   {
     "code": "tr",
     "name": "Turkish",
-    "emoji": "🇹🇷"
+    "emoji": "🇹🇷",
+    "local_name": "Türkçe"
   },
   {
     "code": "uk",
@@ -287,7 +311,8 @@
   {
     "code": "uz",
     "name": "Uzbek",
-    "emoji": "🇺🇿"
+    "emoji": "🇺🇿",
+    "local_name": "Oʻzbek"
   },
   {
     "code": "vi",
@@ -21220,7 +21245,8 @@
   },
   {
     "code": "prd",
-    "name": "Parsi-Dari"
+    "name": "Parsi-Dari",
+    "local_name": "فارسی دری"
   },
   {
     "code": "pre",
@@ -21272,7 +21298,8 @@
   },
   {
     "code": "prs",
-    "name": "Dari"
+    "name": "Dari",
+    "local_name": "فارسی دری"
   },
   {
     "code": "prt",
