@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
 
+from typing import Optional
 from telebot import types as tg
 
 from telebot_components.redis_utils.interface import RedisInterface
@@ -35,8 +36,10 @@ class DisabledAntiSpam(AntiSpamInterface):
 
 
 class AntiSpam(AntiSpamInterface):
-    def __init__(self, redis: RedisInterface, bot_prefix: str, config: AntiSpamConfig):
+    def __init__(self, redis: RedisInterface, bot_prefix: str, config: AntiSpamConfig, name: Optional[str] = None):
         self.config = config
+        if name:
+            bot_prefix = bot_prefix + f"-antispam-{name}"
         self.recent_messages_counter = KeyIntegerStore(
             name="recent-msg-counter-for",
             prefix=bot_prefix,
