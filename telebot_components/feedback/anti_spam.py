@@ -2,8 +2,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
-
 from typing import Optional
+
 from telebot import types as tg
 
 from telebot_components.redis_utils.interface import RedisInterface
