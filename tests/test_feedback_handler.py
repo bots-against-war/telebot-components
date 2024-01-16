@@ -1,7 +1,7 @@
 import asyncio
 import string
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 
 from telebot import types as tg

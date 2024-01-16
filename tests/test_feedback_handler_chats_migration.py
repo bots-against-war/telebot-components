@@ -1,7 +1,6 @@
 import datetime
 
 from telebot import types as tg
-from telebot.runner import BotRunner
 from telebot.test_util import MockedAsyncTeleBot
 
 from telebot_components.feedback import (
