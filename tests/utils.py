@@ -1,12 +1,16 @@
 import asyncio
+import datetime
 import os
-from typing import Any, Callable
+import random
+from typing import Any, Callable, Optional
 from uuid import uuid4
 
 import aiohttp
 import pytest
 import pytest_mock
 from aioresponses import CallbackResult
+from telebot import AsyncTeleBot
+from telebot import types as tg
 from telebot.test_util import MethodCall
 from yarl import URL
 
@@ -99,3 +103,57 @@ def assert_list_of_required_subdicts(actual_dicts: list[dict], required_subdicts
 
 def extract_full_kwargs(method_calls: list[MethodCall]) -> list[dict[str, Any]]:
     return [mc.full_kwargs for mc in method_calls]
+
+
+class TelegramServerMock:
+    def __init__(self, admin_chats: set[int] | None = None) -> None:
+        self._message_id_counter = 0
+        self._admin_chats = admin_chats or set()
+
+    async def send_message_to_bot(
+        self,
+        bot: AsyncTeleBot,
+        user_id: int,
+        text: str,
+        chat_id: int | None = None,
+        reply_to_message_id: Optional[int] = None,
+    ):
+        self._message_id_counter += 1
+        chat_id_ = chat_id or user_id
+        is_admin_chat = chat_id_ in self._admin_chats
+
+        update_json = {
+            "update_id": random.randint(int(1e4), int(1e6)),
+            "message": {
+                "message_id": self._message_id_counter,
+                "from": {
+                    "id": user_id,
+                    "is_bot": False,
+                    "first_name": "Admin" if is_admin_chat else "User",
+                },
+                "chat": {
+                    "id": chat_id_,
+                    "type": "supergroup" if is_admin_chat else "private",
+                },
+                "date": int(datetime.datetime.now().timestamp()),
+                "text": text,
+            },
+        }
+
+        if reply_to_message_id is not None:
+            update_json["message"]["reply_to_message"] = {  # type: ignore
+                "message_id": reply_to_message_id,
+                "from": {
+                    "id": 1,
+                    "is_bot": True,
+                    "first_name": "Bot",
+                },
+                "chat": {
+                    "id": chat_id_,
+                    "type": "supergroup",
+                },
+                "date": 1662891416,
+                "text": "unused-replied-to-message-text",
+            }
+
+        await bot.process_new_updates([tg.Update.de_json(update_json)])  # type: ignore

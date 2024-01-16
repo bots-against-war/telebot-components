@@ -22,7 +22,11 @@ from telebot_components.stores.forum_topics import (
     ForumTopicStore,
     ForumTopicStoreErrorMessages,
 )
-from tests.utils import TimeSupplier, assert_list_of_required_subdicts
+from tests.utils import (
+    TelegramServerMock,
+    TimeSupplier,
+    assert_list_of_required_subdicts,
+)
 
 ADMIN_CHAT_ID = 111
 ADMIN_USER_ID = 1312
@@ -126,54 +130,13 @@ async def test_feedback_handler_throttling(redis: RedisInterface):
     async def welcome_user(m: tg.Message):
         await bot.reply_to(m, "Welcome to the Drug Selling Bot, please tell us what you need!")
 
-    _message_id_counter = 0
+    telegram = TelegramServerMock(admin_chats={ADMIN_CHAT_ID})
 
-    async def _send_message_to_bot(in_admin_chat: bool, text: str, reply_to_message_id: Optional[int] = None):
-        nonlocal _message_id_counter
-        _message_id_counter += 1
-        user_id = ADMIN_USER_ID if in_admin_chat else USER_ID
-
-        update_json = {
-            "update_id": 19283649187364,
-            "message": {
-                "message_id": _message_id_counter,
-                "from": {
-                    "id": user_id,
-                    "is_bot": False,
-                    "first_name": "Admin" if in_admin_chat else "User",
-                },
-                "chat": {
-                    "id": ADMIN_CHAT_ID if in_admin_chat else user_id,
-                    "type": "supergroup" if in_admin_chat else "private",
-                },
-                "date": int(datetime.now().timestamp()),
-                "text": text,
-            },
-        }
-
-        if reply_to_message_id is not None:
-            update_json["message"]["reply_to_message"] = {  # type: ignore
-                "message_id": reply_to_message_id,
-                "from": {
-                    "id": 1,
-                    "is_bot": True,
-                    "first_name": "Bot",
-                },
-                "chat": {
-                    "id": ADMIN_CHAT_ID,
-                    "type": "supergroup",
-                },
-                "date": 1662891416,
-                "text": "replied-to-message-text",
-            }
-
-        await bot.process_new_updates([tg.Update.de_json(update_json)])  # type: ignore
-
-    await _send_message_to_bot(in_admin_chat=False, text="/start")
-    await _send_message_to_bot(in_admin_chat=False, text="Hi I want to buy drugs")
-    await _send_message_to_bot(in_admin_chat=False, text="Could you help me?")
-    await _send_message_to_bot(in_admin_chat=False, text="Please")
-    await _send_message_to_bot(in_admin_chat=False, text="Please please")
+    await telegram.send_message_to_bot(bot, user_id=USER_ID, text="/start")
+    await telegram.send_message_to_bot(bot, user_id=USER_ID, text="Hi I want to buy drugs")
+    await telegram.send_message_to_bot(bot, user_id=USER_ID, text="Could you help me?")
+    await telegram.send_message_to_bot(bot, user_id=USER_ID, text="Please")
+    await telegram.send_message_to_bot(bot, user_id=USER_ID, text="Please please")
 
     assert set(bot.method_calls.keys()) == {"send_message", "forward_message"}
     assert_list_of_required_subdicts(
@@ -205,12 +168,33 @@ async def test_feedback_handler_throttling(redis: RedisInterface):
     )
     bot.method_calls.clear()
 
-    await _send_message_to_bot(in_admin_chat=True, text="This message should be ignored")
-    await _send_message_to_bot(in_admin_chat=True, text="You can buy a lot of drugs from us", reply_to_message_id=4)
-    await _send_message_to_bot(
-        in_admin_chat=True, text="Please tell us more about what you need", reply_to_message_id=4
+    await telegram.send_message_to_bot(
+        bot,
+        user_id=ADMIN_USER_ID,
+        chat_id=ADMIN_CHAT_ID,
+        text="This message should be ignored",
     )
-    await _send_message_to_bot(in_admin_chat=True, text="And who you are", reply_to_message_id=6)
+    await telegram.send_message_to_bot(
+        bot,
+        user_id=ADMIN_USER_ID,
+        chat_id=ADMIN_CHAT_ID,
+        text="You can buy a lot of drugs from us",
+        reply_to_message_id=4,
+    )
+    await telegram.send_message_to_bot(
+        bot,
+        user_id=ADMIN_USER_ID,
+        chat_id=ADMIN_CHAT_ID,
+        text="Please tell us more about what you need",
+        reply_to_message_id=4,
+    )
+    await telegram.send_message_to_bot(
+        bot,
+        user_id=ADMIN_USER_ID,
+        chat_id=ADMIN_CHAT_ID,
+        text="And who you are",
+        reply_to_message_id=6,
+    )
 
     assert set(bot.method_calls.keys()) == {"copy_message", "send_message", "delete_message"}
     assert_list_of_required_subdicts(
@@ -251,51 +235,11 @@ async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
     await feedback_handler.setup(bot)
     assert not bot.method_calls
 
-    _message_id_counter = 0
-
-    async def _send_message_to_bot(in_admin_chat: bool, text: str, reply_to_message_id: Optional[int] = None):
-        nonlocal _message_id_counter
-        _message_id_counter += 1
-        user_id = ADMIN_USER_ID if in_admin_chat else USER_ID
-
-        update_json = {
-            "update_id": 19283649187364,
-            "message": {
-                "message_id": _message_id_counter,
-                "from": {
-                    "id": user_id,
-                    "is_bot": False,
-                    "first_name": "Admin" if in_admin_chat else "User",
-                },
-                "chat": {
-                    "id": ADMIN_CHAT_ID if in_admin_chat else user_id,
-                    "type": "supergroup" if in_admin_chat else "private",
-                },
-                "date": int(datetime.now().timestamp()),
-                "text": text,
-            },
-        }
-
-        if reply_to_message_id is not None:
-            update_json["message"]["reply_to_message"] = {  # type: ignore
-                "message_id": reply_to_message_id,
-                "from": {
-                    "id": 1,
-                    "is_bot": True,
-                    "first_name": "Bot",
-                },
-                "chat": {
-                    "id": ADMIN_CHAT_ID,
-                    "type": "supergroup",
-                },
-                "date": 1662891416,
-                "text": "replied-to-message-text",
-            }
-        await bot.process_new_updates([tg.Update.de_json(update_json)])  # type: ignore
+    telegram = TelegramServerMock(admin_chats={ADMIN_CHAT_ID})
 
     # user sends all 26 letter of the alphabet
     for letter in string.ascii_uppercase:
-        await _send_message_to_bot(in_admin_chat=False, text=letter)
+        await telegram.send_message_to_bot(bot, user_id=USER_ID, text=letter)
 
     assert set(bot.method_calls.keys()) == {"send_message", "forward_message"}
     assert_list_of_required_subdicts(
@@ -305,7 +249,13 @@ async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
     bot.method_calls.clear()
 
     # admin requests message log
-    await _send_message_to_bot(in_admin_chat=True, text="/log", reply_to_message_id=26)
+    await telegram.send_message_to_bot(
+        bot,
+        user_id=ADMIN_USER_ID,
+        chat_id=ADMIN_CHAT_ID,
+        text="/log",
+        reply_to_message_id=26,
+    )
     assert set(bot.method_calls.keys()) == {"send_message", "forward_message"}
     assert [mc.full_kwargs for mc in bot.method_calls["send_message"]] == [
         {"chat_id": 111, "text": "📜 Log page 1 / 6"},
@@ -317,7 +267,9 @@ async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
     bot.method_calls.clear()
 
     # admin requests message log page 5 by answering to another message
-    await _send_message_to_bot(in_admin_chat=True, text="/log 5", reply_to_message_id=4)
+    await telegram.send_message_to_bot(
+        bot, user_id=ADMIN_USER_ID, chat_id=ADMIN_CHAT_ID, text="/log 5", reply_to_message_id=4
+    )
     assert set(bot.method_calls.keys()) == {"send_message", "forward_message"}
     assert [mc.full_kwargs for mc in bot.method_calls["send_message"]] == [
         {"chat_id": 111, "text": "📜 Log page 5 / 6"},
@@ -329,7 +281,13 @@ async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
     bot.method_calls.clear()
 
     # admin requests message log on the last page (with only 1 message) by answering on a log message
-    await _send_message_to_bot(in_admin_chat=True, text="/log -1", reply_to_message_id=44)
+    await telegram.send_message_to_bot(
+        bot,
+        user_id=ADMIN_USER_ID,
+        chat_id=ADMIN_CHAT_ID,
+        text="/log -1",
+        reply_to_message_id=44,
+    )
     assert set(bot.method_calls.keys()) == {"send_message", "forward_message"}
     assert [mc.full_kwargs for mc in bot.method_calls["send_message"]] == [
         {"chat_id": 111, "text": "📜 Log page 6 / 6"},
@@ -386,48 +344,7 @@ async def test_forum_topics_for_categories(redis: RedisInterface, time_supplier:
 
     bot.method_calls.clear()
 
-    _message_id_counter = 0
-
-    async def _send_message_to_bot(in_admin_chat: bool, text: str, reply_to_message_id: Optional[int] = None):
-        nonlocal _message_id_counter
-        _message_id_counter += 1
-        user_id = ADMIN_USER_ID if in_admin_chat else USER_ID
-
-        update_json = {
-            "update_id": 19283649187364,
-            "message": {
-                "message_id": _message_id_counter,
-                "from": {
-                    "id": user_id,
-                    "is_bot": False,
-                    "first_name": "Admin" if in_admin_chat else "User",
-                },
-                "chat": {
-                    "id": ADMIN_CHAT_ID if in_admin_chat else user_id,
-                    "type": "supergroup" if in_admin_chat else "private",
-                },
-                "date": int(datetime.now().timestamp()),
-                "text": text,
-            },
-        }
-
-        if reply_to_message_id is not None:
-            update_json["message"]["reply_to_message"] = {  # type: ignore
-                "message_id": reply_to_message_id,
-                "from": {
-                    "id": 1,
-                    "is_bot": True,
-                    "first_name": "Bot",
-                },
-                "chat": {
-                    "id": ADMIN_CHAT_ID,
-                    "type": "supergroup",
-                },
-                "date": 1662891416,
-                "text": "replied-to-message-text",
-            }
-
-        await bot.process_new_updates([tg.Update.de_json(update_json)])  # type: ignore
+    telegram = TelegramServerMock(admin_chats={ADMIN_CHAT_ID})
 
     assert feedback_handler.category_store
     await feedback_handler.category_store.save_user_category(
@@ -435,7 +352,7 @@ async def test_forum_topics_for_categories(redis: RedisInterface, time_supplier:
         Category(name="two"),
     )
 
-    await _send_message_to_bot(in_admin_chat=False, text="hello I am user in category 1")
+    await telegram.send_message_to_bot(bot, user_id=USER_ID, text="hello I am user in category 1")
 
     assert_list_of_required_subdicts(
         [c.full_kwargs for c in bot.method_calls["send_message"]],

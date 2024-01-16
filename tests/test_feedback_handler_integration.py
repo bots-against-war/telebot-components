@@ -22,7 +22,11 @@ from telebot_components.feedback.integration.interface import (
 from telebot_components.feedback.types import UserMessageRepliedEvent
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.category import Category
-from tests.utils import assert_list_of_required_subdicts, extract_full_kwargs
+from tests.utils import (
+    TelegramServerMock,
+    assert_list_of_required_subdicts,
+    extract_full_kwargs,
+)
 
 
 class MockFeedbackHandlerIntegration(FeedbackHandlerIntegration):
@@ -82,52 +86,12 @@ async def test_feedback_handler_integration_basic(redis: RedisInterface) -> None
 
     await feedback_handler.setup(bot)
 
-    _message_id_counter = 0
-
-    async def _send_message_to_bot(in_admin_chat: bool, text: str, reply_to_message_id: Optional[int] = None):
-        nonlocal _message_id_counter
-        _message_id_counter += 1
-        user_id = ADMIN_USER_ID if in_admin_chat else USER_ID
-
-        update_json = {
-            "update_id": 19283649187364,
-            "message": {
-                "message_id": _message_id_counter,
-                "from": {
-                    "id": user_id,
-                    "is_bot": False,
-                    "first_name": "Admin" if in_admin_chat else "User",
-                },
-                "chat": {
-                    "id": ADMIN_CHAT_ID if in_admin_chat else user_id,
-                    "type": "supergroup" if in_admin_chat else "private",
-                },
-                "date": int(datetime.datetime.now().timestamp()),
-                "text": text,
-            },
-        }
-
-        if reply_to_message_id is not None:
-            update_json["message"]["reply_to_message"] = {  # type: ignore
-                "message_id": reply_to_message_id,
-                "from": {
-                    "id": 1,
-                    "is_bot": True,
-                    "first_name": "Bot",
-                },
-                "chat": {
-                    "id": ADMIN_CHAT_ID,
-                    "type": "supergroup",
-                },
-                "date": 1662891416,
-                "text": "replied-to-message-text",
-            }
-        await bot.process_new_updates([tg.Update.de_json(update_json)])  # type: ignore
+    telegram = TelegramServerMock(admin_chats={ADMIN_CHAT_ID})
 
     for integration in integrations:
         assert integration.message_replied_callback is not None
 
-    await _send_message_to_bot(in_admin_chat=False, text="Hello this is user please respond")
+    await telegram.send_message_to_bot(bot, user_id=USER_ID, text="Hello this is user please respond")
     for integration in integrations:
         assert len(integration.handled_messages) == 1
         admin_chat_message, user_message = integration.handled_messages[0]
@@ -211,55 +175,10 @@ async def test_aux_admin_chat_integration(redis: RedisInterface) -> None:
     for integration in main_feedback_handler.integrations:
         assert integration.message_replied_callback is not None
 
-    _message_id_counter = 0
+    telegram = TelegramServerMock(admin_chats={ADMIN_CHAT_ID, *AUX_ADMIN_CHAT_IDS})
 
-    async def _send_message_to_bot(
-        chat_id: int,
-        is_from_admin: bool,
-        text: str,
-        reply_to_message_id: Optional[int] = None,
-    ):
-        nonlocal _message_id_counter
-        _message_id_counter += 1
-        user_id = ADMIN_USER_ID if is_from_admin else USER_ID
-
-        update_json = {
-            "update_id": 19283649187364,
-            "message": {
-                "message_id": _message_id_counter,
-                "from": {
-                    "id": user_id,
-                    "is_bot": False,
-                    "first_name": "Admin" if is_from_admin else "User",
-                },
-                "chat": {
-                    "id": chat_id,
-                    "type": "supergroup" if chat_id in {ADMIN_CHAT_ID, *AUX_ADMIN_CHAT_IDS} else "private",
-                },
-                "date": int(datetime.datetime.now().timestamp()),
-                "text": text,
-            },
-        }
-
-        if reply_to_message_id is not None:
-            update_json["message"]["reply_to_message"] = {  # type: ignore
-                "message_id": reply_to_message_id,
-                "from": {
-                    "id": 1,
-                    "is_bot": True,
-                    "first_name": "Bot",
-                },
-                "chat": {
-                    "id": ADMIN_CHAT_ID,
-                    "type": "supergroup",
-                },
-                "date": 1662891416,
-                "text": "replied-to-message-text",
-            }
-        await bot.process_new_updates([tg.Update.de_json(update_json)])  # type: ignore
-
-    await _send_message_to_bot(chat_id=USER_ID, is_from_admin=False, text="hello i am user")
-    await _send_message_to_bot(chat_id=USER_ID, is_from_admin=False, text="i like cats")
+    await telegram.send_message_to_bot(bot, user_id=USER_ID, text="hello i am user")
+    await telegram.send_message_to_bot(bot, user_id=USER_ID, text="i like cats")
 
     # the user is replied only once
     assert set(bot.method_calls.keys()) == {"forward_message", "send_message"}
@@ -290,8 +209,8 @@ async def test_aux_admin_chat_integration(redis: RedisInterface) -> None:
     bot.method_calls.clear()
 
     # reply from main admin chat duplicated to aux ones
-    await _send_message_to_bot(
-        chat_id=ADMIN_CHAT_ID, is_from_admin=True, text="hello from the main admin chat", reply_to_message_id=2
+    await telegram.send_message_to_bot(
+        bot, user_id=ADMIN_USER_ID, chat_id=ADMIN_CHAT_ID, text="hello from the main admin chat", reply_to_message_id=2
     )
     assert extract_full_kwargs(bot.method_calls["copy_message"]) == [
         {"chat_id": USER_ID, "from_chat_id": ADMIN_CHAT_ID, "message_id": 3}
@@ -320,8 +239,12 @@ async def test_aux_admin_chat_integration(redis: RedisInterface) -> None:
     )
     bot.method_calls.clear()
 
-    await _send_message_to_bot(
-        chat_id=AUX_ADMIN_CHAT_IDS[0], is_from_admin=True, text="hello from aux admin chat 1", reply_to_message_id=2
+    await telegram.send_message_to_bot(
+        bot,
+        user_id=ADMIN_USER_ID,
+        chat_id=AUX_ADMIN_CHAT_IDS[0],
+        text="hello from aux admin chat 1",
+        reply_to_message_id=2,
     )
     assert extract_full_kwargs(bot.method_calls["copy_message"]) == [
         {"chat_id": 7890123, "from_chat_id": AUX_ADMIN_CHAT_IDS[0], "message_id": 4}

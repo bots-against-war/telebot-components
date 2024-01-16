@@ -16,7 +16,7 @@ from telebot_components.menu.menu import (
 from telebot_components.redis_utils.emulation import RedisEmulation
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.language import Language, LanguageStore
-from tests.utils import extract_full_kwargs
+from tests.utils import TelegramServerMock, extract_full_kwargs
 
 
 @pytest.mark.parametrize(
@@ -450,30 +450,7 @@ async def test_menu_handler_with_reply_buttons(redis: RedisInterface):
 
     example_user = tg.User(id=161, is_bot=False, first_name="Ivan", last_name="Ivanov")
 
-    _message_id_counter = 0
-
-    async def _send_message_to_bot(text: str):
-        nonlocal _message_id_counter
-        _message_id_counter += 1
-        await bot.process_new_updates(
-            [
-                tg.Update.de_json(  # type: ignore
-                    {
-                        "update_id": 19283649187364,
-                        "message": {
-                            "message_id": _message_id_counter,
-                            "from": example_user.to_dict(),
-                            "chat": {
-                                "id": example_user.id,
-                                "type": "private",
-                            },
-                            "date": int(datetime.now().timestamp()),
-                            "text": text,
-                        },
-                    }
-                )
-            ]
-        )  # type: ignore
+    telegram = TelegramServerMock()
 
     menu = Menu(
         text="menu",
@@ -533,7 +510,7 @@ async def test_menu_handler_with_reply_buttons(redis: RedisInterface):
     }
     bot.method_calls.clear()
 
-    await _send_message_to_bot(text="one")
+    await telegram.send_message_to_bot(bot, user_id=example_user.id, text="one")
     assert len(bot.method_calls) == 1
     all_send_message_kw = extract_full_kwargs(bot.method_calls["send_message"])
     assert len(all_send_message_kw) == 1
@@ -551,14 +528,16 @@ async def test_menu_handler_with_reply_buttons(redis: RedisInterface):
     }
     bot.method_calls.clear()
 
-    await _send_message_to_bot(text="some random other message not for menu handler")
+    await telegram.send_message_to_bot(
+        bot, user_id=example_user.id, text="some random other message not for menu handler"
+    )
     assert len(catch_all_received_messages) == 1
 
     # back to main menu
-    await _send_message_to_bot(text="<-")
+    await telegram.send_message_to_bot(bot, user_id=example_user.id, text="<-")
     bot.method_calls.clear()
 
-    await _send_message_to_bot(text="no-escape")
+    await telegram.send_message_to_bot(bot, user_id=example_user.id, text="no-escape")
     assert len(bot.method_calls) == 1
     all_send_message_kw = extract_full_kwargs(bot.method_calls["send_message"])
     assert len(all_send_message_kw) == 1
