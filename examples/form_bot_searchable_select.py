@@ -9,6 +9,7 @@ from telebot.runner import BotRunner
 
 from telebot_components.form.field import (
     FormFieldResultFormattingOpts,
+    PlainTextField,
     SearchableSingleSelectField,
     SearchableSingleSelectItem,
 )
@@ -18,7 +19,10 @@ from telebot_components.form.handler import (
     FormHandler,
     FormHandlerConfig,
 )
-from telebot_components.form.helpers.dynamic_enum import EnumOption, create_enum_class
+from telebot_components.form.helpers.dynamic_enum import (
+    EnumOption,
+    create_dynamic_enum_class,
+)
 from telebot_components.redis_utils.emulation import RedisEmulation
 
 COUNTRIES = [
@@ -227,7 +231,7 @@ form = Form(
             name="country",
             required=True,
             query_message="Choose your country (send the name and pick one of the options from the menu).",
-            EnumClass=create_enum_class(
+            EnumClass=create_dynamic_enum_class(
                 "countries",
                 [
                     EnumOption(
@@ -240,7 +244,14 @@ form = Form(
             no_matches_found="No matches found, try another query.",
             choose_from_matches="Pick the option from the menu or try another query",
             result_formatting_opts=FormFieldResultFormattingOpts(descr="Country"),
-        )
+        ),
+        PlainTextField(
+            name="city",
+            required=True,
+            query_message="Enter your city name.",
+            empty_text_error_msg="Please enter some text.",
+            result_formatting_opts=FormFieldResultFormattingOpts(descr="City"),
+        ),
     ]
 )
 
