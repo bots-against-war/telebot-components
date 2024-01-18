@@ -133,7 +133,7 @@ class _FormAction(Enum):
 @dataclass
 class _UserAction:
     send_message_html: Optional[str]
-    send_reply_keyboard: tg.ReplyMarkup = tg.ReplyKeyboardRemove()
+    send_reply_keyboard: tg.ReplyMarkup
     update_inline_markup: Optional[tg.ReplyMarkup] = None
 
 
@@ -206,7 +206,7 @@ class FormState(Generic[FormResultT]):
 
         save_field_value: bool = True
         value: Optional[Any] = None
-        result_msg: Optional[str] = None
+        response_to_user: Optional[str] = None
 
         message_cmd = message.text_content.strip() if message.content_type == "text" else None
         if message_cmd is not None and message_cmd.startswith("/"):
@@ -214,19 +214,19 @@ class FormState(Generic[FormResultT]):
                 return _FormStateUpdateEffect(_FormAction.CANCEL)
             elif message_cmd == form_handler_config.skip_cmd:
                 if not self.current_field.required:
-                    field_ok = True
+                    is_field_ok = True
                 else:
-                    result_msg = any_text_to_str(form_handler_config.cant_skip_field_msg, language)
-                    field_ok = False
+                    response_to_user = any_text_to_str(form_handler_config.cant_skip_field_msg, language)
+                    is_field_ok = False
             elif message_cmd == form_handler_config.keep_cmd:
                 if (
                     form_handler_config.is_keeping_existing_field_value()
                     and self.current_field.name in self.result_so_far
                 ):
-                    field_ok = True
+                    is_field_ok = True
                     save_field_value = False
                 else:
-                    field_ok = False
+                    is_field_ok = False
             else:
                 return _FormStateUpdateEffect(
                     _FormAction.KEEP_GOING,
@@ -238,17 +238,20 @@ class FormState(Generic[FormResultT]):
         else:
             result = await self.current_field.process_message(message, language)
             value = result.parsed_value
-            result_msg = result.response_to_user
-            field_ok = result.parsed_value is not None
+            response_to_user = result.response_to_user
+            is_field_ok = result.parsed_value is not None
             if result.no_form_state_mutation:
                 return _FormStateUpdateEffect(
                     _FormAction.KEEP_GOING,
-                    user_action=_UserAction(send_message_html=result_msg),
+                    user_action=_UserAction(
+                        send_message_html=response_to_user,
+                        send_reply_keyboard=result.response_reply_markup or tg.ReplyKeyboardRemove(),
+                    ),
                 )
 
-        if not field_ok:
-            if result_msg:
-                reply_paragraphs.append(result_msg)
+        if not is_field_ok:
+            if response_to_user:
+                reply_paragraphs.append(response_to_user)
             reply_paragraphs.append(any_text_to_str(form_handler_config.retry_field_msg, language))
             return _FormStateUpdateEffect(
                 _FormAction.KEEP_GOING,
@@ -262,8 +265,8 @@ class FormState(Generic[FormResultT]):
             # result_so_far is typed as immutable Mapping to allow TypedDict's, but here we actually construct it
             self.result_so_far[self.current_field.name] = value  # type: ignore
 
-        if form_handler_config.echo_filled_field and result_msg is not None:
-            reply_paragraphs.append(result_msg)
+        if form_handler_config.echo_filled_field and response_to_user is not None:
+            reply_paragraphs.append(response_to_user)
 
         next_field = await self.current_field.get_next_field_getter()(
             user=message.from_user,
@@ -274,7 +277,12 @@ class FormState(Generic[FormResultT]):
             return _FormStateUpdateEffect(
                 _FormAction.COMPLETE,
                 user_action=(
-                    _UserAction(send_message_html=join_paragraphs(reply_paragraphs)) if reply_paragraphs else None
+                    _UserAction(
+                        send_message_html=join_paragraphs(reply_paragraphs),
+                        send_reply_keyboard=tg.ReplyKeyboardRemove(),
+                    )
+                    if reply_paragraphs
+                    else None
                 ),
             )
         self.current_field = next_field
@@ -412,7 +420,8 @@ class FormHandler(Generic[FormResultT]):
                     user_action=_UserAction(
                         send_message_html=any_text_to_str(
                             self.config.cancelling_because_of_error_template, language
-                        ).format(telegram_html_escape(str(e)))
+                        ).format(telegram_html_escape(str(e))),
+                        send_reply_keyboard=tg.ReplyKeyboardRemove(),
                     ),
                 )
             if state_update_effect.form_action is _FormAction.DO_NOTHING:
