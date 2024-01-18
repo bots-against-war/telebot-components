@@ -12,6 +12,10 @@ from telebot_components.feedback.trello_integration import (
     TrelloIntegration,
     TrelloIntegrationCredentials,
 )
+from telebot_components.form.helpers.dynamic_enum import (
+    EnumOption,
+    create_dynamic_enum_class,
+)
 from telebot_components.utils import (
     LockRegistry,
     emoji_hash,
@@ -294,3 +298,17 @@ def test_trello_card_title(description: str, user_id: int, expected_card_title: 
 
     title = ti._title_with_user_hash(user_id, description)
     assert title == expected_card_title
+
+
+def test_dynamic_enum() -> None:
+    options = [EnumOption("one", 1), EnumOption("two", 2), EnumOption("three", 3)]
+    enum = create_dynamic_enum_class(class_id="test_enum_123", options=options)
+
+    assert len(enum) == 3
+    assert [e.name for e in enum] == ["one", "two", "three"]
+    assert [e.value for e in enum] == [1, 2, 3]
+
+    assert from_yaml_unsafe(to_yaml_unsafe(enum(2))) == enum(2)
+
+    enum_2 = create_dynamic_enum_class(class_id="test_enum_123", options=options)
+    assert enum is enum_2
