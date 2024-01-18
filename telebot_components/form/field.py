@@ -4,6 +4,7 @@ import dataclasses
 import datetime
 import hashlib
 import logging
+import re
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from dataclasses import fields as dataclass_fields
@@ -16,6 +17,7 @@ from typing import (
     ClassVar,
     Dict,
     Generic,
+    Iterable,
     Optional,
     Type,
     TypeVar,
@@ -25,6 +27,7 @@ from typing import (
 
 from telebot import types as tg
 from telebot.callback_data import CallbackData
+from telebot.types import ReplyMarkup
 from telebot.types import constants as tgconst
 
 from telebot_components.form.helpers.calendar_keyboard import (
@@ -163,10 +166,15 @@ class FormFieldResultExportOpts(Generic[FieldValueT]):
 class MessageProcessingResult(Generic[FieldValueT]):
     response_to_user: Optional[str]
     parsed_value: Optional[FieldValueT]
-    no_form_state_mutation: bool
+
+    # special flag to tell the form "we didn't produce any value but it's not an error! it's really ok,
+    # the form is continuing, we are awaiting some further input from the user or something like this"
+    no_form_state_mutation: bool = False
+
+    response_reply_markup: Optional[tg.ReplyMarkup] = None
 
 
-FormFieldT = TypeVar("FormFieldT")
+FormFieldT = TypeVar("FormFieldT", bound="FormField")
 
 
 @dataclass
@@ -197,7 +205,7 @@ class FormField(Generic[FieldValueT]):
         return self.next_field_getter
 
     def custom_value_type(self) -> Optional[Type]:
-        """Used for runtime form result type validation (see Form.validate_result_type). In trivial cases
+        """Used for validation of a form's result type (see Form.validate_result_type). In trivial cases
         like PlainTextField field value type is obtained from introspection, but sometimes this is
         impossible (e.g. in MultipleSelectField), and this method is used.
 
@@ -214,13 +222,11 @@ class FormField(Generic[FieldValueT]):
             return MessageProcessingResult(
                 response_to_user=self.get_result_message(value, language),
                 parsed_value=value,
-                no_form_state_mutation=False,
             )
         except BadFieldValueError as error:
             return MessageProcessingResult(
                 response_to_user=any_text_to_str(error.msg, language),
                 parsed_value=None,
-                no_form_state_mutation=False,
             )
 
     async def get_query_message(self, user: tg.User) -> AnyText:
@@ -453,7 +459,6 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
             return MessageProcessingResult(
                 response_to_user=any_text_to_str(self.attachments_expected_error_msg, language),
                 parsed_value=None,
-                no_form_state_mutation=False,
             )
         media_group_id = message.media_group_id
         self.logger.debug(f"{self.__class__.__name__} got a new media: {media_group_id = } ")
@@ -472,13 +477,11 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
                     return MessageProcessingResult(
                         response_to_user=self.get_result_message([attachment], language),
                         parsed_value=[attachment],
-                        no_form_state_mutation=False,
                     )
                 else:
                     return MessageProcessingResult(
                         response_to_user=any_text_to_str(self.bad_attachment_type_error_msg, language),
                         parsed_value=None,
-                        no_form_state_mutation=False,
                     )
             else:
                 # first message in a media group — waiting for the rest of it
@@ -495,13 +498,11 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
                     return MessageProcessingResult(
                         response_to_user=self.get_result_message(final_attachments, language),
                         parsed_value=final_attachments,
-                        no_form_state_mutation=False,
                     )
                 else:
                     return MessageProcessingResult(
                         response_to_user=any_text_to_str(self.bad_attachment_type_error_msg, language),
                         parsed_value=None,
-                        no_form_state_mutation=False,
                     )
         # second or later message in a media group
         else:
@@ -511,7 +512,6 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
                 return MessageProcessingResult(
                     response_to_user="Something went wrong...",
                     parsed_value=None,
-                    no_form_state_mutation=False,
                 )
             else:
                 self.logger.debug("Second-or-later attachment in a media group, adding it to stash")
@@ -577,6 +577,111 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
 EnumField = SingleSelectField  # backward compatibility
 
 
+def lower_and_cleanup(s: str) -> str:
+    s = s.lower()
+    s = re.sub(r"\s+", " ", s)
+    s = s.strip()
+    return s
+
+
+@dataclass
+class SearchableSingleSelectItem:
+    button_label: AnyText
+    spellings: list[str] = dataclass_field(default_factory=list)
+    fuzzy_search_prepoc: Callable[[str], str] = lower_and_cleanup
+
+    def matchable_texts(self) -> Iterable[str]:
+        if isinstance(self.button_label, str):
+            yield self.button_label
+        else:
+            yield from self.button_label.values()
+        yield from self.spellings
+
+    def matches(self, query: str, exact: bool) -> bool:
+        if not query:
+            return False
+        for t in self.matchable_texts():
+            if t == query or (not exact and self.fuzzy_search_prepoc(query) in self.fuzzy_search_prepoc(t)):
+                return True
+        return False
+
+
+@dataclass
+class SearchableSingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
+    no_matches_found: AnyText
+    choose_from_matches: AnyText
+    menu_row_width: int = 2
+
+    @staticmethod
+    def _as_item(o: Enum) -> SearchableSingleSelectItem:
+        if not isinstance(o.value, SearchableSingleSelectItem):
+            raise TypeError(
+                "All options in searchable single select field's Enum must have "
+                "SearchableSingleSelectOption instance as value"
+            )
+        return o.value
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        for e in self.EnumClass:
+            self._as_item(e)
+
+    def custom_value_type(self) -> Type:
+        return self.EnumClass
+
+    def custom_texts(self) -> list[AnyText]:
+        return [self._as_item(e).button_label for e in self.EnumClass]
+
+    def get_reply_markup(self, language: MaybeLanguage, current_value: Enum | None = None) -> ReplyMarkup:
+        # NOTE: no markup at the start, as in text field; later we set to "search results"
+        return tg.ReplyKeyboardRemove()
+
+    def find_matches(self, text: str, exact: bool) -> list[Enum]:
+        return [e for e in self.EnumClass if self._as_item(e).matches(text, exact=exact)]
+
+    async def process_message(self, message: tg.Message, language: MaybeLanguage) -> MessageProcessingResult[Enum]:
+        exact_matches = self.find_matches(message.text_content, exact=True)
+        if exact_matches:
+            if len(exact_matches) > 1:
+                logger.warning(f"Multiple exact matches found, will select first one: {exact_matches}")
+            return MessageProcessingResult(
+                response_to_user=self.get_result_message(exact_matches[0], language),
+                parsed_value=exact_matches[0],
+            )
+
+        fuzzy_matches = self.find_matches(message.text_content, exact=False)
+        if fuzzy_matches:
+            select_match_kbd = tg.ReplyKeyboardMarkup(
+                resize_keyboard=True,
+                one_time_keyboard=True,
+                row_width=self.menu_row_width,
+            )
+            for fm in fuzzy_matches:
+                select_match_kbd.add(tg.KeyboardButton(any_text_to_str(self._as_item(fm).button_label, language)))
+
+            return MessageProcessingResult(
+                response_to_user=any_text_to_str(self.choose_from_matches, language),
+                response_reply_markup=select_match_kbd,
+                parsed_value=None,
+                no_form_state_mutation=True,
+            )
+        else:
+            return MessageProcessingResult(
+                response_to_user=any_text_to_str(self.no_matches_found, language),
+                parsed_value=None,
+            )
+
+    def value_to_str(self, value: Enum, lang: MaybeLanguage) -> str:
+        item = self._as_item(value)
+        if is_any_text(item.button_label):
+            return any_text_to_str(item.button_label, lang)
+        else:
+            return str(item.button_label)
+
+    def value_id(self, value: Enum) -> str:
+        return value.name
+
+
 INLINE_FIELD_CALLBACK_DATA = CallbackData("fieldname", "payload", prefix="inline_field")
 
 
@@ -609,7 +714,6 @@ class StrictlyInlineFormField(InlineFormField[FieldValueT]):
         return MessageProcessingResult(
             any_text_to_str(self.please_use_inline_menu, language),
             None,
-            no_form_state_mutation=False,
         )
 
 
