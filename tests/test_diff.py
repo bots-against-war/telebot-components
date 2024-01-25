@@ -123,14 +123,38 @@ from telebot_components.utils.diff import DiffAction, diff, patch
                 {"path": [], "action": "remove_range", "start": 12, "values": [3, 4, 5]},
             ],
         ),
+        pytest.param(
+            [*range(100), 1, 2, 3, 4, 5, *range(200)],
+            [*range(100), 100, 4, 300, *range(100)],
+            [
+                {"path": [], "action": "remove_range", "start": 0, "values": list(range(100)) + list(range(1, 6))},
+                {"path": [206], "action": "change", "old": 101, "new": 4},
+                {"path": [207], "action": "change", "old": 102, "new": 300},
+                {"path": [208], "action": "change", "old": 103, "new": 0},
+                {"path": [209], "action": "change", "old": 104, "new": 1},
+                {"path": [], "action": "remove_range", "start": 210, "values": list(range(105, 200))},
+                {"path": [], "action": "add_range", "start": 305, "values": list(range(2, 100))},
+            ],
+        ),
     ],
 )
-def test_diff(a: Any, b: Any, expected_diff: list[DiffAction]) -> None:
+@pytest.mark.parametrize("invert_a_b", [True, False])
+def test_diff(a: Any, b: Any, expected_diff: list[DiffAction], invert_a_b: bool) -> None:
+    # ensuring test isolation for repeated a, b value tests
+    a = copy.deepcopy(a)
+    b = copy.deepcopy(b)
+
+    if invert_a_b:
+        b, a = a, b
+
     a_initial = copy.deepcopy(a)
     b_initial = copy.deepcopy(b)
 
     diff_ = diff(a, b)
-    assert diff_ == expected_diff
+
+    if not invert_a_b:
+        # we only specify expected diff for non-inverted, but everything else we still can check
+        assert diff_ == expected_diff
 
     b_patched = patch(a, diff_)
     assert b_patched == b

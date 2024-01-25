@@ -148,7 +148,10 @@ def diff_gen(
             for opcode, i1, i2, j1, j2 in matcher.get_opcodes():
                 match opcode:
                     case "replace":
-                        overlap_len = min(i2 - i1, j2 - j1)
+                        # if we have "several for several" replacement for small range lengths it's
+                        # reasonable to assume they were modified one-by-one. but for larger lengths
+                        # we fall back to remove-then-delete scheme
+                        overlap_len = min(4, min(i2 - i1, j2 - j1))
                         for delta in range(overlap_len):
                             yield from _recurse(first[i1 + delta], second[j1 + delta], path + [i1 + delta])
 
@@ -159,12 +162,12 @@ def diff_gen(
                                 start=i1 + overlap_len,
                                 values=copy_list(first[i1 + overlap_len : i2]),
                             )
-                        elif j2 - j1 > overlap_len:
+                        if j2 - j1 > overlap_len:
                             yield ModifyListAction(
                                 path=path,
                                 action="add_range",
                                 start=i2,
-                                values=[copy.deepcopy(el) for el in second[j1 + overlap_len : j2]],
+                                values=copy_list(second[j1 + overlap_len : j2]),
                             )
                     case "delete":
                         yield ModifyListAction(
@@ -178,7 +181,7 @@ def diff_gen(
                             path=path,
                             action="add_range",
                             start=i1,
-                            values=[copy.deepcopy(el) for el in second[j1:j2]],
+                            values=copy_list(second[j1:j2]),
                         )
 
         elif are_different(first, second, float_tol):
