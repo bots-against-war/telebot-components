@@ -17,7 +17,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Generator, MutableMapping, MutableSequence
 from dataclasses import dataclass
-from typing import Any, Iterable, Literal, TypedDict, TypeVar
+from typing import Any, Hashable, Iterable, Literal, TypedDict, TypeVar
 
 NUMERIC_TYPES = int, float
 
@@ -28,8 +28,8 @@ Path = list[Key | Index]
 KeyOrIndex = TypeVar("KeyOrIndex", bound=Key | Index)
 
 
-def dotted(path: Path) -> str:
-    return ".".join(str(el) for el in path)
+def hashable(path: Path) -> Hashable:
+    return tuple(path)
 
 
 def are_different(first: Any, second: Any, tolerance: float, absolute_tolerance: float | None = None):
@@ -73,7 +73,7 @@ class _Diff(TypedDict):
 
 
 class ChangeDiff(_Diff):
-    action: Literal["set"]
+    action: Literal["change"]
     old: Any
     new: Any
 
@@ -100,7 +100,7 @@ class InsertRangeDiff(_Diff):
     values: list[Any]
 
 
-Diff = ChangeDiff | AddKeysDiff | RemoveKeysDiff | DeleteRangeDiff | InsertRangeDiff
+DiffItem = ChangeDiff | AddKeysDiff | RemoveKeysDiff | DeleteRangeDiff | InsertRangeDiff
 
 
 def diff_gen(
@@ -108,7 +108,7 @@ def diff_gen(
     second: Diffable,
     ignore: list[Path] | None = None,
     float_tol: float = sys.float_info.epsilon,
-) -> Generator[Diff, None, None]:
+) -> Generator[DiffItem, None, None]:
     def _recurse(first: Diffable, second: Diffable, _path: Path | None = None):
         path = _path.copy() if _path else []
         if isinstance(first, MutableMapping) and isinstance(second, MutableMapping):
@@ -120,8 +120,8 @@ def diff_gen(
             for first_key, first_value in first.items():
                 if is_ignored(first_key):
                     continue
-                if second_value := second.get(first_key):
-                    yield from _recurse(first_value, second_value, _path=path + [first_key])
+                if first_key in second:
+                    yield from _recurse(first_value, second[first_key], _path=path + [first_key])
                 else:
                     removed[first_key] = copy.deepcopy(first_value)
             if removed:
@@ -187,7 +187,7 @@ def diff_gen(
         elif are_different(first, second, float_tol):
             yield ChangeDiff(
                 path=path,
-                action="set",
+                action="change",
                 old=copy.deepcopy(first),
                 new=copy.deepcopy(second),
             )
@@ -200,21 +200,21 @@ def diff(
     second: Diffable,
     ignore: list[Path] | None = None,
     float_tol: float = sys.float_info.epsilon,
-) -> list[Diff]:
+) -> list[DiffItem]:
     return list(diff_gen(first, second, ignore, float_tol))
 
 
-def patch(destination: Diffable, diff: Iterable[Diff], in_place: bool = False) -> Diffable:
+def patch(destination: Diffable, diff: Iterable[DiffItem], in_place: bool = False) -> Diffable:
     if not in_place:
         destination = copy.deepcopy(destination)
 
-    list_idx_offset: dict[str, int] = defaultdict(int)
+    list_idx_offset: dict[Hashable, int] = defaultdict(int)
 
     def _apply_offset(key: KeyOrIndex, path: Path) -> KeyOrIndex:
         if isinstance(key, str):
             return key  # type: ignore
         else:
-            offset = list_idx_offset.get(dotted(path), 0)
+            offset = list_idx_offset.get(hashable(path), 0)
             return offset + key  # type: ignore
 
     def _access_path(source: Diffable, path: Path) -> Any:
@@ -230,7 +230,8 @@ def patch(destination: Diffable, diff: Iterable[Diff], in_place: bool = False) -
 
     for item in diff:
         path = item["path"]
-        if item["action"] == "set":
+        if item["action"] == "change":
+            assert len(path) > 0, "change action must contain non-empty path"
             *container_path, key = path
             container = _access_path(destination, container_path)
             container[_apply_offset(key, container_path)] = item["new"]
@@ -245,7 +246,7 @@ def patch(destination: Diffable, diff: Iterable[Diff], in_place: bool = False) -
             for key in item["removed"]:
                 del container[key]
         else:
-            path_dotted = dotted(path)
+            path_dotted = hashable(path)
             offset = list_idx_offset.get(path_dotted, 0)
             container = _access_path(destination, path)
             assert isinstance(container, list), f'{item["action"]!r} can only be applied to lists'
@@ -264,13 +265,14 @@ if __name__ == "__main__":
 
     def print_diff(a, b):
         print("\n======")
-        print("a:", a)
-        print("b:        ", b)
+        print("a", a, sep="\n")
+        print("b", b, sep="\n")
         diff_ = diff(a, b)
-        print("diff:")
+        print("\ndiff")
         print(*diff_, sep="\n")
+        print()
         b_rec = patch(a, diff_)
-        print("b patched:", b_rec)
+        print("b patched", b_rec, sep="\n")
         print("OK" if b_rec == b else "ERROR")
 
     print_diff(
@@ -285,7 +287,7 @@ if __name__ == "__main__":
 
     print_diff(
         a=["a", "b", "c", {"nested": [{"value": "y", "other": 123}]}, "e", "f"],
-        b=["b", "c", {"nested": [{"value": "x"}]}, "e", "f"],
+        b=["extra", "a", "b", "c", {"nested": [{"value": "x"}]}, "e", "f"],
     )
 
     print_diff(
