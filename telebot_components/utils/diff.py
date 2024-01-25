@@ -151,7 +151,7 @@ def diff_gen(
                         # if we have "several for several" replacement for small range lengths it's
                         # reasonable to assume they were modified one-by-one. but for larger lengths
                         # we fall back to remove-then-delete scheme
-                        overlap_len = min(4, min(i2 - i1, j2 - j1))
+                        overlap_len = min(5, min(i2 - i1, j2 - j1))
                         for delta in range(overlap_len):
                             yield from _recurse(first[i1 + delta], second[j1 + delta], path + [i1 + delta])
 
