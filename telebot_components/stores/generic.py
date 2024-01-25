@@ -19,10 +19,10 @@ class str_able(Protocol):
         ...
 
 
-WrappedFuncT = TypeVar("WrappedFuncT")
-
-
 logger = logging.getLogger(__name__)
+
+
+WrappedFuncT = TypeVar("WrappedFuncT")
 
 
 def redis_retry() -> Callable[[WrappedFuncT], WrappedFuncT]:
@@ -45,6 +45,8 @@ class GenericStore(Generic[T]):
 
     _prefix_registry: ClassVar[set[str]] = set()
 
+    # useful for testing to allow multiple stores with one prefix to be created
+    # never set to True in actual usage!
     RANDOMIZE_PREFIXES: ClassVar[bool] = False
 
     def __post_init__(self):
@@ -278,3 +280,8 @@ class KeyDictStore(GenericStore[ValueT]):
     @redis_retry()
     async def remove_subkey(self, key: str_able, subkey: str_able) -> bool:
         return await self.redis.hdel(self._full_key(key), str(subkey)) == 1
+
+
+@dataclass
+class VersionedValueStore(GenericStore[ValueT]):
+    pass
