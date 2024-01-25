@@ -88,13 +88,6 @@ class RemoveKeysDiff(_Diff):
     removed: dict[str, Any]
 
 
-class ReplaceRangeDiff(_Diff):
-    action: Literal["replace_range"]
-    start: int
-    end: int
-    replacement: list[Any]
-
-
 class DeleteRangeDiff(_Diff):
     action: Literal["delete_range"]
     start: int
@@ -107,7 +100,7 @@ class InsertRangeDiff(_Diff):
     values: list[Any]
 
 
-Diff = ChangeDiff | AddKeysDiff | RemoveKeysDiff | ReplaceRangeDiff | DeleteRangeDiff | InsertRangeDiff
+Diff = ChangeDiff | AddKeysDiff | RemoveKeysDiff | DeleteRangeDiff | InsertRangeDiff
 
 
 def diff_gen(
@@ -160,9 +153,10 @@ def diff_gen(
                 match opcode:
                     case "replace":
                         if i2 - i1 == 1 and j2 - j1 == 1:
-                            # TODO: recursive handlling of longer replacements
+                            # TODO: handling of longer replacements
                             yield from _recurse(first[i1], second[j1], path + [i1])
                         else:
+                            # transform replace to a sequence of delete and insert operations
                             yield DeleteRangeDiff(
                                 path=path,
                                 action="delete_range",
