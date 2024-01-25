@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from telebot_components.utils.diff import DiffItem, diff, patch
+from telebot_components.utils.diff import DiffAction, diff, patch
 
 
 @pytest.mark.parametrize(
@@ -11,46 +11,46 @@ from telebot_components.utils.diff import DiffItem, diff, patch
     [
         pytest.param([], [], []),
         pytest.param({}, {}, []),
-        pytest.param({}, {"a": "b"}, [{"action": "add", "added": {"a": "b"}, "path": []}]),
-        pytest.param({"a": "b"}, {}, [{"action": "remove", "path": [], "removed": {"a": "b"}}]),
+        pytest.param({}, {"a": "b"}, [{"action": "add", "values": {"a": "b"}, "path": []}]),
+        pytest.param({"a": "b"}, {}, [{"action": "remove", "path": [], "values": {"a": "b"}}]),
         pytest.param({"a": "c"}, {"a": "b"}, [{"action": "change", "new": "b", "old": "c", "path": ["a"]}]),
         pytest.param({"a": [1, 2, 3]}, {"a": "b"}, [{"action": "change", "new": "b", "old": [1, 2, 3], "path": ["a"]}]),
         pytest.param({"a": "c"}, {"a": None}, [{"action": "change", "new": None, "old": "c", "path": ["a"]}]),
         pytest.param({"a": "c"}, {"a": "c"}, []),
         pytest.param({"a": 1.0}, {"a": 1.01}, [{"action": "change", "new": 1.01, "old": 1.0, "path": ["a"]}]),
-        pytest.param([], [1], [{"action": "insert_range", "at": 0, "path": [], "values": [1]}]),
-        pytest.param([1, 2, 3], [1], [{"action": "delete_range", "end": 3, "path": [], "start": 1}]),
-        pytest.param([1, 2, 3, 4], [1, 4], [{"action": "delete_range", "end": 3, "path": [], "start": 1}]),
+        pytest.param([], [1], [{"action": "add_range", "start": 0, "path": [], "values": [1]}]),
+        pytest.param([1, 2, 3], [1], [{"action": "remove_range", "path": [], "start": 1, "values": [2, 3]}]),
+        pytest.param([1, 2, 3, 4], [1, 4], [{"action": "remove_range", "path": [], "start": 1, "values": [2, 3]}]),
         pytest.param(
             {"a": [1]},
             {"a": [1, 2, 3]},
-            [{"action": "insert_range", "at": 1, "path": ["a"], "values": [2, 3]}],
+            [{"action": "add_range", "start": 1, "path": ["a"], "values": [2, 3]}],
         ),
         pytest.param(
             {"a": 1, "b": 12},
             {"a": 2, "c": 5},
             [
                 {"path": ["a"], "action": "change", "old": 1, "new": 2},
-                {"path": [], "action": "remove", "removed": {"b": 12}},
-                {"path": [], "action": "add", "added": {"c": 5}},
+                {"path": [], "action": "remove", "values": {"b": 12}},
+                {"path": [], "action": "add", "values": {"c": 5}},
             ],
         ),
         pytest.param(
             ["a", "b", "c", "y", "e", "f", "x"],
             ["b", "c", "x", "e", "f"],
             [
-                {"path": [], "action": "delete_range", "start": 0, "end": 1},
+                {"path": [], "action": "remove_range", "start": 0, "values": ["a"]},
                 {"path": [3], "action": "change", "old": "y", "new": "x"},
-                {"path": [], "action": "delete_range", "start": 6, "end": 7},
+                {"path": [], "action": "remove_range", "start": 6, "values": ["x"]},
             ],
         ),
         pytest.param(
             ["a", "b", "c", {"nested": [{"value": "y", "other": 123}]}, "e", "f"],
             ["extra", "a", "b", "c", {"nested": [{"value": "x"}]}, "e", "f"],
             [
-                {"path": [], "action": "insert_range", "at": 0, "values": ["extra"]},
+                {"path": [], "action": "add_range", "start": 0, "values": ["extra"]},
                 {"path": [3, "nested", 0, "value"], "action": "change", "old": "y", "new": "x"},
-                {"path": [3, "nested", 0], "action": "remove", "removed": {"other": 123}},
+                {"path": [3, "nested", 0], "action": "remove", "values": {"other": 123}},
             ],
         ),
         pytest.param(
@@ -72,10 +72,10 @@ from telebot_components.utils.diff import DiffItem, diff, patch
                 {"id": 6, "name": "Cindy", "likes": 1},
             ],
             [
-                {"path": [], "action": "insert_range", "at": 0, "values": [{"id": -1, "name": "admin", "likes": 0}]},
-                {"path": [], "action": "delete_range", "start": 2, "end": 3},
+                {"path": [], "action": "add_range", "start": 0, "values": [{"id": -1, "name": "admin", "likes": 0}]},
+                {"path": [], "action": "remove_range", "start": 2, "values": [{"id": 2, "name": "Clare", "likes": 15}]},
                 {"path": [4, "likes"], "action": "change", "old": 153, "new": 155},
-                {"path": [], "action": "insert_range", "at": 6, "values": [{"id": 6, "name": "Cindy", "likes": 1}]},
+                {"path": [], "action": "add_range", "start": 6, "values": [{"id": 6, "name": "Cindy", "likes": 1}]},
             ],
         ),
         pytest.param(
@@ -114,9 +114,18 @@ from telebot_components.utils.diff import DiffItem, diff, patch
             {0: {"1": {2: "haha"}}},
             [{"action": "change", "new": "haha", "old": 3, "path": [0, "1", 2]}],
         ),
+        pytest.param(
+            [*range(10), 1, 2, 3, 4, 5, *range(10)],
+            [*range(10), 7, 8, *range(10)],
+            [
+                {"path": [10], "action": "change", "old": 1, "new": 7},
+                {"path": [11], "action": "change", "old": 2, "new": 8},
+                {"path": [], "action": "remove_range", "start": 12, "values": [3, 4, 5]},
+            ],
+        ),
     ],
 )
-def test_diff(a: Any, b: Any, expected_diff: list[DiffItem]):
+def test_diff(a: Any, b: Any, expected_diff: list[DiffAction]) -> None:
     a_initial = copy.deepcopy(a)
     b_initial = copy.deepcopy(b)
 

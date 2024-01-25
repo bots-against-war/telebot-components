@@ -68,39 +68,35 @@ class HashableWrapper:
         return self._guaranteed_hash(self.data)
 
 
-class _Diff(TypedDict):
+class _DiffAction(TypedDict):
     path: Path
 
 
-class ChangeDiff(_Diff):
+class SetPathAction(_DiffAction):
     action: Literal["change"]
     old: Any
     new: Any
 
 
-class AddKeysDiff(_Diff):
-    action: Literal["add"]
-    added: dict[str, Any]
+class ModifyDictAction(_DiffAction):
+    action: Literal["add", "remove"]
+    values: dict[str, Any]
 
 
-class RemoveKeysDiff(_Diff):
-    action: Literal["remove"]
-    removed: dict[str, Any]
-
-
-class DeleteRangeDiff(_Diff):
-    action: Literal["delete_range"]
+class ModifyListAction(_DiffAction):
+    action: Literal["remove_range", "add_range"]
     start: int
-    end: int
-
-
-class InsertRangeDiff(_Diff):
-    action: Literal["insert_range"]
-    at: int
     values: list[Any]
 
 
-DiffItem = ChangeDiff | AddKeysDiff | RemoveKeysDiff | DeleteRangeDiff | InsertRangeDiff
+DiffAction = SetPathAction | ModifyDictAction | ModifyListAction
+
+
+ItemT = TypeVar("ItemT")
+
+
+def copy_list(iterable: Iterable[ItemT]) -> list[ItemT]:
+    return [copy.deepcopy(el) for el in iterable]
 
 
 def diff_gen(
@@ -108,7 +104,7 @@ def diff_gen(
     second: Diffable,
     ignore: list[Path] | None = None,
     float_tol: float = sys.float_info.epsilon,
-) -> Generator[DiffItem, None, None]:
+) -> Generator[DiffAction, None, None]:
     def _recurse(first: Diffable, second: Diffable, _path: Path | None = None):
         path = _path.copy() if _path else []
         if isinstance(first, MutableMapping) and isinstance(second, MutableMapping):
@@ -125,10 +121,10 @@ def diff_gen(
                 else:
                     removed[first_key] = copy.deepcopy(first_value)
             if removed:
-                yield RemoveKeysDiff(
+                yield ModifyDictAction(
                     path=path,
                     action="remove",
-                    removed=removed,
+                    values=removed,
                 )
 
             added: dict[str, Any] = {}
@@ -138,10 +134,10 @@ def diff_gen(
                 if second_key not in first:
                     added[second_key] = copy.deepcopy(second_value)
             if added:
-                yield AddKeysDiff(
+                yield ModifyDictAction(
                     path=path,
                     action="add",
-                    added=added,
+                    values=added,
                 )
         elif isinstance(first, MutableSequence) and isinstance(second, MutableSequence):
             matcher = difflib.SequenceMatcher(
@@ -152,40 +148,41 @@ def diff_gen(
             for opcode, i1, i2, j1, j2 in matcher.get_opcodes():
                 match opcode:
                     case "replace":
-                        if i2 - i1 == 1 and j2 - j1 == 1:
-                            # TODO: handling of longer replacements
-                            yield from _recurse(first[i1], second[j1], path + [i1])
-                        else:
-                            # transform replace to a sequence of delete and insert operations
-                            yield DeleteRangeDiff(
+                        overlap_len = min(i2 - i1, j2 - j1)
+                        for delta in range(overlap_len):
+                            yield from _recurse(first[i1 + delta], second[j1 + delta], path + [i1 + delta])
+
+                        if i2 - i1 > overlap_len:
+                            yield ModifyListAction(
                                 path=path,
-                                action="delete_range",
-                                start=i1,
-                                end=i2,
+                                action="remove_range",
+                                start=i1 + overlap_len,
+                                values=copy_list(first[i1 + overlap_len : i2]),
                             )
-                            yield InsertRangeDiff(
+                        elif j2 - j1 > overlap_len:
+                            yield ModifyListAction(
                                 path=path,
-                                action="insert_range",
-                                at=i1 + 1,
-                                values=[copy.deepcopy(el) for el in second[j1:j2]],
+                                action="add_range",
+                                start=i2,
+                                values=[copy.deepcopy(el) for el in second[j1 + overlap_len : j2]],
                             )
                     case "delete":
-                        yield DeleteRangeDiff(
+                        yield ModifyListAction(
                             path=path,
-                            action="delete_range",
+                            action="remove_range",
                             start=i1,
-                            end=i2,
+                            values=copy_list(first[i1:i2]),
                         )
                     case "insert":
-                        yield InsertRangeDiff(
+                        yield ModifyListAction(
                             path=path,
-                            action="insert_range",
-                            at=i1,
+                            action="add_range",
+                            start=i1,
                             values=[copy.deepcopy(el) for el in second[j1:j2]],
                         )
 
         elif are_different(first, second, float_tol):
-            yield ChangeDiff(
+            yield SetPathAction(
                 path=path,
                 action="change",
                 old=copy.deepcopy(first),
@@ -200,11 +197,11 @@ def diff(
     second: Diffable,
     ignore: list[Path] | None = None,
     float_tol: float = sys.float_info.epsilon,
-) -> list[DiffItem]:
+) -> list[DiffAction]:
     return list(diff_gen(first, second, ignore, float_tol))
 
 
-def patch(destination: Diffable, diff: Iterable[DiffItem], in_place: bool = False) -> Diffable:
+def patch(destination: Diffable, diff: Iterable[DiffAction], in_place: bool = False) -> Diffable:
     if not in_place:
         destination = copy.deepcopy(destination)
 
@@ -238,24 +235,25 @@ def patch(destination: Diffable, diff: Iterable[DiffItem], in_place: bool = Fals
         elif item["action"] == "add":
             container = _access_path(destination, path)
             assert isinstance(container, dict)
-            for key, value in item["added"].items():
+            for key, value in item["values"].items():
                 container[key] = value
         elif item["action"] == "remove":
             container = _access_path(destination, path)
             assert isinstance(container, dict)
-            for key in item["removed"]:
+            for key in item["values"]:
                 del container[key]
         else:
             path_dotted = hashable(path)
             offset = list_idx_offset.get(path_dotted, 0)
             container = _access_path(destination, path)
             assert isinstance(container, list), f'{item["action"]!r} can only be applied to lists'
-            if item["action"] == "delete_range":
-                del container[offset + item["start"] : offset + item["end"]]
-                list_idx_offset[path_dotted] -= item["end"] - item["start"]
-            elif item["action"] == "insert_range":
+            if item["action"] == "remove_range":
+                end = item["start"] + len(item["values"])
+                del container[offset + item["start"] : offset + end]
+                list_idx_offset[path_dotted] -= end - item["start"]
+            elif item["action"] == "add_range":
                 for i, el in enumerate(item["values"]):
-                    container.insert(offset + item["at"] + i, el)
+                    container.insert(offset + item["start"] + i, el)
                 list_idx_offset[path_dotted] += len(item["values"])
 
     return destination
