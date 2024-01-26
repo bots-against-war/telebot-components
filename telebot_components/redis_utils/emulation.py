@@ -170,6 +170,22 @@ class RedisEmulation(RedisInterface):
         end += 1  # redis' `end` is inclusive, python's is exclusive
         return list_[start:end]
 
+    async def llen(self, name: str) -> int:
+        self._evict_if_expired(name)
+        return len(self.lists.get(name, []))
+
+    async def lset(self, name: str, index: int, value: bytes) -> str:
+        self._evict_if_expired(name)
+        list_ = self.lists.get(name)
+        if list_ is None:
+            return "(error) no such key"
+        try:
+            list_[index] = value
+        except Exception:
+            return "(error) index out of range"
+
+        return "OK"
+
     async def exists(self, *names: str) -> int:
         n_exist = 0
         for name in names:
@@ -300,6 +316,14 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def lrange(self, name: str, start: int, end: int) -> list[bytes]:
         self._stack.append(self.redis_em.lrange(name, start, end))
         return []
+
+    async def llen(self, name: str) -> int:
+        self._stack.append(self.redis_em.llen(name))
+        return 0
+
+    async def lset(self, name: str, index: int, value: bytes) -> str:
+        self._stack.append(self.redis_em.lset(name, index, value))
+        return "OK"
 
     async def exists(self, *names: str) -> int:
         self._stack.append(self.redis_em.exists(*names))

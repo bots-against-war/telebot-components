@@ -3,7 +3,14 @@ from typing import Any
 
 import pytest
 
-from telebot_components.utils.diff import DiffAction, diff, patch
+from telebot_components.utils.diff import (
+    DiffAction,
+    InplacePatchImpossible,
+    diff,
+    diff_text,
+    patch,
+    patch_text,
+)
 
 
 @pytest.mark.parametrize(
@@ -132,8 +139,45 @@ from telebot_components.utils.diff import DiffAction, diff, patch
                 {"path": [207], "action": "change", "old": 102, "new": 300},
                 {"path": [208], "action": "change", "old": 103, "new": 0},
                 {"path": [209], "action": "change", "old": 104, "new": 1},
-                {"path": [], "action": "remove_range", "start": 210, "values": list(range(105, 200))},
-                {"path": [], "action": "add_range", "start": 305, "values": list(range(2, 100))},
+                {"path": [210], "action": "change", "old": 105, "new": 2},
+                {"path": [], "action": "remove_range", "start": 211, "values": list(range(106, 200))},
+                {"path": [], "action": "add_range", "start": 305, "values": list(range(3, 100))},
+            ],
+        ),
+        pytest.param(1, 2, [{"action": "change", "new": 2, "old": 1, "path": []}]),
+        pytest.param(
+            1,
+            {"complex": "data"},
+            [{"action": "change", "new": {"complex": "data"}, "old": 1, "path": []}],
+        ),
+        pytest.param(
+            {
+                "message": "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod "
+                + "tempor incididunt ut labore et dolore magna aliqua."
+            },
+            {
+                "message": "Lorem ipsum dolor sit, consectetur adipiscing elit, sed do eiusmod "
+                + "tempor incididunt ut lalalala 123 labore et dolore, magna!"
+            },
+            [
+                {
+                    "path": ["message"],
+                    "action": "patch_string",
+                    "delta": "=21\t-5\t=69\t+lalala 123 la\t=14\t+,\t=6\t-8\t+!",
+                }
+            ],
+        ),
+        pytest.param(
+            "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod "
+            + "tempor incididunt ut labore et dolore magna aliqua.",
+            "Lorem ipsum dolor sit, consectetur adipiscing elit, sed do eiusmod "
+            + "tempor incididunt ut lalalala 123 labore et dolore, magna!",
+            [
+                {
+                    "path": [],
+                    "action": "patch_string",
+                    "delta": "=21\t-5\t=69\t+lalala 123 la\t=14\t+,\t=6\t-8\t+!",
+                }
             ],
         ),
     ],
@@ -161,6 +205,26 @@ def test_diff(a: Any, b: Any, expected_diff: list[DiffAction], invert_a_b: bool)
     assert a == a_initial
     assert b == b_initial
 
-    patch(a, diff_, in_place=True)
+    try:
+        patch(a, diff_, in_place=True)
+    except InplacePatchImpossible as e:
+        a = e.patched_value
     assert a == b
     assert a == b_initial
+
+
+@pytest.mark.parametrize(
+    "a, b",
+    [
+        pytest.param("aaaa", "bbbb"),
+        pytest.param("hello", "Hello!"),
+        pytest.param("", ""),
+        pytest.param("aaa", ""),
+        pytest.param("", "abcdef"),
+    ],
+)
+def test_diff_text(a: str, b: str) -> None:
+    diff_ = diff_text(a, b)
+    b_patched = patch_text(a, diff_)
+    assert b_patched == b
+    assert len(diff_) <= len(a) + len(b) + 1

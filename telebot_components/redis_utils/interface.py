@@ -103,7 +103,7 @@ class RedisInterface(ABC):
 
     @abstractmethod
     async def rpush(self, name: str, *values: bytes) -> int:
-        """Push ``values`` onto the tail of the list ``name`` and return list length the operation"""
+        """Push ``values`` onto the tail of the list ``name`` and return list length after the operation"""
         ...
 
     @abstractmethod
@@ -130,6 +130,23 @@ class RedisInterface(ABC):
         Python slicing notation
         """
         ...
+
+    @abstractmethod
+    async def llen(self, name: str) -> int:
+        """
+        Return the length of the list ``name``
+
+        For more information see https://redis.io/commands/llen
+        """
+        ...
+
+    @abstractmethod
+    async def lset(self, name: str, index: int, value: bytes) -> str:
+        """
+        Set element at ``index`` of list ``name`` to ``value``
+
+        For more information see https://redis.io/commands/lset
+        """
 
     @abstractmethod
     async def exists(self, *names: str) -> int:
@@ -187,7 +204,7 @@ class RedisInterface(ABC):
         ...
 
 
-RedisCmdReturn = Union[bytes, list[bytes], None, int]
+RedisCmdReturn = Union[bytes, list[bytes], None, int, str]
 
 
 class RedisPipelineInterface(RedisInterface):

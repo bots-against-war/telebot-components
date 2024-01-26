@@ -11,6 +11,7 @@ with the main changes:
 
 
 import copy
+import dataclasses
 import difflib
 import math
 import sys
@@ -19,9 +20,11 @@ from collections.abc import Generator, MutableMapping, MutableSequence
 from dataclasses import dataclass
 from typing import Any, Hashable, Iterable, Literal, TypedDict, TypeVar
 
+from diff_match_patch import diff_match_patch  # type: ignore
+
 NUMERIC_TYPES = int, float
 
-Diffable = MutableMapping | MutableSequence
+Diffable = MutableMapping | MutableSequence | str | float
 Key = str
 Index = int
 Path = list[Key | Index]
@@ -78,6 +81,11 @@ class SetPathAction(_DiffAction):
     new: Any
 
 
+class PatchStringAction(_DiffAction):
+    action: Literal["patch_string"]
+    delta: str
+
+
 class ModifyDictAction(_DiffAction):
     action: Literal["add", "remove"]
     values: dict[str, Any]
@@ -89,7 +97,7 @@ class ModifyListAction(_DiffAction):
     values: list[Any]
 
 
-DiffAction = SetPathAction | ModifyDictAction | ModifyListAction
+DiffAction = SetPathAction | PatchStringAction | ModifyDictAction | ModifyListAction
 
 
 ItemT = TypeVar("ItemT")
@@ -99,11 +107,30 @@ def copy_list(iterable: Iterable[ItemT]) -> list[ItemT]:
     return [copy.deepcopy(el) for el in iterable]
 
 
+# google's diff-match-patch wrapper functions
+
+
+_dmp = diff_match_patch()
+
+
+def diff_text(first: str, second: str) -> str:
+    str_diff = _dmp.diff_main(first, second)
+    _dmp.diff_cleanupEfficiency(str_diff)
+    return _dmp.diff_toDelta(str_diff)
+
+
+def patch_text(first: str, text_diff: str) -> str:
+    dmp_diff = _dmp.diff_fromDelta(first, text_diff)
+    patches = _dmp.patch_make(first, dmp_diff)
+    return _dmp.patch_apply(patches, first)[0]
+
+
 def diff_gen(
     first: Diffable,
     second: Diffable,
     ignore: list[Path] | None = None,
     float_tol: float = sys.float_info.epsilon,
+    diff_strings: bool = True,
 ) -> Generator[DiffAction, None, None]:
     def _recurse(first: Diffable, second: Diffable, _path: Path | None = None):
         path = _path.copy() if _path else []
@@ -183,7 +210,12 @@ def diff_gen(
                             start=i1,
                             values=copy_list(second[j1:j2]),
                         )
-
+        elif isinstance(first, str) and isinstance(second, str) and len(first) > 32 and len(second) > 32:
+            yield PatchStringAction(
+                path=path,
+                action="patch_string",
+                delta=diff_text(first, second),
+            )
         elif are_different(first, second, float_tol):
             yield SetPathAction(
                 path=path,
@@ -202,6 +234,11 @@ def diff(
     float_tol: float = sys.float_info.epsilon,
 ) -> list[DiffAction]:
     return list(diff_gen(first, second, ignore, float_tol))
+
+
+@dataclasses.dataclass
+class InplacePatchImpossible(Exception):
+    patched_value: Diffable
 
 
 def patch(destination: Diffable, diff: Iterable[DiffAction], in_place: bool = False) -> Diffable:
@@ -231,10 +268,28 @@ def patch(destination: Diffable, diff: Iterable[DiffAction], in_place: bool = Fa
     for item in diff:
         path = item["path"]
         if item["action"] == "change":
-            assert len(path) > 0, "change action must contain non-empty path"
+            patched_value = item["new"]
+            if len(path) == 0:
+                if in_place:
+                    raise InplacePatchImpossible(patched_value=patched_value)
+                else:
+                    return patched_value
             *container_path, key = path
             container = _access_path(destination, container_path)
-            container[_apply_offset(key, container_path)] = item["new"]
+            container[_apply_offset(key, container_path)] = patched_value
+        elif item["action"] == "patch_string":
+            if len(path) == 0:
+                if not isinstance(destination, str):
+                    raise ValueError("Top-level patch string on non-string destination")
+                patched_value = patch_text(destination, item["delta"])
+                if in_place:
+                    raise InplacePatchImpossible(patched_value=patched_value)
+                else:
+                    return patched_value
+            *container_path, key = path
+            container = _access_path(destination, container_path)
+            key = _apply_offset(key, container_path)
+            container[key] = patch_text(container[key], item["delta"])
         elif item["action"] == "add":
             container = _access_path(destination, path)
             assert isinstance(container, dict)
@@ -309,4 +364,9 @@ if __name__ == "__main__":
             {"id": 5, "name": "Carl", "likes": 5},
             {"id": 6, "name": "Cindy", "likes": 1},
         ],
+    )
+
+    print_diff(
+        a="The patch algorithms generate (using patch_toText()) and parse (using patch_fromText()) a textual diff format which looks a lot like the Unidiff format.",
+        b="The patch algorithms generate and parse an awesome textual diff format which looks a lot like the Unidiff format!!!",
     )

@@ -1,7 +1,7 @@
 import random
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Callable, Optional, TypedDict
+from typing import Any, Callable, Optional, Type, TypedDict
 from uuid import uuid4
 
 import pytest
@@ -15,6 +15,7 @@ from telebot_components.stores.generic import (
     KeyListStore,
     KeySetStore,
     KeyValueStore,
+    KeyVersionedValueStore,
     SetStore,
     str_able,
 )
@@ -319,3 +320,23 @@ async def test_key_dict_store(redis: RedisInterface):
     await user_data_store.remove_subkey("good", "9")
     assert set(await user_data_store.list_subkeys("good")) == {"1"}
     assert await user_data_store.get_subkey("good", "9") is None
+
+
+@pytest.mark.parametrize("store_class", [KeyValueStore, KeyVersionedValueStore])
+async def test_key_versioned_value_store(
+    redis: RedisInterface,
+    store_class: Type[KeyValueStore] | Type[KeyVersionedValueStore],
+    key: str_able,
+) -> None:
+    store = store_class(
+        name="testing-versioning-compat",
+        prefix=generate_str(),
+        redis=redis,
+    )
+    assert await store.load(key) is None
+    value = generate_str()
+    assert await store.save(key, value)
+    assert await store.load(key) == value
+    assert await store.drop(key)
+    assert await store.load(key) is None
+    assert await store.save(key, value)

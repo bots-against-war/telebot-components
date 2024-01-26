@@ -13,20 +13,20 @@ from telebot_components.redis_utils.emulation import (
     RedisEmulation,
 )
 from telebot_components.redis_utils.interface import RedisInterface
-from telebot_components.stores.generic import GenericStore
+from telebot_components.stores.generic import SingleKeyStore
 from tests.utils import TimeSupplier, using_real_redis
 
 # HACK: this allows creating multiple distinct stores with the same prefix
-GenericStore.RANDOMIZE_PREFIXES = True
+SingleKeyStore.RANDOMIZE_PREFIXES = True
 
 
 # for tests that need normal store behavior (two instances with the same prefix point to the same data)
 # can use this hacky fixture
 @pytest.fixture
 def normal_store_behavior() -> Generator[None, None, None]:
-    GenericStore.RANDOMIZE_PREFIXES = False
+    SingleKeyStore.RANDOMIZE_PREFIXES = False
     yield
-    GenericStore.RANDOMIZE_PREFIXES = True
+    SingleKeyStore.RANDOMIZE_PREFIXES = True
 
 
 @pytest.fixture(params=["ephemeral_emulation", "persistent_emulation"] if not using_real_redis() else ["real"])
