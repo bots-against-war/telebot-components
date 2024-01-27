@@ -77,7 +77,6 @@ class _DiffAction(TypedDict):
 
 class SetPathAction(_DiffAction):
     action: Literal["change"]
-    old: Any
     new: Any
 
 
@@ -86,18 +85,29 @@ class PatchStringAction(_DiffAction):
     delta: str
 
 
-class ModifyDictAction(_DiffAction):
-    action: Literal["add", "remove"]
-    values: dict[str, Any]
+class AddKeysAction(_DiffAction):
+    action: Literal["add"]
+    items: dict[str, Any]
 
 
-class ModifyListAction(_DiffAction):
-    action: Literal["remove_range", "add_range"]
+class RemoveKeysAction(_DiffAction):
+    action: Literal["remove"]
+    keys: list[str]
+
+
+class AddRangeAction(_DiffAction):
+    action: Literal["add_range"]
     start: int
     values: list[Any]
 
 
-DiffAction = SetPathAction | PatchStringAction | ModifyDictAction | ModifyListAction
+class RemoveRangeAction(_DiffAction):
+    action: Literal["remove_range"]
+    start: int
+    length: int
+
+
+DiffAction = SetPathAction | PatchStringAction | AddKeysAction | RemoveKeysAction | AddRangeAction | RemoveRangeAction
 
 
 ItemT = TypeVar("ItemT")
@@ -148,10 +158,10 @@ def diff_gen(
                 else:
                     removed[first_key] = copy.deepcopy(first_value)
             if removed:
-                yield ModifyDictAction(
+                yield RemoveKeysAction(
                     path=path,
                     action="remove",
-                    values=removed,
+                    keys=list(removed.keys()),
                 )
 
             added: dict[str, Any] = {}
@@ -161,10 +171,10 @@ def diff_gen(
                 if second_key not in first:
                     added[second_key] = copy.deepcopy(second_value)
             if added:
-                yield ModifyDictAction(
+                yield AddKeysAction(
                     path=path,
                     action="add",
-                    values=added,
+                    items=added,
                 )
         elif isinstance(first, MutableSequence) and isinstance(second, MutableSequence):
             matcher = difflib.SequenceMatcher(
@@ -183,28 +193,28 @@ def diff_gen(
                             yield from _recurse(first[i1 + delta], second[j1 + delta], path + [i1 + delta])
 
                         if i2 - i1 > overlap_len:
-                            yield ModifyListAction(
+                            yield RemoveRangeAction(
                                 path=path,
                                 action="remove_range",
                                 start=i1 + overlap_len,
-                                values=copy_list(first[i1 + overlap_len : i2]),
+                                length=i2 - (i1 + overlap_len),
                             )
                         if j2 - j1 > overlap_len:
-                            yield ModifyListAction(
+                            yield AddRangeAction(
                                 path=path,
                                 action="add_range",
                                 start=i2,
                                 values=copy_list(second[j1 + overlap_len : j2]),
                             )
                     case "delete":
-                        yield ModifyListAction(
+                        yield RemoveRangeAction(
                             path=path,
                             action="remove_range",
                             start=i1,
-                            values=copy_list(first[i1:i2]),
+                            length=i2 - i1,
                         )
                     case "insert":
-                        yield ModifyListAction(
+                        yield AddRangeAction(
                             path=path,
                             action="add_range",
                             start=i1,
@@ -220,7 +230,6 @@ def diff_gen(
             yield SetPathAction(
                 path=path,
                 action="change",
-                old=copy.deepcopy(first),
                 new=copy.deepcopy(second),
             )
 
@@ -293,12 +302,12 @@ def patch(destination: Diffable, diff: Iterable[DiffAction], in_place: bool = Fa
         elif item["action"] == "add":
             container = _access_path(destination, path)
             assert isinstance(container, dict)
-            for key, value in item["values"].items():
+            for key, value in item["items"].items():
                 container[key] = value
         elif item["action"] == "remove":
             container = _access_path(destination, path)
             assert isinstance(container, dict)
-            for key in item["values"]:
+            for key in item["keys"]:
                 del container[key]
         else:
             path_dotted = hashable(path)
@@ -306,7 +315,7 @@ def patch(destination: Diffable, diff: Iterable[DiffAction], in_place: bool = Fa
             container = _access_path(destination, path)
             assert isinstance(container, list), f'{item["action"]!r} can only be applied to lists'
             if item["action"] == "remove_range":
-                end = item["start"] + len(item["values"])
+                end = item["start"] + item["length"]
                 del container[offset + item["start"] : offset + end]
                 list_idx_offset[path_dotted] -= end - item["start"]
             elif item["action"] == "add_range":
@@ -367,6 +376,12 @@ if __name__ == "__main__":
     )
 
     print_diff(
-        a="The patch algorithms generate (using patch_toText()) and parse (using patch_fromText()) a textual diff format which looks a lot like the Unidiff format.",
-        b="The patch algorithms generate and parse an awesome textual diff format which looks a lot like the Unidiff format!!!",
+        a=(
+            "The patch algorithms generate (using patch_toText()) and parse "
+            + "(using patch_fromText()) a textual diff format which looks a lot like the Unidiff format."
+        ),
+        b=(
+            "The patch algorithms generate and parse an awesome textual diff "
+            + "format which looks a lot like the Unidiff format!!!"
+        ),
     )

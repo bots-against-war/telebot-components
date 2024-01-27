@@ -151,6 +151,7 @@ async def create_key_func(redis: RedisInterface, request: fixtures.SubRequest) -
         pytest.param(["one", "two", "three", "four"], "*", [b"one", b"two", b"three", b"four"]),
     ],
 )
+@pytest_skip_on_real_redis
 async def test_keys(
     keys: list[str],
     pattern: str,

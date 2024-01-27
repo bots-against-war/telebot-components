@@ -21,7 +21,13 @@ import tenacity
 from telebot_components.constants.times import MONTH
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.utils import tail
-from telebot_components.utils.diff import Diffable, DiffAction, diff, patch
+from telebot_components.utils.diff import (
+    Diffable,
+    DiffAction,
+    InplacePatchImpossible,
+    diff,
+    patch,
+)
 
 T = TypeVar("T")
 
@@ -179,7 +185,6 @@ class KeyListStore(SingleKeyStore[ItemT]):
             after_push_len, *_ = await pipe.execute()
             return cast(int, after_push_len)
 
-    @redis_retry()
     async def all(self, key: str_able) -> list[ItemT]:
         return await self.last(key, n=0) or []
 
@@ -367,7 +372,7 @@ class VersionCorruptionError(Exception):
 
 
 @dataclasses.dataclass
-class KeyVersionedValueStore(PrefixedStore, Generic[VersionMetaT, ValueT]):
+class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
     """
     Key-value store for structured data with multiple versions of the value available.
     Note that diffing is performed on data structure, not serialized value. So, for simple
@@ -400,8 +405,8 @@ class KeyVersionedValueStore(PrefixedStore, Generic[VersionMetaT, ValueT]):
     async def list_keys(self) -> list[str]:
         return await self._version_store.list_keys()
 
-    async def load_raw_versions(self, key: str_able, from_offset: int) -> list[Version[VersionMetaT]]:
-        return await self._version_store.all(key)
+    async def load_raw_versions(self, key: str_able, start_offset: int) -> list[Version[VersionMetaT]]:
+        return await self._version_store.last(key, n=1 + start_offset) or []
 
     def _iter_versions(
         self,
@@ -425,7 +430,10 @@ class KeyVersionedValueStore(PrefixedStore, Generic[VersionMetaT, ValueT]):
         for i, version in enumerate(reversed(versions[:-1])):
             backdiff = version.backdiff
             if backdiff is not None:
-                patch(current, backdiff, in_place=True)
+                try:
+                    patch(current, backdiff, in_place=True)
+                except InplacePatchImpossible as e:
+                    current = e.patched_value
                 yield current, backdiff
             else:
                 if version.snapshot is None:
@@ -440,15 +448,17 @@ class KeyVersionedValueStore(PrefixedStore, Generic[VersionMetaT, ValueT]):
                 yield current, backdiff
 
     async def _convert_snapshots_to_diffs(self, key: str_able) -> None:
-        versions = await self._version_store.all(key)
-        for offset, (_, backdiff) in enumerate(self._iter_versions(versions, key=str(key))):
-            if backdiff is None:
-                continue
-            index = len(versions) - 1 - offset
-            current_version = versions[index]
-            if current_version.backdiff is None:
-                self.logger.info(f"Converting snapshot -> backdiff at offset {offset} (#{index})")
-                try:
+        try:
+            self.logger.info("Converting snapshots to diff")
+            versions = await self._version_store.all(key)
+            self.logger.info(f"Got {len(versions) = }")
+            for offset, (_, backdiff) in enumerate(self._iter_versions(versions, key=str(key))):
+                if backdiff is None:
+                    continue
+                index = len(versions) - 1 - offset
+                current_version = versions[index]
+                if current_version.backdiff is None:
+                    self.logger.info(f"Converting snapshot -> backdiff at offset {offset} (#{index})")
                     await self._version_store.set(
                         key,
                         index,
@@ -458,8 +468,8 @@ class KeyVersionedValueStore(PrefixedStore, Generic[VersionMetaT, ValueT]):
                             meta=current_version.meta,
                         ),
                     )
-                except Exception:
-                    self.logger.exception("Error converting snapshot to backdiff")
+        except Exception:
+            self.logger.exception("Error converting values from snapshots to diffs")
 
     async def save(self, key: str_able, value: ValueT, meta: VersionMetaT | None = None) -> bool:
         added = await self._version_store.push(
@@ -475,7 +485,7 @@ class KeyVersionedValueStore(PrefixedStore, Generic[VersionMetaT, ValueT]):
         snapshot_to_diff_task.add_done_callback(self._background_tasks.discard)
         return added == 1
 
-    async def version_count(self, key: str_able) -> int:
+    async def count_versions(self, key: str_able) -> int:
         return await self._version_store.length(key)
 
     async def load_version(self, key: str_able, offset: int = 0) -> tuple[ValueT, VersionMetaT | None] | None:
@@ -483,11 +493,13 @@ class KeyVersionedValueStore(PrefixedStore, Generic[VersionMetaT, ValueT]):
         if versions is None:
             return None
         version_snapshot, _ = next(tail(1, self._iter_versions(versions, key=str(key))))
-        return (self.snapshot_loader(version_snapshot), versions[0].meta) if version_snapshot else None
+        return self.snapshot_loader(version_snapshot), versions[0].meta
 
     async def load(self, key: str_able) -> ValueT | None:
-        """KeyValueStore-compatible method, see also load_with_version_meta"""
+        """KeyValueStore-compatible method, see also load_version"""
         if res := await self.load_version(key, offset=0):
             return res[0]
         else:
             return None
+
+    # TODO: revert versions

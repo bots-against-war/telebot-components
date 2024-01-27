@@ -34,7 +34,7 @@ async def redis(request: pytest.FixtureRequest) -> AsyncGenerator[RedisInterface
     redis_type = request.param
     if redis_type == "real":
         # FIXME: the cleanup does not work properly for some reason...
-        redis = Redis.from_url(os.getenv("REDIS_URL"))
+        redis = Redis.from_url(os.environ["REDIS_URL"])
         # await redis.flushall()
         for db_index in range(1, 11):
             await redis.select(db_index)
@@ -43,6 +43,7 @@ async def redis(request: pytest.FixtureRequest) -> AsyncGenerator[RedisInterface
                 break  # found empty database
         else:
             raise RuntimeError("Couldn't found an empy Redis DB for testing")
+        # await redis.select(1)
 
         yield redis
 

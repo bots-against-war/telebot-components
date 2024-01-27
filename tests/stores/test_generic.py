@@ -1,5 +1,7 @@
+import asyncio
+import copy
+import dataclasses
 import random
-from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Callable, Optional, Type, TypedDict
 from uuid import uuid4
@@ -17,6 +19,8 @@ from telebot_components.stores.generic import (
     KeyValueStore,
     KeyVersionedValueStore,
     SetStore,
+    Snapshot,
+    Version,
     str_able,
 )
 from tests.utils import TimeSupplier, generate_str, using_real_redis
@@ -32,7 +36,7 @@ def expiration_time(request: fixtures.SubRequest) -> Optional[timedelta]:
     return request.param
 
 
-@dataclass
+@dataclasses.dataclass
 class CustomStrableKey:
     data: str
 
@@ -94,7 +98,7 @@ async def test_key_value_store_json_serialization(redis: RedisInterface, key: st
 
 
 async def test_key_value_store_custom_serialization(redis: RedisInterface, key: str_able):
-    @dataclass
+    @dataclasses.dataclass
     class UserData:
         name: str
         age: int
@@ -323,7 +327,7 @@ async def test_key_dict_store(redis: RedisInterface):
 
 
 @pytest.mark.parametrize("store_class", [KeyValueStore, KeyVersionedValueStore])
-async def test_key_versioned_value_store(
+async def test_key_versioned_value_store_compat(
     redis: RedisInterface,
     store_class: Type[KeyValueStore] | Type[KeyVersionedValueStore],
     key: str_able,
@@ -340,3 +344,191 @@ async def test_key_versioned_value_store(
     assert await store.drop(key)
     assert await store.load(key) is None
     assert await store.save(key, value)
+
+
+@dataclasses.dataclass
+class Thing:
+    name: str
+    parts: list["Thing"] = dataclasses.field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, dict: dict) -> "Thing":
+        return Thing(
+            name=dict["name"],
+            parts=[Thing.from_dict(el) for el in dict["parts"]],
+        )
+
+
+@dataclasses.dataclass
+class Inventory:
+    name: str
+    stock: list[Thing]
+    ordered: list[Thing]
+
+    def to_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, snapshot: Snapshot) -> "Inventory":
+        if not isinstance(snapshot, dict):
+            raise TypeError()
+        return Inventory(
+            name=snapshot["name"],
+            stock=[Thing.from_dict(el) for el in snapshot["stock"]],
+            ordered=[Thing.from_dict(el) for el in snapshot["ordered"]],
+        )
+
+
+async def test_key_versioned_store(redis: RedisInterface) -> None:
+    versioned_store = KeyVersionedValueStore[Inventory, None](
+        name="test",
+        prefix=generate_str(),
+        redis=redis,
+        snapshot_dumper=Inventory.to_dict,
+        snapshot_loader=Inventory.from_dict,
+    )
+
+    expected_versions: list[Inventory] = []
+
+    async def save_version_and_check(inv: Inventory):
+        inv = copy.deepcopy(inv)
+        expected_versions.append(inv)
+        await versioned_store.save("some_key", inv, meta=None)
+
+        assert len(expected_versions) == await versioned_store.count_versions("some_key")
+
+        # await asyncio.sleep(0.1)
+        # print(await versioned_store.load_raw_versions("some_key", start_offset=100))
+
+        for offset, ver in enumerate(reversed(expected_versions)):
+            res = await versioned_store.load_version("some_key", offset=offset)
+            assert res is not None
+            ver_loaded, meta = res
+            assert ver == ver_loaded
+            assert meta is None
+
+        res = await versioned_store.load_version("some_key", offset=len(expected_versions) + 1)
+        assert res is not None
+        ver_loaded, meta = res
+        assert ver == ver_loaded
+        assert ver_loaded == expected_versions[0]
+        assert meta is None
+
+    inv = Inventory(name="example", stock=[], ordered=[])
+    await save_version_and_check(inv)
+
+    inv.name = "other name"
+    await save_version_and_check(inv)
+
+    inv.ordered.append(
+        Thing(
+            "pc",
+            parts=[
+                Thing("cpu"),
+                Thing("memory"),
+                Thing("gpu"),
+            ],
+        )
+    )
+    await save_version_and_check(inv)
+
+    inv.ordered.append(Thing("pen"))
+    await save_version_and_check(inv)
+
+    inv.ordered[0].parts[2].parts.append(Thing("fan"))
+    await save_version_and_check(inv)
+
+    pc = inv.ordered.pop(0)
+    inv.stock.append(pc)
+    await save_version_and_check(inv)
+
+    inv.stock[0].parts[1].name = "ok"
+    inv.stock.insert(0, Thing("book"))
+    await save_version_and_check(inv)
+
+    await asyncio.sleep(0.1)
+    assert await versioned_store.load_raw_versions("new_key", start_offset=5) == []
+    assert await versioned_store.load_raw_versions(
+        "some_key",
+        start_offset=await versioned_store.count_versions("some_key"),
+    ) == [
+        Version(
+            snapshot=None,
+            backdiff=[{"path": ["name"], "action": "change", "new": "example"}],
+            meta=None,
+        ),
+        Version(
+            snapshot=None,
+            backdiff=[{"path": ["ordered"], "action": "remove_range", "start": 0, "length": 1}],
+            meta=None,
+        ),
+        Version(
+            snapshot=None,
+            backdiff=[{"path": ["ordered"], "action": "remove_range", "start": 1, "length": 1}],
+            meta=None,
+        ),
+        Version(
+            snapshot=None,
+            backdiff=[{"path": ["ordered", 0, "parts", 2, "parts"], "action": "remove_range", "start": 0, "length": 1}],
+            meta=None,
+        ),
+        Version(
+            snapshot=None,
+            backdiff=[
+                {"path": ["stock"], "action": "remove_range", "start": 0, "length": 1},
+                {
+                    "path": ["ordered"],
+                    "action": "add_range",
+                    "start": 0,
+                    "values": [
+                        {
+                            "name": "pc",
+                            "parts": [
+                                {"name": "cpu", "parts": []},
+                                {"name": "memory", "parts": []},
+                                {"name": "gpu", "parts": [{"name": "fan", "parts": []}]},
+                            ],
+                        }
+                    ],
+                },
+            ],
+            meta=None,
+        ),
+        Version(
+            snapshot=None,
+            backdiff=[
+                {"path": ["stock", 0, "name"], "action": "change", "new": "pc"},
+                {
+                    "path": ["stock", 0, "parts"],
+                    "action": "add_range",
+                    "start": 0,
+                    "values": [
+                        {"name": "cpu", "parts": []},
+                        {"name": "memory", "parts": []},
+                        {"name": "gpu", "parts": [{"name": "fan", "parts": []}]},
+                    ],
+                },
+                {"path": ["stock"], "action": "remove_range", "start": 1, "length": 1},
+            ],
+            meta=None,
+        ),
+        Version(
+            snapshot={
+                "name": "other name",
+                "stock": [
+                    {"name": "book", "parts": []},
+                    {
+                        "name": "pc",
+                        "parts": [
+                            {"name": "cpu", "parts": []},
+                            {"name": "ok", "parts": []},
+                            {"name": "gpu", "parts": [{"name": "fan", "parts": []}]},
+                        ],
+                    },
+                ],
+                "ordered": [{"name": "pen", "parts": []}],
+            },
+            backdiff=None,
+            meta=None,
+        ),
+    ]
