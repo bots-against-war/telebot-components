@@ -397,21 +397,20 @@ async def test_key_versioned_store(redis: RedisInterface) -> None:
 
         assert len(expected_versions) == await versioned_store.count_versions("some_key")
 
-        # await asyncio.sleep(0.1)
-        # print(await versioned_store.load_raw_versions("some_key", start_offset=100))
-
-        for offset, ver in enumerate(reversed(expected_versions)):
-            res = await versioned_store.load_version("some_key", offset=offset)
-            assert res is not None
+        for version_number, ver in enumerate(expected_versions):
+            res = await versioned_store.load_version("some_key", version=version_number)
+            assert res is not None, f"failed to load version {version_number}"
             ver_loaded, meta = res
             assert ver == ver_loaded
             assert meta is None
 
-        res = await versioned_store.load_version("some_key", offset=len(expected_versions) + 1)
+        res = await versioned_store.load_version("some_key", version=len(expected_versions) + 1)
+        assert res is None
+
+        res = await versioned_store.load_version("some_key", version=-1)
         assert res is not None
         ver_loaded, meta = res
-        assert ver == ver_loaded
-        assert ver_loaded == expected_versions[0]
+        assert ver_loaded == expected_versions[-1]
         assert meta is None
 
     inv = Inventory(name="example", stock=[], ordered=[])
@@ -446,12 +445,9 @@ async def test_key_versioned_store(redis: RedisInterface) -> None:
     inv.stock.insert(0, Thing("book"))
     await save_version_and_check(inv)
 
-    await asyncio.sleep(0.1)
-    assert await versioned_store.load_raw_versions("new_key", start_offset=5) == []
-    assert await versioned_store.load_raw_versions(
-        "some_key",
-        start_offset=await versioned_store.count_versions("some_key"),
-    ) == [
+    await asyncio.sleep(0.1)  # to let normalization happen in the background
+    assert await versioned_store.load_raw_versions("new_key") == []
+    assert await versioned_store.load_raw_versions("some_key") == [
         Version(
             snapshot=None,
             backdiff=[{"path": ["name"], "action": "change", "new": "example"}],

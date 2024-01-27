@@ -186,15 +186,15 @@ class KeyListStore(SingleKeyStore[ItemT]):
             return cast(int, after_push_len)
 
     async def all(self, key: str_able) -> list[ItemT]:
-        return await self.last(key, n=0) or []
+        return await self.tail(key, start=0) or []
 
     @redis_retry()
     async def length(self, key: str_able) -> int:
         return await self.redis.llen(self._full_key(key))
 
     @redis_retry()
-    async def last(self, key: str_able, n: int) -> list[ItemT] | None:
-        item_dumps = await self.redis.lrange(self._full_key(key), -n, -1)
+    async def tail(self, key: str_able, start: int) -> list[ItemT] | None:
+        item_dumps = await self.redis.lrange(self._full_key(key), start, -1)
         return [self.loader(item_dump.decode("utf-8")) for item_dump in item_dumps] or None
 
     @redis_retry()
@@ -392,6 +392,12 @@ class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
             dumper=Version.dump,
             loader=Version.load,
         )
+        self._normalization_lock_store = KeyFlagStore(
+            name=f"{self.name}/normlock",
+            prefix=self.prefix,
+            redis=self.redis,
+            expiration_time=datetime.timedelta(seconds=30),
+        )
         self._background_tasks: set[asyncio.Task[None]] = set()
 
     # proxied methods
@@ -405,8 +411,8 @@ class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
     async def list_keys(self) -> list[str]:
         return await self._version_store.list_keys()
 
-    async def load_raw_versions(self, key: str_able, start_offset: int) -> list[Version[VersionMetaT]]:
-        return await self._version_store.last(key, n=1 + start_offset) or []
+    async def load_raw_versions(self, key: str_able, start_version: int = 0) -> list[Version[VersionMetaT]]:
+        return await self._version_store.tail(key, start=start_version) or []
 
     def _iter_versions(
         self,
@@ -447,18 +453,18 @@ class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
                 current = version.snapshot
                 yield current, backdiff
 
-    async def _convert_snapshots_to_diffs(self, key: str_able) -> None:
+    async def _normalize(self, key: str_able) -> None:
         try:
-            self.logger.info("Converting snapshots to diff")
+            self.logger.debug(f"Normalizing {key} converting snapshots to diff")
             versions = await self._version_store.all(key)
-            self.logger.info(f"Got {len(versions) = }")
+            self.logger.debug(f"Got {len(versions) = }")
             for offset, (_, backdiff) in enumerate(self._iter_versions(versions, key=str(key))):
                 if backdiff is None:
                     continue
                 index = len(versions) - 1 - offset
                 current_version = versions[index]
                 if current_version.backdiff is None:
-                    self.logger.info(f"Converting snapshot -> backdiff at offset {offset} (#{index})")
+                    self.logger.debug(f"Converting snapshot -> backdiff at offset {offset} (#{index})")
                     await self._version_store.set(
                         key,
                         index,
@@ -480,7 +486,7 @@ class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
                 meta=meta,
             ),
         )
-        snapshot_to_diff_task = asyncio.create_task(self._convert_snapshots_to_diffs(key))
+        snapshot_to_diff_task = asyncio.create_task(self._normalize(key))
         self._background_tasks.add(snapshot_to_diff_task)
         snapshot_to_diff_task.add_done_callback(self._background_tasks.discard)
         return added == 1
@@ -488,8 +494,8 @@ class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
     async def count_versions(self, key: str_able) -> int:
         return await self._version_store.length(key)
 
-    async def load_version(self, key: str_able, offset: int = 0) -> tuple[ValueT, VersionMetaT | None] | None:
-        versions = await self._version_store.last(key, n=1 + offset)
+    async def load_version(self, key: str_able, version: int = -1) -> tuple[ValueT, VersionMetaT | None] | None:
+        versions = await self._version_store.tail(key, start=version)
         if versions is None:
             return None
         version_snapshot, _ = next(tail(1, self._iter_versions(versions, key=str(key))))
@@ -497,9 +503,7 @@ class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
 
     async def load(self, key: str_able) -> ValueT | None:
         """KeyValueStore-compatible method, see also load_version"""
-        if res := await self.load_version(key, offset=0):
+        if res := await self.load_version(key, version=-1):
             return res[0]
         else:
             return None
-
-    # TODO: revert versions
