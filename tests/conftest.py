@@ -33,31 +33,20 @@ def normal_store_behavior() -> Generator[None, None, None]:
 async def redis(request: pytest.FixtureRequest) -> AsyncGenerator[RedisInterface, None]:
     redis_type = request.param
     if redis_type == "real":
-        # FIXME: the cleanup does not work properly for some reason...
-        redis = Redis.from_url(os.environ["REDIS_URL"])
-        # await redis.flushall()
-        for db_index in range(1, 11):
-            await redis.select(db_index)
-            db_size = await redis.dbsize()
+        redis_temp = Redis.from_url(os.environ["REDIS_URL"], single_connection_client=True)
+        for free_db in range(1, 11):
+            await redis_temp.select(free_db)
+            db_size = await redis_temp.dbsize()
             if db_size == 0:
                 break  # found empty database
         else:
             raise RuntimeError("Couldn't found an empy Redis DB for testing")
-        # await redis.select(1)
+        await redis_temp.aclose(close_connection_pool=True)
 
+        redis = Redis.from_url(os.environ["REDIS_URL"], db=free_db)
         yield redis
-
-        # with open("teardown.log", "a") as f:
-        #     print("Starting redis teardown", file=f)
-        #     await redis.select(db_index)
-        #     info = await redis.client_info()
-        #     print(info, file=f)
-
         await redis.flushdb()
-        try:
-            await redis.connection.disconnect()
-        except Exception:
-            pass
+        await redis.aclose(close_connection_pool=True)
     elif redis_type == "ephemeral_emulation":
         yield RedisEmulation()
     elif redis_type == "persistent_emulation":
