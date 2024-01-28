@@ -15,6 +15,7 @@ from typing import (
     TypeVar,
     cast,
 )
+import uuid
 
 import tenacity
 
@@ -114,6 +115,25 @@ class SingleKeyStore(PrefixedStore, Generic[T]):
     async def drop(self, key: str_able) -> bool:
         n_deleted = await self.redis.delete(self._full_key(key))
         return n_deleted == 1
+
+    @redis_retry()
+    async def copy(self, key: str_able, new_key: str_able) -> bool:
+        return (
+            await self.redis.copy(
+                self._full_key(key),
+                self._full_key(new_key),
+                replace=True,
+            )
+            == 1
+        )
+
+    @redis_retry()
+    async def rename(self, key: str_able, to: str_able) -> bool:
+        return await self.redis.rename(src=self._full_key(key), dst=self._full_key(to)) == "OK"
+
+    @redis_retry()
+    async def manual_expire(self, key: str_able, ttl: datetime.timedelta) -> None:
+        await self.redis.expire(self._full_key(key), ttl)
 
     @redis_retry()
     async def exists(self, key: str_able) -> bool:
@@ -507,3 +527,11 @@ class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
             return res[0]
         else:
             return None
+
+    async def revert(self, key: str_able, to_version: int) -> tuple[ValueT, VersionMetaT | None] | None:
+        temp_key = str(uuid.uuid4())
+        if not await self._version_store.exists(key):
+            return None
+        await self._version_store.copy(key, temp_key)
+
+        return None

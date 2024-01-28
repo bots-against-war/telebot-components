@@ -1,5 +1,6 @@
 import abc
 import asyncio
+import copy
 import json
 import os
 import time as time_module
@@ -49,6 +50,15 @@ class RedisEmulation(RedisInterface):
         if self.response_delay is not None:
             await asyncio.sleep(self.response_delay)
 
+    def _remove_from_storages(self, key: str, except_for: dict[str, Any] | None = None) -> int:
+        n_popped = 0
+        for storage in self.storages:
+            if except_for is not None and storage is except_for:
+                continue
+            if storage.pop(key, None) is not None:
+                n_popped += 1
+        return n_popped
+
     async def set(
         self,
         name: str,
@@ -58,6 +68,7 @@ class RedisEmulation(RedisInterface):
         **kwargs,
     ) -> bool:
         await self._bookkeeping(name)
+        self._remove_from_storages(name)
         self.values[name] = value
         if ex is not None:
             self.key_eviction_time[name] = time_module.time() + ex.total_seconds()
@@ -72,10 +83,43 @@ class RedisEmulation(RedisInterface):
             await self._bookkeeping(name)
         n_deleted = 0
         for key in names:
-            for storage in self.storages:
-                if storage.pop(key, None) is not None:
-                    n_deleted += 1
+            n_deleted += self._remove_from_storages(key)
         return n_deleted
+
+    async def copy(
+        self,
+        source: str,
+        destination: str,
+        destination_db: Union[str, None] = None,
+        replace: bool = False,
+    ) -> int:
+        """Note: dbs are not supported, so destination_db param is ignored"""
+        for name in (source, destination):
+            await self._bookkeeping(name)
+
+        for storage in self.storages:
+            if destination in storage:
+                if replace:
+                    storage.pop(destination)
+                else:
+                    return 0
+
+        for storage in self.storages:
+            if source in storage:
+                storage[destination] = copy.deepcopy(storage[source])
+                return 1
+
+        return 0
+
+    async def rename(self, src: str, dst: str) -> str:
+        for name in (src, dst):
+            await self._bookkeeping(name)
+        for storage in self.storages:
+            if src in storage:
+                await self.delete(dst)
+                storage[dst] = storage.pop(src)
+                return "OK"
+        return "error: src does not exist"
 
     async def expire(self, name: str, time: timedelta) -> int:
         self.key_eviction_time[name] = time_module.time() + time.total_seconds()
@@ -282,6 +326,20 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def delete(self, *names: str) -> int:
         self._stack.append(self.redis_em.delete(*names))
         return 0
+
+    async def copy(
+        self,
+        source: str,
+        destination: str,
+        destination_db: Union[str, None] = None,
+        replace: bool = False,
+    ) -> int:
+        self._stack.append(self.redis_em.copy(source, destination, destination_db, replace))
+        return 0
+
+    async def rename(self, src: str, dst: str) -> str:
+        self._stack.append(self.redis_em.rename(src, dst))
+        return "OK"
 
     async def sadd(self, name: str, *values: bytes) -> int:
         self._stack.append(self.redis_em.sadd(name, *values))

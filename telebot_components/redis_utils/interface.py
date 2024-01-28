@@ -71,6 +71,37 @@ class RedisInterface(ABC):
         ...
 
     @abstractmethod
+    async def copy(
+        self,
+        source: str,
+        destination: str,
+        destination_db: Union[str, None] = None,
+        replace: bool = False,
+    ) -> int:
+        """
+        Copy the value stored in the ``source`` key to the ``destination`` key.
+
+        ``destination_db`` an alternative destination database. By default,
+        the ``destination`` key is created in the source Redis database.
+
+        ``replace`` whether the ``destination`` key should be removed before
+        copying the value to it. By default, the value is not copied if
+        the ``destination`` key already exists.
+
+        For more information see https://redis.io/commands/copy
+        """
+        ...
+
+    @abstractmethod
+    async def rename(self, src: str, dst: str) -> str:
+        """
+        Rename key ``src`` to ``dst``
+
+        For more information see https://redis.io/commands/rename
+        """
+        ...
+
+    @abstractmethod
     async def sadd(self, name: str, *values: bytes) -> int:
         """Add ``value(s)`` to set ``name`` and return number of values added to the set"""
         ...
