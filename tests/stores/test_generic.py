@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import random
 from datetime import timedelta
-from typing import Any, Callable, Optional, Type, TypedDict
+from typing import Any, Callable, Optional, Type, TypedDict, cast
 from uuid import uuid4
 
 import pytest
@@ -23,6 +23,7 @@ from telebot_components.stores.generic import (
     Version,
     str_able,
 )
+from telebot_components.utils.diff import Diffable
 from tests.utils import TimeSupplier, generate_str, using_real_redis
 
 EXPIRATION_TIME_TEST_OPTIONS: list[Optional[timedelta]] = [None]
@@ -526,5 +527,85 @@ async def test_key_versioned_store(redis: RedisInterface) -> None:
             },
             backdiff=None,
             meta=None,
+        ),
+    ]
+
+
+async def test_key_versioned_store_strings(redis: RedisInterface) -> None:
+    class VersionMeta(TypedDict):
+        timestamp: float
+        message: str
+
+    store = KeyVersionedValueStore[str, VersionMeta](
+        name="test",
+        prefix=generate_str(),
+        redis=redis,
+        snapshot_dumper=str,
+        snapshot_loader=str,
+    )
+
+    key = "hello"
+
+    await store.save(key, "", VersionMeta(timestamp=0, message="init"))
+    await store.save(key, "hello world", VersionMeta(timestamp=1, message=""))
+    await store.save(key, "hello, how's it going?", VersionMeta(timestamp=2, message="example"))
+    await store.save(key, "hello, how are things going?", None)
+
+    await asyncio.sleep(0.01)
+
+    assert await store.load(key) == "hello, how are things going?"
+
+    res = await store.load_version(key, version=1)
+    assert res is not None
+    assert res == ("hello world", {"timestamp": 1, "message": ""})
+
+    res = await store.load_version(key, version=2)
+    assert res is not None
+    assert res == ("hello, how's it going?", {"timestamp": 2, "message": "example"})
+
+    res = await store.load_version(key, version=3)
+    assert res is not None
+    assert res == ("hello, how are things going?", None)
+
+
+async def test_key_versioned_store_revert(redis: RedisInterface) -> None:
+    class Data(TypedDict):
+        name: str
+        amount: float
+
+    class VersionMeta(TypedDict):
+        message: str
+
+    store = KeyVersionedValueStore[Data, VersionMeta](
+        name="test",
+        prefix=generate_str(),
+        redis=redis,
+        snapshot_dumper=lambda x: cast(Diffable, x),
+        snapshot_loader=lambda x: cast(Data, x),
+    )
+
+    key = "hiii"
+
+    await store.save(key, {"name": "test", "amount": 1}, meta={"message": "init"})
+    await store.save(key, {"name": "new", "amount": 1}, meta={"message": "changed name"})
+    await store.save(key, {"name": "newer than new", "amount": 1}, meta={"message": "changed again"})
+    await store.save(key, {"name": "newer than new", "amount": 2}, meta={"message": "amount increased"})
+
+    await asyncio.sleep(0.01)
+
+    assert await store.load_version(key) == ({"amount": 2, "name": "newer than new"}, {"message": "amount increased"})
+
+    assert await store.revert(key, to_version=1) == ({"amount": 1, "name": "new"}, {"message": "changed name"})
+    assert await store.load_version(key) == ({"amount": 1, "name": "new"}, {"message": "changed name"})
+    assert await store.load_raw_versions(key) == [
+        Version(
+            snapshot=None,
+            backdiff=[{"path": ["name"], "action": "change", "new": "test"}],
+            meta={"message": "init"},
+        ),
+        Version(
+            snapshot={"name": "new", "amount": 1},
+            backdiff=None,
+            meta={"message": "changed name"},
         ),
     ]

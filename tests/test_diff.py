@@ -5,6 +5,7 @@ import pytest
 
 from telebot_components.utils.diff import (
     DiffAction,
+    HashableWrapper,
     InplacePatchImpossible,
     diff,
     diff_text,
@@ -228,3 +229,29 @@ def test_diff_text(a: str, b: str) -> None:
     b_patched = patch_text(a, diff_)
     assert b_patched == b
     assert len(diff_) <= len(a) + len(b) + 1
+
+
+class Unhashable:
+    pass
+
+
+@pytest.mark.parametrize(
+    "a, b, is_equal_hash",
+    [
+        pytest.param(1, 1, True),
+        pytest.param(1, 2, False),
+        pytest.param({}, {}, True),
+        pytest.param({}, {"data": "a"}, False),
+        pytest.param({"data": "b"}, {"data": "a"}, False),
+        pytest.param({"data": "a"}, {"data": "a"}, True),
+        pytest.param(set(), set(), True),
+        pytest.param({"a"}, {"a"}, True),
+        pytest.param({"a"}, {"b"}, False),
+        pytest.param({None}, {}, False),
+        pytest.param(Unhashable(), Unhashable(), False),
+    ],
+)
+def test_hashable_wrapper(a: Any, b: Any, is_equal_hash: bool) -> None:
+    ahash = hash(HashableWrapper(a))
+    bhash = hash(HashableWrapper(b))
+    assert (ahash == bhash) == is_equal_hash

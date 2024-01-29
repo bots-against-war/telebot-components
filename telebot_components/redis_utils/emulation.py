@@ -203,13 +203,8 @@ class RedisEmulation(RedisInterface):
         else:
             return popped or None
 
-    async def lrange(self, name: str, start: int, end: int) -> list[bytes]:
-        await self._bookkeeping(name)
-        if name not in self.lists:
-            return []
-        list_ = self.lists[name]
-        if not isinstance(list_, list):
-            raise TypeError("lrange on non-list key")
+    def _redis_slice(self, list_: list[Any], start: int, end: int) -> list[Any]:
+        """Redis-style list indexing (inclusive end, liberal out-of bounds treatment)"""
         length = len(list_)
         if start > length:
             return []
@@ -219,6 +214,15 @@ class RedisEmulation(RedisInterface):
             end = length
         end += 1  # redis' `end` is inclusive, python's is exclusive
         return list_[start:end]
+
+    async def lrange(self, name: str, start: int, end: int) -> list[bytes]:
+        await self._bookkeeping(name)
+        if name not in self.lists:
+            return []
+        list_ = self.lists[name]
+        if not isinstance(list_, list):
+            raise TypeError("lrange on non-list key")
+        return self._redis_slice(list_, start, end)
 
     async def llen(self, name: str) -> int:
         await self._bookkeeping(name)
@@ -234,6 +238,12 @@ class RedisEmulation(RedisInterface):
         except Exception:
             return "(error) index out of range"
 
+        return "OK"
+
+    async def ltrim(self, name: str, start: int, end: int) -> str:
+        await self._bookkeeping(name)
+        if name in self.lists:
+            self.lists[name] = self._redis_slice(self.lists[name], start, end)
         return "OK"
 
     async def exists(self, *names: str) -> int:
@@ -380,6 +390,10 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def lrange(self, name: str, start: int, end: int) -> list[bytes]:
         self._stack.append(self.redis_em.lrange(name, start, end))
         return []
+
+    async def ltrim(self, name: str, start: int, end: int) -> str:
+        self._stack.append(self.redis_em.ltrim(name, start, end))
+        return "OK"
 
     async def llen(self, name: str) -> int:
         self._stack.append(self.redis_em.llen(name))

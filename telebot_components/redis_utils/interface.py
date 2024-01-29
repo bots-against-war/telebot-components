@@ -180,6 +180,19 @@ class RedisInterface(ABC):
         """
 
     @abstractmethod
+    async def ltrim(self, name: str, start: int, end: int) -> str:
+        """
+        Trim the list ``name``, removing all values not within the slice
+        between ``start`` and ``end``
+
+        ``start`` and ``end`` can be negative numbers just like
+        Python slicing notation
+
+        For more information see https://redis.io/commands/ltrim
+        """
+        ...
+
+    @abstractmethod
     async def exists(self, *names: str) -> int:
         """Returns the number of ``names`` that exist"""
         ...

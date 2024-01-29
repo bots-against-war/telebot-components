@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import secrets
+import uuid
 from hashlib import md5
 from typing import (
     Callable,
@@ -15,7 +16,6 @@ from typing import (
     TypeVar,
     cast,
 )
-import uuid
 
 import tenacity
 
@@ -226,6 +226,10 @@ class KeyListStore(SingleKeyStore[ItemT]):
             after_push_len, *_ = await pipe.execute()
             return after_push_len == "OK"
 
+    @redis_retry()
+    async def trim(self, key: str_able, last: int) -> None:
+        await self.redis.ltrim(self._full_key(key), 0, last)
+
 
 @dataclasses.dataclass
 class SetStore(PrefixedStore, Generic[ItemT]):
@@ -412,12 +416,6 @@ class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
             dumper=Version.dump,
             loader=Version.load,
         )
-        self._normalization_lock_store = KeyFlagStore(
-            name=f"{self.name}/normlock",
-            prefix=self.prefix,
-            redis=self.redis,
-            expiration_time=datetime.timedelta(seconds=30),
-        )
         self._background_tasks: set[asyncio.Task[None]] = set()
 
     # proxied methods
@@ -533,5 +531,15 @@ class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
         if not await self._version_store.exists(key):
             return None
         await self._version_store.copy(key, temp_key)
+        await self._version_store.manual_expire(temp_key, ttl=datetime.timedelta(minutes=30))
 
-        return None
+        versions = await self._version_store.tail(temp_key, start=to_version)
+        if versions is None:
+            return None
+        snapshot, _ = next(tail(1, self._iter_versions(versions, key=str(key))))
+        new_last_version = Version(snapshot=snapshot, backdiff=None, meta=versions[0].meta)
+
+        await self._version_store.set(temp_key, i=to_version, value=new_last_version)
+        await self._version_store.trim(temp_key, last=to_version)
+        await self._version_store.rename(temp_key, key)
+        return self.snapshot_loader(snapshot), new_last_version.meta

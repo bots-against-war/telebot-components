@@ -1,7 +1,10 @@
 import textwrap
 from enum import Enum
+from typing import Any
 
 import pytest
+from telebot import types as tg
+from telebot.test_util import MockedAsyncTeleBot
 
 from telebot_components.form.field import (
     FormField,
@@ -12,7 +15,19 @@ from telebot_components.form.field import (
     SingleSelectField,
 )
 from telebot_components.form.form import Form, FormBranch
+from telebot_components.form.handler import (
+    FormExitContext,
+    FormHandler,
+    FormHandlerConfig,
+)
+from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.language import MaybeLanguage
+from tests.utils import (
+    TelegramServerMock,
+    assert_list_of_required_subdicts,
+    extract_full_kwargs,
+    generate_str,
+)
 
 DUMMY_FORM_FIELD_KW = {"required": True, "query_message": "aaa", "empty_text_error_msg": "fail :("}
 
@@ -254,3 +269,93 @@ def test_branching_form_constructor() -> None:
         "final field 1": {"final field 2"},
         "final field 2": {None},
     }
+
+
+async def test_form_handler(redis: RedisInterface) -> None:
+    bot_prefix = generate_str()
+
+    def field(name: str, is_optional: bool = False) -> FormField:
+        return PlainTextField(
+            name=name,
+            required=not is_optional,
+            query_message=f"Question: {name}",
+            empty_text_error_msg="empty test error",
+            result_formatting_opts=FormFieldResultFormattingOpts(descr=name, is_multiline=False),
+        )
+
+    f = Form.branching(
+        [
+            field("your name"),
+            field("your favourite food"),
+            field("your pet's name", is_optional=True),
+        ]
+    )
+
+    fh = FormHandler[Any](
+        redis=redis,
+        bot_prefix=bot_prefix,
+        name="test-form",
+        form=f,
+        config=FormHandlerConfig(
+            echo_filled_field=False,
+            retry_field_msg="retry",
+            unsupported_cmd_error_template="unsupported ({})",
+            cancelling_because_of_error_template="error: {}",
+            form_starting_template="form start ({} - cancel)",
+            can_skip_field_template="({} to skip)",
+            cant_skip_field_msg="cant skip this",
+        ),
+    )
+
+    bot = MockedAsyncTeleBot(token="foobar")
+
+    completed_ctxs: list[FormExitContext] = []
+
+    async def on_form_completed(ctx: FormExitContext):
+        completed_ctxs.append(ctx)
+
+    fh.setup(bot, on_form_completed=on_form_completed)
+
+    @bot.message_handler(commands=["form"])
+    async def form_start(message: tg.Message) -> None:
+        await fh.start(bot, user=message.from_user)
+
+    tgserv = TelegramServerMock()
+
+    await tgserv.send_message_to_bot(bot, user_id=1, text="/form")
+    assert len(bot.method_calls) == 1
+    assert_list_of_required_subdicts(
+        extract_full_kwargs(bot.method_calls["send_message"]),
+        [{"chat_id": 1, "text": "form start (/cancel - cancel)\n\nQuestion: your name"}],
+    )
+    bot.method_calls.clear()
+
+    await tgserv.send_message_to_bot(bot, user_id=1, text="test user")
+    assert len(bot.method_calls) == 1
+    assert_list_of_required_subdicts(
+        extract_full_kwargs(bot.method_calls["send_message"]),
+        [{"chat_id": 1, "text": "Question: your favourite food"}],
+    )
+    bot.method_calls.clear()
+
+    await tgserv.send_message_to_bot(bot, user_id=1, text="pizza")
+    assert len(bot.method_calls) == 1
+    assert_list_of_required_subdicts(
+        extract_full_kwargs(bot.method_calls["send_message"]),
+        [{"chat_id": 1, "text": "Question: your pet's name (/skip to skip)"}],
+    )
+    bot.method_calls.clear()
+
+    await tgserv.send_message_to_bot(bot, user_id=1, text="/skip")
+    assert len(bot.method_calls) == 0
+
+    assert len(completed_ctxs) == 1
+    ctx = completed_ctxs[0]
+    assert ctx.bot is bot
+    assert ctx.result == {
+        "your favourite food": "pizza",
+        "your name": "test user",
+        "your pet's name": None,
+    }
+
+    assert f.result_to_html(ctx.result, lang=None) == "<b>your name</b>: test user\n<b>your favourite food</b>: pizza"
