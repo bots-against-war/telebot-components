@@ -1,7 +1,9 @@
+import asyncio
+import copy
+import dataclasses
 import random
-from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Callable, Optional, TypedDict
+from typing import Any, Callable, Optional, Type, TypedDict, cast
 from uuid import uuid4
 
 import pytest
@@ -15,9 +17,13 @@ from telebot_components.stores.generic import (
     KeyListStore,
     KeySetStore,
     KeyValueStore,
+    KeyVersionedValueStore,
     SetStore,
+    Snapshot,
+    Version,
     str_able,
 )
+from telebot_components.utils.diff import Diffable
 from tests.utils import TimeSupplier, generate_str, using_real_redis
 
 EXPIRATION_TIME_TEST_OPTIONS: list[Optional[timedelta]] = [None]
@@ -31,7 +37,7 @@ def expiration_time(request: fixtures.SubRequest) -> Optional[timedelta]:
     return request.param
 
 
-@dataclass
+@dataclasses.dataclass
 class CustomStrableKey:
     data: str
 
@@ -93,7 +99,7 @@ async def test_key_value_store_json_serialization(redis: RedisInterface, key: st
 
 
 async def test_key_value_store_custom_serialization(redis: RedisInterface, key: str_able):
-    @dataclass
+    @dataclasses.dataclass
     class UserData:
         name: str
         age: int
@@ -125,10 +131,22 @@ async def test_key_list_store(redis: RedisInterface, key: str_able, jsonable_val
         prefix=generate_str(),
         redis=redis,
     )
-    for _ in range(10):
-        assert await store.push(key, jsonable_value)
-    assert await store.all(key) == [jsonable_value] * 10
-    assert await store.drop(key)
+    for i in range(5):
+        assert await store.push(key, jsonable_value) == i + 1
+    assert await store.push(key, "hello") == 6
+    assert await store.push(key, 1312) == 7
+    assert await store.all(key) == [jsonable_value] * 5 + ["hello", 1312]
+
+    assert await store.length(key) == 7
+
+    assert await store.tail(key, 4) == [jsonable_value, "hello", 1312]
+    assert await store.set(key, 4, "new value") is True
+    assert await store.tail(key, 4) == ["new value", "hello", 1312]
+
+    assert await store.trim(key, last=4) is None
+    assert await store.all(key) == [jsonable_value] * 4 + ["new value"]
+
+    assert await store.drop(key) is True
     assert await store.all(key) == []
 
 
@@ -242,25 +260,19 @@ async def test_list_keys(redis: RedisInterface):
     assert set(await store_2.list_keys()) == set(store_2_keys)
 
 
-async def test_cant_create_conflicting_stores(redis: RedisInterface):
+async def test_cant_create_conflicting_stores(redis: RedisInterface, normal_store_behavior):
     bot_prefix = generate_str()
-
-    previous_randomize_prefixes = KeyValueStore.RANDOMIZE_PREFIXES
-    try:
-        KeyValueStore.RANDOMIZE_PREFIXES = False
-        store_1 = KeyValueStore[int](
+    store_1 = KeyValueStore[int](
+        name="some-prefix",
+        prefix=bot_prefix,
+        redis=redis,
+    )
+    with pytest.raises(ValueError, match="Attempt to create KeyValueStore with prefix "):
+        store_2 = KeyValueStore[int](
             name="some-prefix",
             prefix=bot_prefix,
             redis=redis,
         )
-        with pytest.raises(ValueError, match="Attempt to create KeyValueStore with prefix "):
-            store_2 = KeyValueStore[int](
-                name="some-prefix",
-                prefix=bot_prefix,
-                redis=redis,
-            )
-    finally:
-        KeyValueStore.RANDOMIZE_PREFIXES = previous_randomize_prefixes
 
 
 async def test_key_dict_store(redis: RedisInterface):
@@ -325,3 +337,311 @@ async def test_key_dict_store(redis: RedisInterface):
     await user_data_store.remove_subkey("good", "9")
     assert set(await user_data_store.list_subkeys("good")) == {"1"}
     assert await user_data_store.get_subkey("good", "9") is None
+
+
+@pytest.mark.parametrize("store_class", [KeyValueStore, KeyVersionedValueStore])
+async def test_key_versioned_value_store_compat(
+    redis: RedisInterface,
+    store_class: Type[KeyValueStore] | Type[KeyVersionedValueStore],
+    key: str_able,
+) -> None:
+    store = store_class(
+        name="testing-versioning-compat",
+        prefix=generate_str(),
+        redis=redis,
+    )
+    assert await store.load(key) is None
+    value = generate_str()
+    assert await store.save(key, value)
+    assert await store.load(key) == value
+    assert await store.drop(key)
+    assert await store.load(key) is None
+    assert await store.save(key, value)
+
+
+@dataclasses.dataclass
+class Thing:
+    name: str
+    parts: list["Thing"] = dataclasses.field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, dict: dict) -> "Thing":
+        return Thing(
+            name=dict["name"],
+            parts=[Thing.from_dict(el) for el in dict["parts"]],
+        )
+
+
+@dataclasses.dataclass
+class Inventory:
+    name: str
+    stock: list[Thing]
+    ordered: list[Thing]
+
+    def to_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, snapshot: Snapshot) -> "Inventory":
+        if not isinstance(snapshot, dict):
+            raise TypeError()
+        return Inventory(
+            name=snapshot["name"],
+            stock=[Thing.from_dict(el) for el in snapshot["stock"]],
+            ordered=[Thing.from_dict(el) for el in snapshot["ordered"]],
+        )
+
+
+async def test_key_versioned_store(redis: RedisInterface) -> None:
+    versioned_store = KeyVersionedValueStore[Inventory, None](
+        name="test",
+        prefix=generate_str(),
+        redis=redis,
+        snapshot_dumper=Inventory.to_dict,
+        snapshot_loader=Inventory.from_dict,
+    )
+
+    expected_versions: list[Inventory] = []
+
+    async def save_version_and_check(inv: Inventory):
+        inv = copy.deepcopy(inv)
+        expected_versions.append(inv)
+        await versioned_store.save("some_key", inv, meta=None)
+
+        assert len(expected_versions) == await versioned_store.count_versions("some_key")
+
+        for version_number, ver in enumerate(expected_versions):
+            res = await versioned_store.load_version("some_key", version=version_number)
+            assert res is not None, f"failed to load version {version_number}"
+            ver_loaded, meta = res
+            assert ver == ver_loaded
+            assert meta is None
+
+        res = await versioned_store.load_version("some_key", version=len(expected_versions) + 1)
+        assert res is None
+
+        res = await versioned_store.load_version("some_key", version=-1)
+        assert res is not None
+        ver_loaded, meta = res
+        assert ver_loaded == expected_versions[-1]
+        assert meta is None
+
+    inv = Inventory(name="example", stock=[], ordered=[])
+    await save_version_and_check(inv)
+
+    inv.name = "other name"
+    await save_version_and_check(inv)
+
+    inv.ordered.append(
+        Thing(
+            "pc",
+            parts=[
+                Thing("cpu"),
+                Thing("memory"),
+                Thing("gpu"),
+            ],
+        )
+    )
+    await save_version_and_check(inv)
+
+    inv.ordered.append(Thing("pen"))
+    await save_version_and_check(inv)
+
+    inv.ordered[0].parts[2].parts.append(Thing("fan"))
+    await save_version_and_check(inv)
+
+    pc = inv.ordered.pop(0)
+    inv.stock.append(pc)
+    await save_version_and_check(inv)
+
+    inv.stock[0].parts[1].name = "ok"
+    inv.stock.insert(0, Thing("book"))
+    await save_version_and_check(inv)
+
+    await asyncio.sleep(0.1)  # to let normalization happen in the background
+    assert await versioned_store.load_raw_versions("new_key") == []
+    assert await versioned_store.load_raw_versions("some_key") == [
+        Version(
+            snapshot=None,
+            backdiff=[{"path": ["name"], "action": "change", "new": "example"}],
+            meta=None,
+        ),
+        Version(
+            snapshot=None,
+            backdiff=[{"path": ["ordered"], "action": "remove_range", "start": 0, "length": 1}],
+            meta=None,
+        ),
+        Version(
+            snapshot=None,
+            backdiff=[{"path": ["ordered"], "action": "remove_range", "start": 1, "length": 1}],
+            meta=None,
+        ),
+        Version(
+            snapshot=None,
+            backdiff=[{"path": ["ordered", 0, "parts", 2, "parts"], "action": "remove_range", "start": 0, "length": 1}],
+            meta=None,
+        ),
+        Version(
+            snapshot=None,
+            backdiff=[
+                {"path": ["stock"], "action": "remove_range", "start": 0, "length": 1},
+                {
+                    "path": ["ordered"],
+                    "action": "add_range",
+                    "start": 0,
+                    "values": [
+                        {
+                            "name": "pc",
+                            "parts": [
+                                {"name": "cpu", "parts": []},
+                                {"name": "memory", "parts": []},
+                                {"name": "gpu", "parts": [{"name": "fan", "parts": []}]},
+                            ],
+                        }
+                    ],
+                },
+            ],
+            meta=None,
+        ),
+        Version(
+            snapshot=None,
+            backdiff=[
+                {"path": ["stock", 0, "name"], "action": "change", "new": "pc"},
+                {
+                    "path": ["stock", 0, "parts"],
+                    "action": "add_range",
+                    "start": 0,
+                    "values": [
+                        {"name": "cpu", "parts": []},
+                        {"name": "memory", "parts": []},
+                        {"name": "gpu", "parts": [{"name": "fan", "parts": []}]},
+                    ],
+                },
+                {"path": ["stock"], "action": "remove_range", "start": 1, "length": 1},
+            ],
+            meta=None,
+        ),
+        Version(
+            snapshot={
+                "name": "other name",
+                "stock": [
+                    {"name": "book", "parts": []},
+                    {
+                        "name": "pc",
+                        "parts": [
+                            {"name": "cpu", "parts": []},
+                            {"name": "ok", "parts": []},
+                            {"name": "gpu", "parts": [{"name": "fan", "parts": []}]},
+                        ],
+                    },
+                ],
+                "ordered": [{"name": "pen", "parts": []}],
+            },
+            backdiff=None,
+            meta=None,
+        ),
+    ]
+
+
+async def test_key_versioned_store_strings(redis: RedisInterface) -> None:
+    class VersionMeta(TypedDict):
+        timestamp: float
+        message: str
+
+    store = KeyVersionedValueStore[str, VersionMeta](
+        name="test",
+        prefix=generate_str(),
+        redis=redis,
+        snapshot_dumper=str,
+        snapshot_loader=str,
+    )
+
+    key = "hello"
+
+    await store.save(key, "", VersionMeta(timestamp=0, message="init"))
+    await store.save(key, "hello world", VersionMeta(timestamp=1, message=""))
+    await store.save(key, "hello, how's it going?", VersionMeta(timestamp=2, message="example"))
+    await store.save(key, "hello, how are things going?", None)
+
+    await asyncio.sleep(0.01)
+
+    assert await store.load(key) == "hello, how are things going?"
+
+    res = await store.load_version(key, version=1)
+    assert res is not None
+    assert res == ("hello world", {"timestamp": 1, "message": ""})
+
+    res = await store.load_version(key, version=2)
+    assert res is not None
+    assert res == ("hello, how's it going?", {"timestamp": 2, "message": "example"})
+
+    res = await store.load_version(key, version=3)
+    assert res is not None
+    assert res == ("hello, how are things going?", None)
+
+
+async def test_key_versioned_store_revert(redis: RedisInterface) -> None:
+    class Data(TypedDict):
+        name: str
+        amount: float
+
+    class VersionMeta(TypedDict):
+        message: str
+
+    store = KeyVersionedValueStore[Data, VersionMeta](
+        name="test",
+        prefix=generate_str(),
+        redis=redis,
+        snapshot_dumper=lambda x: cast(Diffable, x),
+        snapshot_loader=lambda x: cast(Data, x),
+    )
+
+    key = "hiii"
+
+    await store.save(key, {"name": "test", "amount": 1}, meta={"message": "init"})
+    await store.save(key, {"name": "new", "amount": 1}, meta={"message": "changed name"})
+    await store.save(key, {"name": "newer than new", "amount": 1}, meta={"message": "changed again"})
+    await store.save(key, {"name": "newer than new", "amount": 2}, meta={"message": "amount increased"})
+
+    await asyncio.sleep(0.01)
+
+    assert await store.load_version(key) == ({"amount": 2, "name": "newer than new"}, {"message": "amount increased"})
+
+    assert await store.revert(key, to_version=1) == ({"amount": 1, "name": "new"}, {"message": "changed name"})
+    assert await store.load_version(key) == ({"amount": 1, "name": "new"}, {"message": "changed name"})
+    assert await store.load_raw_versions(key) == [
+        Version(
+            snapshot=None,
+            backdiff=[{"path": ["name"], "action": "change", "new": "test"}],
+            meta={"message": "init"},
+        ),
+        Version(
+            snapshot={"name": "new", "amount": 1},
+            backdiff=None,
+            meta={"message": "changed name"},
+        ),
+    ]
+
+    await store.save(key, {"name": "edited history", "amount": 100}, meta={"message": "hi"})
+    await asyncio.sleep(0.01)
+
+    assert await store.load_raw_versions(key) == [
+        Version(
+            snapshot=None,
+            backdiff=[{"path": ["name"], "action": "change", "new": "test"}],
+            meta={"message": "init"},
+        ),
+        Version(
+            snapshot=None,
+            backdiff=[
+                {"path": ["name"], "action": "change", "new": "new"},
+                {"path": ["amount"], "action": "change", "new": 1},
+            ],
+            meta={"message": "changed name"},
+        ),
+        Version(
+            snapshot={"name": "edited history", "amount": 100},
+            backdiff=None,
+            meta={"message": "hi"},
+        ),
+    ]

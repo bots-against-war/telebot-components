@@ -1,4 +1,6 @@
 import abc
+import asyncio
+import copy
 import json
 import os
 import time as time_module
@@ -18,12 +20,14 @@ from telebot_components.redis_utils.interface import (
 class RedisEmulation(RedisInterface):
     """Inmemory redis emulation, compliant with interface, useful for local runs and tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, response_delay: float | None = None) -> None:
         self.values: dict[str, bytes] = dict()
         self.sets: dict[str, set[bytes]] = defaultdict(set)
         self.lists: dict[str, list[bytes]] = defaultdict(list)
         self.hashes: dict[str, dict[str, bytes]] = defaultdict(dict)
         self.key_eviction_time: dict[str, float] = dict()
+
+        self.response_delay = response_delay
 
     @property
     def storages(self) -> tuple[dict[str, Any], ...]:
@@ -32,7 +36,7 @@ class RedisEmulation(RedisInterface):
     def pipeline(self, transaction: bool = True, shard_hint: Optional[str] = None) -> "RedisPipelineEmulatiom":
         return RedisPipelineEmulatiom(self)
 
-    def _evict_if_expired(self, key: str):
+    async def _bookkeeping(self, key: str):
         if key not in self.key_eviction_time:
             return
         evict_at = self.key_eviction_time[key]
@@ -43,6 +47,18 @@ class RedisEmulation(RedisInterface):
             if key in storage:
                 storage.pop(key)
 
+        if self.response_delay is not None:
+            await asyncio.sleep(self.response_delay)
+
+    def _remove_from_storages(self, key: str, except_for: dict[str, Any] | None = None) -> int:
+        n_popped = 0
+        for storage in self.storages:
+            if except_for is not None and storage is except_for:
+                continue
+            if storage.pop(key, None) is not None:
+                n_popped += 1
+        return n_popped
+
     async def set(
         self,
         name: str,
@@ -51,50 +67,81 @@ class RedisEmulation(RedisInterface):
         *args,
         **kwargs,
     ) -> bool:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
+        self._remove_from_storages(name)
         self.values[name] = value
         if ex is not None:
             self.key_eviction_time[name] = time_module.time() + ex.total_seconds()
         return True
 
     async def get(self, name: str) -> Optional[bytes]:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         return self.values.get(name)
 
     async def delete(self, *names: str) -> int:
         for name in names:
-            self._evict_if_expired(name)
+            await self._bookkeeping(name)
         n_deleted = 0
         for key in names:
-            for storage in self.storages:
-                if storage.pop(key, None) is not None:
-                    n_deleted += 1
+            n_deleted += self._remove_from_storages(key)
         return n_deleted
+
+    async def copy(
+        self,
+        source: str,
+        destination: str,
+        destination_db: Union[str, None] = None,
+        replace: bool = False,
+    ) -> bool:
+        """Note: dbs are not supported, so destination_db param is ignored"""
+        for name in (source, destination):
+            await self._bookkeeping(name)
+        for storage in self.storages:
+            if destination in storage:
+                if replace:
+                    storage.pop(destination)
+                else:
+                    return False
+        for storage in self.storages:
+            if source in storage:
+                storage[destination] = copy.deepcopy(storage[source])
+                return True
+        return False
+
+    async def rename(self, src: str, dst: str) -> bool:
+        for name in (src, dst):
+            await self._bookkeeping(name)
+        for storage in self.storages:
+            if src in storage:
+                await self.delete(dst)
+                storage[dst] = storage.pop(src)
+                return True
+        raise KeyError(f"src key does not exist: {src}")
 
     async def expire(self, name: str, time: timedelta) -> int:
         self.key_eviction_time[name] = time_module.time() + time.total_seconds()
         return 1
 
     async def sadd(self, name: str, *values: bytes) -> int:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         target_set = self.sets[name]
         new_values = {v for v in values if v not in target_set}
         target_set.update(new_values)
         return len(new_values)
 
     async def srem(self, name: str, *values: bytes) -> int:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         target_set = self.sets[name]
         values_to_remove = {v for v in values if v in target_set}
         target_set.difference_update(values_to_remove)
         return len(values_to_remove)
 
     async def smembers(self, name: str) -> list[bytes]:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         return list(self.sets[name])
 
     async def spop(self, name: str, count: Optional[int] = None) -> Optional[Union[bytes, list[bytes]]]:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         set_ = self.sets.get(name)
         if set_ is None:
             return None
@@ -113,11 +160,11 @@ class RedisEmulation(RedisInterface):
             return popped
 
     async def sismember(self, name: str, value: bytes) -> int:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         return int(value in self.sets.get(name, set()))
 
     async def incr(self, name: str) -> int:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         current_value_bytes = self.values.get(name)
         if current_value_bytes is None:
             current_value = 0
@@ -128,7 +175,7 @@ class RedisEmulation(RedisInterface):
         return new_value
 
     async def rpush(self, name: str, *values: bytes) -> int:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         for v in values:
             self.lists[name].append(v)
         return len(self.lists[name])
@@ -138,7 +185,7 @@ class RedisEmulation(RedisInterface):
         name: str,
         count: Optional[int] = None,
     ) -> Union[bytes, list[bytes], None]:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         pop_elements = count or 1
         lst = self.lists.get(name)
         if not lst:
@@ -153,13 +200,8 @@ class RedisEmulation(RedisInterface):
         else:
             return popped or None
 
-    async def lrange(self, name: str, start: int, end: int) -> list[bytes]:
-        self._evict_if_expired(name)
-        if name not in self.lists:
-            return []
-        list_ = self.lists[name]
-        if not isinstance(list_, list):
-            raise TypeError("lrange on non-list key")
+    def _redis_slice(self, list_: list[Any], start: int, end: int) -> list[Any]:
+        """Redis-style list indexing (inclusive end, liberal out-of bounds treatment)"""
         length = len(list_)
         if start > length:
             return []
@@ -169,6 +211,37 @@ class RedisEmulation(RedisInterface):
             end = length
         end += 1  # redis' `end` is inclusive, python's is exclusive
         return list_[start:end]
+
+    async def lrange(self, name: str, start: int, end: int) -> list[bytes]:
+        await self._bookkeeping(name)
+        if name not in self.lists:
+            return []
+        list_ = self.lists[name]
+        if not isinstance(list_, list):
+            raise TypeError("lrange on non-list key")
+        return self._redis_slice(list_, start, end)
+
+    async def llen(self, name: str) -> int:
+        await self._bookkeeping(name)
+        return len(self.lists.get(name, []))
+
+    async def lset(self, name: str, index: int, value: bytes) -> bool:
+        await self._bookkeeping(name)
+        list_ = self.lists.get(name)
+        if list_ is None:
+            raise KeyError(f"no such key: {name}")
+        try:
+            list_[index] = value
+        except Exception:
+            raise KeyError(f"index out of range: {name}[{index}]")
+
+        return True
+
+    async def ltrim(self, name: str, start: int, end: int) -> bool:
+        await self._bookkeeping(name)
+        if name in self.lists:
+            self.lists[name] = self._redis_slice(self.lists[name], start, end)
+        return True
 
     async def exists(self, *names: str) -> int:
         n_exist = 0
@@ -199,7 +272,7 @@ class RedisEmulation(RedisInterface):
         value: Optional[bytes] = None,
         mapping: Optional[Mapping[str, bytes]] = None,
     ) -> int:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         if mapping is None:
             if key is None or value is None:
                 raise TypeError("If mapping is not specified, key and value must be set")
@@ -213,19 +286,19 @@ class RedisEmulation(RedisInterface):
     async def hkeys(self, name: str) -> list[bytes]:
         # NOTE: redis client does not decode anything received from Redis by default,
         # so we have to re-encode keys from a hash
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         return [key.encode("utf-8") for key in self.hashes.get(name, {}).keys()]
 
     async def hvals(self, name: str) -> list[bytes]:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         return [value for value in self.hashes.get(name, {}).values()]
 
     async def hgetall(self, name: str) -> dict[bytes, bytes]:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         return {key.encode("utf-8"): value for key, value in self.hashes.get(name, {}).items()}
 
     async def hdel(self, name: str, *keys: str) -> int:
-        self._evict_if_expired(name)
+        await self._bookkeeping(name)
         count = 0
         hash_ = self.hashes.get(name, {})
         for k in keys:
@@ -260,6 +333,20 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def delete(self, *names: str) -> int:
         self._stack.append(self.redis_em.delete(*names))
         return 0
+
+    async def copy(
+        self,
+        source: str,
+        destination: str,
+        destination_db: Union[str, None] = None,
+        replace: bool = False,
+    ) -> bool:
+        self._stack.append(self.redis_em.copy(source, destination, destination_db, replace))
+        return False
+
+    async def rename(self, src: str, dst: str) -> bool:
+        self._stack.append(self.redis_em.rename(src, dst))
+        return True
 
     async def sadd(self, name: str, *values: bytes) -> int:
         self._stack.append(self.redis_em.sadd(name, *values))
@@ -300,6 +387,18 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def lrange(self, name: str, start: int, end: int) -> list[bytes]:
         self._stack.append(self.redis_em.lrange(name, start, end))
         return []
+
+    async def ltrim(self, name: str, start: int, end: int) -> bool:
+        self._stack.append(self.redis_em.ltrim(name, start, end))
+        return True
+
+    async def llen(self, name: str) -> int:
+        self._stack.append(self.redis_em.llen(name))
+        return 0
+
+    async def lset(self, name: str, index: int, value: bytes) -> bool:
+        self._stack.append(self.redis_em.lset(name, index, value))
+        return False
 
     async def exists(self, *names: str) -> int:
         self._stack.append(self.redis_em.exists(*names))

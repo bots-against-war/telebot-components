@@ -10,7 +10,7 @@ import toml  # type: ignore
 from cryptography.fernet import Fernet
 
 from telebot_components.redis_utils.interface import RedisInterface
-from telebot_components.stores.generic import GenericStore, KeyDictStore
+from telebot_components.stores.generic import KeyDictStore, SingleKeyStore
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ class RedisSecretStore(SecretStore):
             loader=lambda s: s,
         )
         # this allows creation of several secret stores for testing
-        GenericStore.allow_duplicate_stores(self._store._full_prefix)
+        SingleKeyStore.allow_duplicate_stores(self._store._full_prefix)
 
     async def get_secret(self, secret_name: str, owner_id: OwnerId = ADMIN_OWNER_ID) -> Optional[str]:
         encrypted_b64 = await self._store.get_subkey(self.to_env_specific(owner_id), secret_name)

@@ -71,6 +71,37 @@ class RedisInterface(ABC):
         ...
 
     @abstractmethod
+    async def copy(
+        self,
+        source: str,
+        destination: str,
+        destination_db: Union[str, None] = None,
+        replace: bool = False,
+    ) -> bool:
+        """
+        Copy the value stored in the ``source`` key to the ``destination`` key.
+
+        ``destination_db`` an alternative destination database. By default,
+        the ``destination`` key is created in the source Redis database.
+
+        ``replace`` whether the ``destination`` key should be removed before
+        copying the value to it. By default, the value is not copied if
+        the ``destination`` key already exists.
+
+        For more information see https://redis.io/commands/copy
+        """
+        ...
+
+    @abstractmethod
+    async def rename(self, src: str, dst: str) -> bool:
+        """
+        Rename key ``src`` to ``dst``
+
+        For more information see https://redis.io/commands/rename
+        """
+        ...
+
+    @abstractmethod
     async def sadd(self, name: str, *values: bytes) -> int:
         """Add ``value(s)`` to set ``name`` and return number of values added to the set"""
         ...
@@ -103,7 +134,7 @@ class RedisInterface(ABC):
 
     @abstractmethod
     async def rpush(self, name: str, *values: bytes) -> int:
-        """Push ``values`` onto the tail of the list ``name`` and return list length the operation"""
+        """Push ``values`` onto the tail of the list ``name`` and return list length after the operation"""
         ...
 
     @abstractmethod
@@ -128,6 +159,36 @@ class RedisInterface(ABC):
         position ``start`` and ``end``
         ``start`` and ``end`` can be negative numbers just like
         Python slicing notation
+        """
+        ...
+
+    @abstractmethod
+    async def llen(self, name: str) -> int:
+        """
+        Return the length of the list ``name``
+
+        For more information see https://redis.io/commands/llen
+        """
+        ...
+
+    @abstractmethod
+    async def lset(self, name: str, index: int, value: bytes) -> bool:
+        """
+        Set element at ``index`` of list ``name`` to ``value``
+
+        For more information see https://redis.io/commands/lset
+        """
+
+    @abstractmethod
+    async def ltrim(self, name: str, start: int, end: int) -> bool:
+        """
+        Trim the list ``name``, removing all values not within the slice
+        between ``start`` and ``end``
+
+        ``start`` and ``end`` can be negative numbers just like
+        Python slicing notation
+
+        For more information see https://redis.io/commands/ltrim
         """
         ...
 
@@ -187,7 +248,7 @@ class RedisInterface(ABC):
         ...
 
 
-RedisCmdReturn = Union[bytes, list[bytes], None, int]
+RedisCmdReturn = Union[bytes, list[bytes], None, int, str]
 
 
 class RedisPipelineInterface(RedisInterface):

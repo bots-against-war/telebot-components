@@ -52,7 +52,7 @@ def using_real_redis() -> bool:
     return "REDIS_URL" in os.environ
 
 
-pytest_skip_on_real_redis = pytest.mark.skipif(using_real_redis(), reason="Can't emulate sleeping with real redis")
+pytest_skip_on_real_redis = pytest.mark.skipif(using_real_redis(), reason="Not running on real Redis")
 
 
 def mock_bot_user_json() -> dict[str, Any]:

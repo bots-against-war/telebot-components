@@ -1,10 +1,20 @@
 import asyncio
+import collections
 import functools
 import hashlib
 import io
 import logging
 import string
-from typing import Any, Awaitable, Callable, Optional, TypeVar, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Iterable,
+    Iterator,
+    Optional,
+    TypeVar,
+    Union,
+)
 from weakref import WeakValueDictionary
 
 from PIL import Image  # type: ignore
@@ -133,8 +143,8 @@ def text_hash(some_id: int, bot_prefix: str, length: int = 6) -> str:
 # TODO: unused for now, move to telebot library and use to force sequential processing of
 # the same-origin updates
 class LockRegistry:
-    def __init__(self):
-        self._lock_by_key: dict[Any, asyncio.Lock] = WeakValueDictionary()
+    def __init__(self) -> None:
+        self._lock_by_key: WeakValueDictionary[Any, asyncio.Lock] = WeakValueDictionary()
 
     def get_lock(self, key: Any) -> asyncio.Lock:
         maybe_lock = self._lock_by_key.get(key)
@@ -261,3 +271,11 @@ def log_errors(logger: logging.Logger, errmsg: str, return_on_error: ReturnT) ->
         return wrapper  # type: ignore
 
     return decorator
+
+
+ItemT = TypeVar("ItemT")
+
+
+def tail(n: int, iterable: Iterable[ItemT]) -> Iterator[ItemT]:
+    "Return an iterator over the last n items."
+    return iter(collections.deque(iterable, maxlen=n))

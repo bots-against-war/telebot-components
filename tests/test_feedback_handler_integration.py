@@ -24,6 +24,7 @@ from telebot_components.stores.category import Category
 from tests.utils import (
     TelegramServerMock,
     assert_list_of_required_subdicts,
+    assert_required_subdict,
     extract_full_kwargs,
 )
 
@@ -51,9 +52,9 @@ class MockFeedbackHandlerIntegration(FeedbackHandlerIntegration):
         self.handled_user_message_replied_events.append(event)
 
 
-ADMIN_USER_ID = 123456
-ADMIN_CHAT_ID = 111000111000
-USER_ID = 7890123
+ADMIN_USER_ID = 1
+ADMIN_CHAT_ID = -1001
+USER_ID = 2
 
 
 async def test_feedback_handler_integration_basic(redis: RedisInterface) -> None:
@@ -119,7 +120,7 @@ async def test_feedback_handler_integration_basic(redis: RedisInterface) -> None
     assert_list_of_required_subdicts(
         [mc.full_kwargs for mc in bot.method_calls["send_message"]],
         [
-            {"chat_id": ADMIN_CHAT_ID, "text": "🤭🎺👪☔"},
+            {"chat_id": ADMIN_CHAT_ID, "text": "🧂🙉🗳🦯"},
             {"chat_id": USER_ID, "text": "fwd ok", "reply_to_message_id": 1},
             {
                 "chat_id": ADMIN_CHAT_ID,
@@ -184,25 +185,43 @@ async def test_aux_admin_chat_integration(redis: RedisInterface) -> None:
     assert_list_of_required_subdicts(
         extract_full_kwargs(bot.method_calls["send_message"]),
         [
-            {"chat_id": 7890123, "text": "fwd ok", "reply_to_message_id": 1},
-            {"chat_id": 7890123, "text": "fwd ok", "reply_to_message_id": 2},
+            {"chat_id": USER_ID, "text": "fwd ok", "reply_to_message_id": 1},
+            {"chat_id": USER_ID, "text": "fwd ok", "reply_to_message_id": 2},
         ],
     )
     # the message is forwarded to all admin chats
+
+    fwd_msg_kwargs = extract_full_kwargs(bot.method_calls["forward_message"])
+    assert len(fwd_msg_kwargs) == 2 + 2 * len(AUX_ADMIN_CHAT_IDS)
+    assert_required_subdict(
+        fwd_msg_kwargs[0],
+        {"chat_id": ADMIN_CHAT_ID, "from_chat_id": USER_ID, "message_id": 1},
+    )
+    assert_required_subdict(
+        fwd_msg_kwargs[3],
+        {"chat_id": ADMIN_CHAT_ID, "from_chat_id": USER_ID, "message_id": 2},
+    )
+
+    def sorted_by_chat_id(dicts: list[dict]) -> list[dict]:
+        return sorted(dicts, key=lambda d: d["chat_id"])
+
     assert_list_of_required_subdicts(
-        extract_full_kwargs(bot.method_calls["forward_message"]),
-        [
-            {"chat_id": ADMIN_CHAT_ID, "from_chat_id": USER_ID, "message_id": 1},
-            *[
+        sorted_by_chat_id(fwd_msg_kwargs[1:3]),
+        sorted_by_chat_id(
+            [
                 {"chat_id": aux_admin_chat_id, "from_chat_id": USER_ID, "message_id": 1}
                 for aux_admin_chat_id in AUX_ADMIN_CHAT_IDS
-            ],
-            {"chat_id": ADMIN_CHAT_ID, "from_chat_id": USER_ID, "message_id": 2},
-            *[
+            ]
+        ),
+    )
+    assert_list_of_required_subdicts(
+        sorted_by_chat_id(fwd_msg_kwargs[4:6]),
+        sorted_by_chat_id(
+            [
                 {"chat_id": aux_admin_chat_id, "from_chat_id": USER_ID, "message_id": 2}
                 for aux_admin_chat_id in AUX_ADMIN_CHAT_IDS
-            ],
-        ],
+            ]
+        ),
     )
 
     bot.method_calls.clear()
@@ -214,27 +233,31 @@ async def test_aux_admin_chat_integration(redis: RedisInterface) -> None:
     assert extract_full_kwargs(bot.method_calls["copy_message"]) == [
         {"chat_id": USER_ID, "from_chat_id": ADMIN_CHAT_ID, "message_id": 3}
     ]
+    send_msg_kwargs = extract_full_kwargs(bot.method_calls["send_message"])
+    assert_required_subdict(
+        send_msg_kwargs[0],
+        {
+            "chat_id": ADMIN_CHAT_ID,
+            "text": "copied ok",
+            "reply_to_message_id": 3,
+        },
+    )
     assert_list_of_required_subdicts(
-        extract_full_kwargs(bot.method_calls["send_message"]),
-        [
-            {
-                "chat_id": ADMIN_CHAT_ID,
-                "text": "copied ok",
-                "reply_to_message_id": 3,
-            },
-            *[
+        sorted_by_chat_id(send_msg_kwargs[1:]),
+        sorted_by_chat_id(
+            [
                 {
                     "chat_id": aux_admin_chat_id,
                     "reply_to_message_id": 2,
                     "text": (
-                        '💬 <b>Admin</b> via <a href="https://t.me/c/111000111000/3">main admin chat</a>\n\n'
+                        '💬 <b>Admin</b> via <a href="https://t.me/c/1/3">main admin chat</a>\n\n'
                         "hello from the main admin chat"
                     ),
                     "parse_mode": "HTML",
                 }
                 for aux_admin_chat_id in AUX_ADMIN_CHAT_IDS
-            ],
-        ],
+            ]
+        ),
     )
     bot.method_calls.clear()
 
@@ -246,7 +269,7 @@ async def test_aux_admin_chat_integration(redis: RedisInterface) -> None:
         reply_to_message_id=2,
     )
     assert extract_full_kwargs(bot.method_calls["copy_message"]) == [
-        {"chat_id": 7890123, "from_chat_id": AUX_ADMIN_CHAT_IDS[0], "message_id": 4}
+        {"chat_id": USER_ID, "from_chat_id": AUX_ADMIN_CHAT_IDS[0], "message_id": 4}
     ]
     assert_list_of_required_subdicts(
         extract_full_kwargs(bot.method_calls["send_message"]),
@@ -257,7 +280,7 @@ async def test_aux_admin_chat_integration(redis: RedisInterface) -> None:
                 "reply_to_message_id": 4,
             },
             {
-                "chat_id": 111000111000,
+                "chat_id": ADMIN_CHAT_ID,
                 "reply_to_message_id": 2,
                 "text": (
                     '💬 <b>Admin</b> via <a href="https://t.me/c/1312/4">aux-admin-chat-0</a>\n\n'

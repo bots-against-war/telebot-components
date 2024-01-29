@@ -6,7 +6,7 @@ authors = ["Igor Vaiman <gosha.vaiman@gmail.com>"]
 license = "GPLv3"
 readme = "README.md"
 repository = "https://github.com/bots-against-war/telebot-components"
-packages = [{include = "telebot_components"}]
+packages = [{ include = "telebot_components" }]
 
 [tool.poetry.group.dev.dependencies]
 pyproject-flake8 = "^6.0.0.post1"
@@ -16,12 +16,12 @@ coverage = "^7.2.3"
 enable = true
 vcs = "git"
 dirty = true
-style="semver"
+style = "semver"
 
 [tool.poetry.dependencies]
 python = "^3.10"
 telebot-against-war = "^0.6.11"
-redis = "^4.3.1"
+redis = "^5.0.1"
 py-trello = "^0.18.0"
 markdownify = "^0.11.2"
 pytest-mock = "^3.7.0"
@@ -35,6 +35,7 @@ async-lru = "^2.0.2"
 cryptography = "^41.0.6"
 toml = "^0.10.2"
 urllib3 = "^1.26.18"
+diff-match-patch = "^20230430"
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.1.2"
@@ -61,9 +62,7 @@ profile = 'black'
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-markers = [
-    'integration: requires a real bot to run',
-]
+markers = ['integration: requires a real bot to run']
 
 [tool.mypy]
 incremental = false
@@ -72,6 +71,27 @@ files = '.'
 [tool.flake8]
 max-line-length = 120
 extend-ignore = [
-    "F841",  # local variable 'xxx' is assigned to but never used
-    "E203",  # whitespace before ':' (black formatting compatibility)
+    "F841", # local variable 'xxx' is assigned to but never used
+    "E203", # whitespace before ':' (black formatting compatibility)
+]
+
+[tool.coverage.run]
+# this way coverage will show even files that are not imported at all
+source = ['telebot_components']
+
+[tool.coverage.report]
+fail_under = 70
+skip_covered = true
+show_missing = true
+exclude_lines = [
+    # re-enable the standard pragma
+    'pragma: no cover',
+    # non-runnable code
+    'if __name__ == .__main__.:',
+    # abstract methods aren't run:
+    '@(abc\.)?abstractmethod',
+    # ellipsis is used in abstract method bodies
+    '\.\.\.',
+    # stub methods
+    'raise NotImplementedError()',
 ]
