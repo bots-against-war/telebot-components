@@ -527,16 +527,18 @@ class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
             return None
 
     async def revert(self, key: str_able, to_version: int) -> tuple[ValueT, VersionMetaT | None] | None:
-        temp_key = str(uuid.uuid4())
         if not await self._version_store.exists(key):
             return None
+
+        temp_key = str(uuid.uuid4())
         await self._version_store.copy(key, temp_key)
         await self._version_store.manual_expire(temp_key, ttl=datetime.timedelta(minutes=30))
 
         versions = await self._version_store.tail(temp_key, start=to_version)
         if versions is None:
+            await self._version_store.drop(temp_key)
             return None
-        snapshot, _ = next(tail(1, self._iter_versions(versions, key=str(key))))
+        snapshot, _ = next(tail(1, self._iter_versions(versions, key=temp_key)))
         new_last_version = Version(snapshot=snapshot, backdiff=None, meta=versions[0].meta)
 
         await self._version_store.set(temp_key, i=to_version, value=new_last_version)

@@ -77,7 +77,7 @@ class RedisInterface(ABC):
         destination: str,
         destination_db: Union[str, None] = None,
         replace: bool = False,
-    ) -> int:
+    ) -> bool:
         """
         Copy the value stored in the ``source`` key to the ``destination`` key.
 
@@ -93,7 +93,7 @@ class RedisInterface(ABC):
         ...
 
     @abstractmethod
-    async def rename(self, src: str, dst: str) -> str:
+    async def rename(self, src: str, dst: str) -> bool:
         """
         Rename key ``src`` to ``dst``
 
@@ -172,7 +172,7 @@ class RedisInterface(ABC):
         ...
 
     @abstractmethod
-    async def lset(self, name: str, index: int, value: bytes) -> str:
+    async def lset(self, name: str, index: int, value: bytes) -> bool:
         """
         Set element at ``index`` of list ``name`` to ``value``
 
@@ -180,7 +180,7 @@ class RedisInterface(ABC):
         """
 
     @abstractmethod
-    async def ltrim(self, name: str, start: int, end: int) -> str:
+    async def ltrim(self, name: str, start: int, end: int) -> bool:
         """
         Trim the list ``name``, removing all values not within the slice
         between ``start`` and ``end``

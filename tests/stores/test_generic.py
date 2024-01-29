@@ -609,3 +609,27 @@ async def test_key_versioned_store_revert(redis: RedisInterface) -> None:
             meta={"message": "changed name"},
         ),
     ]
+
+    await store.save(key, {"name": "edited history", "amount": 100}, meta={"message": "hi"})
+    await asyncio.sleep(0.01)
+
+    assert await store.load_raw_versions(key) == [
+        Version(
+            snapshot=None,
+            backdiff=[{"path": ["name"], "action": "change", "new": "test"}],
+            meta={"message": "init"},
+        ),
+        Version(
+            snapshot=None,
+            backdiff=[
+                {"path": ["name"], "action": "change", "new": "new"},
+                {"path": ["amount"], "action": "change", "new": 1},
+            ],
+            meta={"message": "changed name"},
+        ),
+        Version(
+            snapshot={"name": "edited history", "amount": 100},
+            backdiff=None,
+            meta={"message": "hi"},
+        ),
+    ]

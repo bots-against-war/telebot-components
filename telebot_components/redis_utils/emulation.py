@@ -92,34 +92,31 @@ class RedisEmulation(RedisInterface):
         destination: str,
         destination_db: Union[str, None] = None,
         replace: bool = False,
-    ) -> int:
+    ) -> bool:
         """Note: dbs are not supported, so destination_db param is ignored"""
         for name in (source, destination):
             await self._bookkeeping(name)
-
         for storage in self.storages:
             if destination in storage:
                 if replace:
                     storage.pop(destination)
                 else:
-                    return 0
-
+                    return False
         for storage in self.storages:
             if source in storage:
                 storage[destination] = copy.deepcopy(storage[source])
-                return 1
+                return True
+        return False
 
-        return 0
-
-    async def rename(self, src: str, dst: str) -> str:
+    async def rename(self, src: str, dst: str) -> bool:
         for name in (src, dst):
             await self._bookkeeping(name)
         for storage in self.storages:
             if src in storage:
                 await self.delete(dst)
                 storage[dst] = storage.pop(src)
-                return "OK"
-        return "error: src does not exist"
+                return True
+        raise KeyError(f"src key does not exist: {src}")
 
     async def expire(self, name: str, time: timedelta) -> int:
         self.key_eviction_time[name] = time_module.time() + time.total_seconds()
@@ -228,23 +225,23 @@ class RedisEmulation(RedisInterface):
         await self._bookkeeping(name)
         return len(self.lists.get(name, []))
 
-    async def lset(self, name: str, index: int, value: bytes) -> str:
+    async def lset(self, name: str, index: int, value: bytes) -> bool:
         await self._bookkeeping(name)
         list_ = self.lists.get(name)
         if list_ is None:
-            return "(error) no such key"
+            raise KeyError(f"no such key: {name}")
         try:
             list_[index] = value
         except Exception:
-            return "(error) index out of range"
+            raise KeyError(f"index out of range: {name}[{index}]")
 
-        return "OK"
+        return True
 
-    async def ltrim(self, name: str, start: int, end: int) -> str:
+    async def ltrim(self, name: str, start: int, end: int) -> bool:
         await self._bookkeeping(name)
         if name in self.lists:
             self.lists[name] = self._redis_slice(self.lists[name], start, end)
-        return "OK"
+        return True
 
     async def exists(self, *names: str) -> int:
         n_exist = 0
@@ -343,13 +340,13 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
         destination: str,
         destination_db: Union[str, None] = None,
         replace: bool = False,
-    ) -> int:
+    ) -> bool:
         self._stack.append(self.redis_em.copy(source, destination, destination_db, replace))
-        return 0
+        return False
 
-    async def rename(self, src: str, dst: str) -> str:
+    async def rename(self, src: str, dst: str) -> bool:
         self._stack.append(self.redis_em.rename(src, dst))
-        return "OK"
+        return True
 
     async def sadd(self, name: str, *values: bytes) -> int:
         self._stack.append(self.redis_em.sadd(name, *values))
@@ -391,17 +388,17 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
         self._stack.append(self.redis_em.lrange(name, start, end))
         return []
 
-    async def ltrim(self, name: str, start: int, end: int) -> str:
+    async def ltrim(self, name: str, start: int, end: int) -> bool:
         self._stack.append(self.redis_em.ltrim(name, start, end))
-        return "OK"
+        return True
 
     async def llen(self, name: str) -> int:
         self._stack.append(self.redis_em.llen(name))
         return 0
 
-    async def lset(self, name: str, index: int, value: bytes) -> str:
+    async def lset(self, name: str, index: int, value: bytes) -> bool:
         self._stack.append(self.redis_em.lset(name, index, value))
-        return "OK"
+        return False
 
     async def exists(self, *names: str) -> int:
         self._stack.append(self.redis_em.exists(*names))

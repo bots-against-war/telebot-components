@@ -1,3 +1,4 @@
+import string
 from datetime import timedelta
 from typing import Callable, Coroutine
 from uuid import uuid4
@@ -101,10 +102,13 @@ async def test_counter(redis: RedisInterface, time_supplier: TimeSupplier):
 async def test_list(redis: RedisInterface):
     key, _ = generate_key_value()
     assert await redis.lrange(key, 0, -1) == []
-    values = generate_values(10)
+    values = [letter.encode("utf-8") for letter in string.ascii_letters[:10]]
     for v in values[:5]:
         await redis.rpush(key, v)
+    assert await redis.llen(key) == 5
     await redis.rpush(key, *values[5:])
+    assert await redis.llen(key) == 10
+
     assert await redis.lrange(key, 0, -1) == values
     assert await redis.lrange(key, 0, 1) == values[0:2]
     assert await redis.lrange(key, 4, 8) == values[4:9]
@@ -114,6 +118,15 @@ async def test_list(redis: RedisInterface):
     assert await redis.lrange(key, 1, -100) == []
     assert await redis.lrange(key, -1, -1) == [values[9]]
     assert await redis.lrange(key, -1000, -100) == []
+    assert await redis.lrange("non-existent-key", 0, -1) == []
+
+    assert await redis.lset(key, 5, b"edited") is True
+    values_edited = values.copy()
+    values_edited[5] = b"edited"
+    assert await redis.lrange(key, 0, -1) == values_edited
+
+    assert await redis.ltrim(key, 0, 3) is True
+    assert await redis.lrange(key, 0, -1) == values_edited[:4]
 
 
 @pytest_skip_on_real_redis
@@ -202,3 +215,38 @@ async def test_rpush_rpop(redis: RedisInterface):
     assert await redis.rpop("my-list-key") == b"9"
     assert await redis.rpop("my-list-key", 3) == [b"8", b"7", b"6"]
     assert await redis.rpop("my-list-key", 100) == [b"5", b"4", b"3", b"2", b"1", b"0"]
+
+
+@pytest.mark.parametrize("is_copy", [True, False])
+async def test_copy_or_rename_key(redis: RedisInterface, is_copy: bool) -> None:
+    async def copy_or_rename(key1: str, key2: str):
+        if is_copy:
+            assert await redis.copy(key1, key2) is True
+        else:
+            assert await redis.rename(key1, key2) is True
+
+    key1, key2 = "key1", "key2"
+    await redis.set(key1, b"hello")
+    await copy_or_rename(key1, key2)
+    assert await redis.get(key1) == (b"hello" if is_copy else None)
+    assert await redis.get(key2) == b"hello"
+
+    key1, key2 = "key3", "key4"
+    await redis.rpush(key1, b"1", b"2", b"3")
+    await copy_or_rename(key1, key2)
+    assert await redis.lrange(key1, 0, -1) == ([b"1", b"2", b"3"] if is_copy else [])
+    assert await redis.lrange(key2, 0, -1) == [b"1", b"2", b"3"]
+
+    key1, key2 = "key5", "key6"
+    await redis.hset(key1, "subkey1", b"a")
+    await redis.hset(key1, "subkey2", b"b")
+    await copy_or_rename(key1, key2)
+    assert await redis.hget(key1, "subkey1") == (b"a" if is_copy else None)
+    assert await redis.hget(key1, "subkey2") == (b"b" if is_copy else None)
+    assert await redis.hget(key2, "subkey1") == b"a"
+    assert await redis.hget(key2, "subkey2") == b"b"
+
+
+async def test_rename_non_existent(redis: RedisInterface) -> None:
+    with pytest.raises(Exception):
+        assert await redis.rename("key-does-not-exist", "new")
