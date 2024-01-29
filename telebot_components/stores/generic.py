@@ -129,7 +129,7 @@ class SingleKeyStore(PrefixedStore, Generic[T]):
 
     @redis_retry()
     async def rename(self, key: str_able, to: str_able) -> bool:
-        return await self.redis.rename(src=self._full_key(key), dst=self._full_key(to)) == "OK"
+        return await self.redis.rename(src=self._full_key(key), dst=self._full_key(to)) is True
 
     @redis_retry()
     async def manual_expire(self, key: str_able, ttl: datetime.timedelta) -> None:
@@ -224,7 +224,7 @@ class KeyListStore(SingleKeyStore[ItemT]):
             if reset_ttl and self.expiration_time is not None:
                 await pipe.expire(self._full_key(key), self.expiration_time)
             after_push_len, *_ = await pipe.execute()
-            return after_push_len == "OK"
+            return after_push_len is True
 
     @redis_retry()
     async def trim(self, key: str_able, last: int) -> None:

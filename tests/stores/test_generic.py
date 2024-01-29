@@ -131,10 +131,22 @@ async def test_key_list_store(redis: RedisInterface, key: str_able, jsonable_val
         prefix=generate_str(),
         redis=redis,
     )
-    for _ in range(10):
-        assert await store.push(key, jsonable_value)
-    assert await store.all(key) == [jsonable_value] * 10
-    assert await store.drop(key)
+    for i in range(5):
+        assert await store.push(key, jsonable_value) == i + 1
+    assert await store.push(key, "hello") == 6
+    assert await store.push(key, 1312) == 7
+    assert await store.all(key) == [jsonable_value] * 5 + ["hello", 1312]
+
+    assert await store.length(key) == 7
+
+    assert await store.tail(key, 4) == [jsonable_value, "hello", 1312]
+    assert await store.set(key, 4, "new value") is True
+    assert await store.tail(key, 4) == ["new value", "hello", 1312]
+
+    assert await store.trim(key, last=4) is None
+    assert await store.all(key) == [jsonable_value] * 4 + ["new value"]
+
+    assert await store.drop(key) is True
     assert await store.all(key) == []
 
 
