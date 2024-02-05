@@ -767,6 +767,7 @@ class FeedbackHandler:
                     text,
                     remove_exif_data,
                     message_thread_id=message_thread_id,
+                    **send_message_kwargs,
                 )
             return MessageForwarderResult(
                 admin_chat_msg=sent_msg,

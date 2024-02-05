@@ -166,6 +166,7 @@ async def send_attachment(
     caption: Optional[str] = None,
     remove_metadata: bool = True,
     message_thread_id: Optional[int] = None,
+    **send_message_kwargs,
 ):
     if isinstance(attachment, list) and all(isinstance(att, tg.PhotoSize) for att in attachment):
         return await bot.send_photo(
@@ -173,6 +174,7 @@ async def send_attachment(
             photo=attachment[0].file_id,
             caption=caption,
             message_thread_id=message_thread_id,
+            **send_message_kwargs,
         )
     elif isinstance(attachment, tg.Document):
         doc_to_send: Union[str, bytes]
@@ -188,6 +190,7 @@ async def send_attachment(
             caption=caption,
             visible_file_name=attachment.file_name,
             message_thread_id=message_thread_id,
+            **send_message_kwargs,
         )
     elif isinstance(attachment, tg.Video):
         return await bot.send_video(
@@ -195,6 +198,7 @@ async def send_attachment(
             video=attachment.file_id,
             caption=caption,
             message_thread_id=message_thread_id,
+            **send_message_kwargs,
         )
     elif isinstance(attachment, tg.Animation):
         return await bot.send_animation(
@@ -202,6 +206,7 @@ async def send_attachment(
             animation=attachment.file_id,
             caption=caption,
             message_thread_id=message_thread_id,
+            **send_message_kwargs,
         )
     elif isinstance(attachment, tg.Audio):
         return await bot.send_audio(
@@ -209,6 +214,7 @@ async def send_attachment(
             audio=attachment.file_id,
             caption=caption,
             message_thread_id=message_thread_id,
+            **send_message_kwargs,
         )
     else:
         raise TypeError(f"Can not send attachment of type: {type(attachment)!r}.")
