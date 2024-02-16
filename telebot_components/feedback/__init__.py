@@ -1077,6 +1077,11 @@ class FeedbackHandler:
                                         from_chat_id=self.admin_chat_id,
                                         message_id=message_id,
                                     )
+                                    if self.config.message_log_to_admin_chat:
+                                        # to be able to reply to them as to normal forwarded messages...
+                                        await self.origin_chat_id_store.save(log_message.id, origin_chat_id)
+                                        # ... and to delete them in case of user ban
+                                        await self.user_related_messages_store.add(origin_chat_id, log_message.id)
                                 except Exception:
                                     self.logger.info(
                                         f"Error forwarding message for /log command, {page = }; {total_pages = }",
@@ -1086,11 +1091,6 @@ class FeedbackHandler:
                                         chat_id=log_destination_chat_id,
                                         text="Failed to send log message!",
                                     )
-                                if self.config.message_log_to_admin_chat:
-                                    # to be able to reply to them as to normal forwarded messages...
-                                    await self.origin_chat_id_store.save(log_message.id, origin_chat_id)
-                                    # ... and to delete them in case of user ban
-                                    await self.user_related_messages_store.add(origin_chat_id, log_message.id)
                                 await asyncio.sleep(0.5)  # soft rate limit prevention
                             except Exception:
                                 self.logger.exception(
