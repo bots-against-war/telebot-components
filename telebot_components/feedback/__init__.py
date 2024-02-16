@@ -1071,11 +1071,21 @@ class FeedbackHandler:
                         )
                         for message_id in log_message_ids_page:
                             try:
-                                log_message = await bot.forward_message(
-                                    chat_id=log_destination_chat_id,
-                                    from_chat_id=self.admin_chat_id,
-                                    message_id=message_id,
-                                )
+                                try:
+                                    log_message = await bot.forward_message(
+                                        chat_id=log_destination_chat_id,
+                                        from_chat_id=self.admin_chat_id,
+                                        message_id=message_id,
+                                    )
+                                except Exception:
+                                    self.logger.info(
+                                        f"Error forwarding message for /log command, {page = }; {total_pages = }",
+                                        exc_info=True,
+                                    )
+                                    await bot.send_message(
+                                        chat_id=log_destination_chat_id,
+                                        text="Failed to send log message!",
+                                    )
                                 if self.config.message_log_to_admin_chat:
                                     # to be able to reply to them as to normal forwarded messages...
                                     await self.origin_chat_id_store.save(log_message.id, origin_chat_id)
