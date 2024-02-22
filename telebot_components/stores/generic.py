@@ -141,7 +141,11 @@ class SingleKeyStore(PrefixedStore, Generic[T]):
 
     @redis_retry()
     async def list_keys(self) -> list[str]:
-        matching_full_keys = await self.redis.keys(self._full_prefix + "*")
+        return await self.find_keys(pattern="*")
+
+    @redis_retry()
+    async def find_keys(self, pattern: str) -> list[str]:
+        matching_full_keys = await self.redis.keys(self._full_prefix + pattern)
         return [fk.decode("utf-8").removeprefix(self._full_prefix) for fk in matching_full_keys]
 
 

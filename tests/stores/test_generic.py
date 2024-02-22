@@ -143,7 +143,7 @@ async def test_key_list_store(redis: RedisInterface, key: str_able, jsonable_val
     assert await store.set(key, 4, "new value") is True
     assert await store.tail(key, 4) == ["new value", "hello", 1312]
 
-    assert await store.trim(key, last=4) is None
+    await store.trim(key, last=4)
     assert await store.all(key) == [jsonable_value] * 4 + ["new value"]
 
     assert await store.drop(key) is True
@@ -187,11 +187,14 @@ async def test_key_set_store(redis: RedisInterface, key: str_able, jsonable_valu
     await store.add_multiple(key, values_bulk)
 
     values_set = set(values_one_by_one + values_bulk)
-    popped_set = set(await store.pop_multiple(key, count=3))
-    assert popped_set.issubset(values_set)
-    for popped in popped_set:
-        values_set.discard(popped)
-    assert await store.all(key) == values_set
+
+    assert await store.pop_multiple(key, count=0) == []
+    for count in (1, 3):
+        popped_set = set(await store.pop_multiple(key, count=count))
+        assert popped_set.issubset(values_set)
+        for popped in popped_set:
+            values_set.discard(popped)
+        assert await store.all(key) == values_set
 
 
 async def test_set_store(redis: RedisInterface, jsonable_value_factory: Any):
@@ -243,8 +246,8 @@ async def test_list_keys(redis: RedisInterface):
         prefix=bot_prefix,
         redis=redis,
     )
-    store_1_keys = [uuid4().hex for _ in range(100)]
-    for k in store_1_keys:
+    random_keys_1 = [uuid4().hex for _ in range(100)]
+    for k in random_keys_1:
         await store_1.save(k, uuid4().hex)
 
     store_2 = KeyValueStore[str](
@@ -252,12 +255,16 @@ async def test_list_keys(redis: RedisInterface):
         prefix=bot_prefix,
         redis=redis,
     )
-    store_2_keys = [uuid4().hex for _ in range(100)]
-    for k in store_2_keys:
+    random_keys_2 = [uuid4().hex for _ in range(100)]
+    for k in random_keys_2:
         await store_2.save(k, uuid4().hex)
+    CUSTOM_KEYS = ["prefixed-1", "prefixed-1234", "prefixed-hello"]
+    for k in CUSTOM_KEYS:
+        await store_2.save(k, "VALUE")
 
-    assert set(await store_1.list_keys()) == set(store_1_keys)
-    assert set(await store_2.list_keys()) == set(store_2_keys)
+    assert set(await store_1.list_keys()) == set(random_keys_1)
+    assert set(await store_2.list_keys()) == set(random_keys_2 + CUSTOM_KEYS)
+    assert set(await store_2.find_keys(pattern="prefixed-*")) == set(CUSTOM_KEYS)
 
 
 async def test_cant_create_conflicting_stores(redis: RedisInterface, normal_store_behavior):

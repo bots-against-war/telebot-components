@@ -43,6 +43,12 @@ Use command below for run tests
 poetry run pytest tests -vv
 ```
 
+To also generate test coverage report
+
+```bash
+poetry run coverage run -m pytest tests -vv && poetry run coverage report
+```
+
 By default, all tests are run with in-memory Redis emulation. But if you want you can run them
 locally on real Redis by specifying `REDIS_URL` environment variable before running `pytest`.
 
