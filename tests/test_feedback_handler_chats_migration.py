@@ -18,7 +18,6 @@ from telebot_components.feedback.integration.aux_feedback_handler import (
     AuxFeedbackHandlerIntegration,
 )
 from telebot_components.redis_utils.interface import RedisInterface
-from telebot_components.stores.generic import SingleKeyStore
 from tests.utils import (
     TelegramServerMock,
     assert_list_of_required_subdicts,

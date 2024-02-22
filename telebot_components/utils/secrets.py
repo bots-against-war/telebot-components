@@ -10,7 +10,7 @@ import toml  # type: ignore
 from cryptography.fernet import Fernet
 
 from telebot_components.redis_utils.interface import RedisInterface
-from telebot_components.stores.generic import KeyDictStore, SingleKeyStore
+from telebot_components.stores.generic import KeyDictStore
 
 logger = logging.getLogger(__name__)
 
