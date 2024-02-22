@@ -34,7 +34,8 @@ T = TypeVar("T")
 
 
 class str_able(Protocol):
-    def __str__(self) -> str: ...
+    def __str__(self) -> str:
+        ...
 
 
 logger = logging.getLogger(__name__)
