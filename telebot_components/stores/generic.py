@@ -64,8 +64,6 @@ class PrefixedStore:
     prefix: str  # used to identify bot that uses the store
     redis: RedisInterface
 
-    _prefix_registry: ClassVar[set[str]] = set()
-
     # useful for testing to allow multiple stores with one prefix to be created
     # never set to True in actual usage!
     RANDOMIZE_PREFIXES: ClassVar[bool] = False
@@ -81,19 +79,10 @@ class PrefixedStore:
             # option for testing that allows creating unlimited number of independent copies for every store
             prefix_hash += "-RANDOM" + secrets.token_hex(nbytes=8)
         self._full_prefix = f"{plain_prefix}-{prefix_hash}-"
-        if self._full_prefix in self._prefix_registry:
-            raise ValueError(
-                f"Attempt to create {self.__class__.__name__} with prefix {self._full_prefix!r} already in use"
-            )
-        else:
-            self._prefix_registry.add(self._full_prefix)
-
-    def __del__(self):
-        self._prefix_registry.discard(self._full_prefix)
 
     @classmethod
     def allow_duplicate_stores(cls, prefix: str):
-        cls._prefix_registry = {fp for fp in cls._prefix_registry if not fp.startswith(prefix)}
+        pass  # noop, left for backwards compatibility
 
 
 @dataclasses.dataclass

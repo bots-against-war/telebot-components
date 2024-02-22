@@ -9,7 +9,6 @@ repository = "https://github.com/bots-against-war/telebot-components"
 packages = [{ include = "telebot_components" }]
 
 [tool.poetry.group.dev.dependencies]
-pyproject-flake8 = "^6.0.0.post1"
 coverage = "^7.2.3"
 
 [tool.poetry-dynamic-versioning]
@@ -36,6 +35,7 @@ cryptography = ">=41.0.6,<43.0.0"
 toml = "^0.10.2"
 urllib3 = "^1.26.18"
 diff-match-patch = "^20230430"
+flake8-pyproject = "^1.2.3"
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.1.2"
