@@ -433,6 +433,9 @@ class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
     async def list_keys(self) -> list[str]:
         return await self._version_store.list_keys()
 
+    async def find_keys(self, pattern: str) -> list[str]:
+        return await self._version_store.find_keys(pattern)
+
     async def load_raw_versions(self, key: str_able, start_version: int = 0) -> list[Version[VersionMetaT]]:
         return await self._version_store.tail(key, start=start_version) or []
 
