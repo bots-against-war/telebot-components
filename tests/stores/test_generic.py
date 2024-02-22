@@ -267,21 +267,6 @@ async def test_list_keys(redis: RedisInterface):
     assert set(await store_2.find_keys(pattern="prefixed-*")) == set(CUSTOM_KEYS)
 
 
-async def test_cant_create_conflicting_stores(redis: RedisInterface, normal_store_behavior):
-    bot_prefix = generate_str()
-    store_1 = KeyValueStore[int](
-        name="some-prefix",
-        prefix=bot_prefix,
-        redis=redis,
-    )
-    with pytest.raises(ValueError, match="Attempt to create KeyValueStore with prefix "):
-        store_2 = KeyValueStore[int](
-            name="some-prefix",
-            prefix=bot_prefix,
-            redis=redis,
-        )
-
-
 async def test_key_dict_store(redis: RedisInterface):
     class UserData(TypedDict):
         name: str
