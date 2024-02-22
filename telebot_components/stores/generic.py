@@ -82,7 +82,7 @@ class PrefixedStore:
 
     @classmethod
     def allow_duplicate_stores(cls, prefix: str):
-        pass  # noop, left for backwards compatibility
+        logger.warning("allow_duplicate_stores is noop now, duplicate stores are globally allowed")
 
 
 @dataclasses.dataclass
