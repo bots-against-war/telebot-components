@@ -99,8 +99,6 @@ class RedisSecretStore(SecretStore):
             dumper=lambda s: s,
             loader=lambda s: s,
         )
-        # secret stores do not conflict so it's ok to have several copies
-        SingleKeyStore.allow_duplicate_stores(self._store._full_prefix)
 
     async def get_secret(self, secret_name: str, owner_id: OwnerId = ADMIN_OWNER_ID) -> Optional[str]:
         encrypted_b64 = await self._store.get_subkey(self.to_env_specific(owner_id), secret_name)

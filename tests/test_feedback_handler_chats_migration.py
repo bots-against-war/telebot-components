@@ -118,7 +118,6 @@ async def test_main_to_aux_chat_migration(redis: RedisInterface, normal_store_be
     bot_prefix = "main-to-aux-chat-migration-test-bot-"
 
     before_bot = await create_bot(bot_prefix, redis, feedback_to_main_chat=True, feedback_to_aux_chat=True)
-    SingleKeyStore.allow_duplicate_stores(bot_prefix)
 
     before_bot.add_return_values(
         "create_forum_topic",
@@ -156,7 +155,6 @@ async def test_main_to_aux_chat_migration(redis: RedisInterface, normal_store_be
 
     after_bot = await create_bot(bot_prefix, redis, feedback_to_aux_chat=True, feedback_to_main_chat=False)
     after_bot._latest_message_id_by_chat = before_bot._latest_message_id_by_chat
-    SingleKeyStore.allow_duplicate_stores(bot_prefix)
     await telegram.send_message_to_bot(after_bot, user_id=USER_ID, text="are you still there?")
 
     assert set(after_bot.method_calls.keys()) == {
