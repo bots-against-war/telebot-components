@@ -595,6 +595,7 @@ class FeedbackHandler:
             message_thread_id: Optional[int] = await self.forum_topic_store.get_message_thread_id(category)
         elif self.config.forum_topic_per_user:
             message_thread_id = await self.message_thread_id_by_user_id_store.load(user.id)
+            await self.message_thread_id_by_user_id_store.touch(user.id) 
             if message_thread_id is None:
                 try:
                     new_topic = await bot.create_forum_topic(
