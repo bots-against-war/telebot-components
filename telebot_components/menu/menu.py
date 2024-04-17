@@ -545,6 +545,7 @@ class MenuHandler:
                 new_menu=self.menu_by_id[new_menu_id],
                 current_menu_message_id=call.message.id,
             )
+            return None
 
         @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA, auto_answer=True)
         async def handle_inactive_menu(call: tg.CallbackQuery):
