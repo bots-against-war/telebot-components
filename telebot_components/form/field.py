@@ -735,7 +735,8 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
     def __post_init__(self) -> None:
         super().__post_init__()
         self._option_by_hash = {self.option_hash(o): o for o in self.EnumClass}
-        # TODO: check hash uniqueness here!
+        if len(self._option_by_hash) != len(self.EnumClass):
+            raise ValueError("Duplicate options detected in the options enum!")
 
     def custom_value_type(self) -> Type:
         return set[self.EnumClass]  # type: ignore
@@ -744,6 +745,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
         if isinstance(option.value, str):
             return md5(option.value.encode("utf-8")).hexdigest()[:8]
         elif isinstance(option.value, dict):
+            # WARNING: this might be unstable due to dict order
             md5_hash = md5()
             is_hash_initialized = False
             for lang, localization in option.value.items():
@@ -752,7 +754,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                     md5_hash.update(localization.encode("utf-8"))
             if is_hash_initialized:
                 return md5_hash.hexdigest()[:8]
-        raise ValueError("Every Enum option must either string or Language -> str dict")
+        raise ValueError("Every Enum option must be either a string or a Language->str dict")
 
     def value_to_str(self, value: set[Enum], language: MaybeLanguage) -> str:
         selected_str = [any_text_to_str(opt.value, language) for opt in value]

@@ -62,7 +62,7 @@ class DataclassMessageSender(AbstractMessageSender):
         return cls(**dump)
 
     def dump_concrete(self) -> dict:
-        return asdict(self)
+        return asdict(self)  # type: ignore
 
 
 @dataclass(frozen=True)

@@ -169,7 +169,7 @@ def test_yaml_serialization(obj: Any):
     assert from_yaml_unsafe(to_yaml_unsafe(obj)) == obj
 
 
-async def test_lock_registry():
+async def test_lock_registry() -> None:
     @dataclass
     class Event:
         is_start: bool
@@ -202,7 +202,7 @@ async def test_lock_registry():
     assert len(lock_registry._lock_by_key) == 0
 
 
-def test_alphabet_hash():
+def test_alphabet_hash() -> None:
     assert emoji_hash(123456789, "hello-world") == "🤸👐🃏🦯"
     assert emoji_hash(10000, "hello-world") == "⚒🌑💄🧃"
     assert emoji_hash(-10000, "hello-world") == "🔵🦠🕔🌂"

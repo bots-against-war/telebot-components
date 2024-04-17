@@ -8,10 +8,6 @@ readme = "README.md"
 repository = "https://github.com/bots-against-war/telebot-components"
 packages = [{ include = "telebot_components" }]
 
-[tool.poetry.group.dev.dependencies]
-coverage = "^7.2.3"
-flake8-pyproject = "^1.2.3"
-
 [tool.poetry-dynamic-versioning]
 enable = true
 vcs = "git"
@@ -20,7 +16,7 @@ style = "semver"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-telebot-against-war = "^0.6.11"
+telebot-against-war = "^0.6.13"
 redis = "^5.0.1"
 py-trello = "^0.18.0"
 markdownify = "^0.11.2"
@@ -37,7 +33,10 @@ toml = "^0.10.2"
 urllib3 = "^1.26.18"
 diff-match-patch = "^20230430"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
+coverage = "^7.2.3"
+flake8-pyproject = "^1.2.3"
+mypy = "^1.9.0"
 pytest = "^7.1.2"
 pytest-aiohttp = "1.0.4"
 pytest-asyncio = "^0.18.3"
@@ -46,8 +45,6 @@ aioresponses = "0.7.6"
 black = "^22.3.0"
 isort = "^5.10.1"
 pre-commit = "^2.19.0"
-mypy = "^0.960"
-
 
 [build-system]
 requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning"]

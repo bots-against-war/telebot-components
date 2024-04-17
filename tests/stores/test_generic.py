@@ -188,6 +188,10 @@ async def test_key_set_store(redis: RedisInterface, key: str_able, jsonable_valu
 
     values_set = set(values_one_by_one + values_bulk)
 
+    assert await store.pop_multiple("non-existent key", count=0) == []
+    assert await store.pop_multiple("non-existent key", count=1) == []
+    assert await store.pop_multiple("non-existent key", count=1000) == []
+
     assert await store.pop_multiple(key, count=0) == []
     for count in (1, 3):
         popped_set = set(await store.pop_multiple(key, count=count))
@@ -237,6 +241,8 @@ async def test_flag_store(redis: RedisInterface, key: str_able):
     assert not (await store.is_flag_set(key))
     assert await store.set_flag(key)
     assert await store.is_flag_set(key)
+    assert await store.unset_flag(key)
+    assert not (await store.is_flag_set(key))
 
 
 async def test_list_keys(redis: RedisInterface):
@@ -306,6 +312,7 @@ async def test_key_dict_store(redis: RedisInterface):
         UserData(name="maria", age=35),
         UserData(name="sasha", age=21),
     ]
+    assert await user_data_store.count_values("good") == len(expected_good_values)
     assert len(good_values) == len(expected_good_values)
     for v in good_values:
         assert v in expected_good_values
@@ -345,10 +352,14 @@ async def test_key_versioned_value_store_compat(
     assert await store.load(key) is None
     value = generate_str()
     assert await store.save(key, value)
+    assert await store.exists(key)
+    assert str(key) in await store.list_keys()
     assert await store.load(key) == value
+
     assert await store.drop(key)
+    assert not (await store.exists(key))
     assert await store.load(key) is None
-    assert await store.save(key, value)
+    assert str(key) not in await store.list_keys()
 
 
 @dataclasses.dataclass

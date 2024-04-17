@@ -477,7 +477,7 @@ def get_sequential_vertices_arrow_canvas(height: int, width: int) -> "CharCanvas
 
 
 class CharCanvas:
-    def __init__(self):
+    def __init__(self) -> None:
         self._array: list[list[str]] = []
 
     @property
