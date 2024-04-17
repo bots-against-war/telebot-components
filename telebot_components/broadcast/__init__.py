@@ -21,9 +21,6 @@ from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import KeyDictStore, KeySetStore, KeyValueStore
 from telebot_components.utils import restart_on_errors
 
-logger = logging.getLogger(__name__)
-
-
 prevent_shutdown_on_consuming_queue = PreventShutdown("consuming broadcast queue")
 prevent_shutdown_on_broadcasting = PreventShutdown("broadcasting")
 
@@ -95,6 +92,7 @@ class BroadcastHandler:
             dumper=lambda qb: qb.dump(),
             loader=QueuedBroadcast.load,
         )
+        self.logger = logging.getLogger(__name__ + f"[{bot_prefix}]")
 
     async def topics(self) -> list[str]:
         """At least one person should be subscribed to the topic"""
@@ -172,15 +170,15 @@ class BroadcastHandler:
                 async with prevent_shutdown_on_consuming_queue.allow_shutdown():
                     await asyncio.sleep(5)
                 continue
-            logger.info("Processing broadcast queue")
+            self.logger.info("Processing broadcast queue")
             queued_broadcasts = await self.broadcast_queue_store.all(self.CONST_KEY)
-            logger.info(f"Found {len(queued_broadcasts)} queued broadcasts")
+            self.logger.info(f"Found {len(queued_broadcasts)} queued broadcasts")
             dequeued_broadcasts: list[QueuedBroadcast] = []
             for qb in queued_broadcasts:
                 if qb.start_time > time.time():
                     continue
                 if (await self.current_broadcast_by_topic_store.load(qb.topic)) is None:
-                    logger.info(
+                    self.logger.info(
                         f"Starting broadcast on topic {qb.topic} "
                         + f"scheduled {time.time() - qb.start_time:3f} sec ago "
                         + f"with sender {qb.sender}"
@@ -194,23 +192,25 @@ class BroadcastHandler:
                         try:
                             await on_broadcast_start(qb)
                         except Exception:
-                            logger.exception("Unexpected error in on_broadcast_start callback, ignoring")
+                            self.logger.exception("Unexpected error in on_broadcast_start callback, ignoring")
                     self.is_broadcasting = True
                 else:
-                    logger.info(
+                    self.logger.info(
                         f"Overdue broadcast on topic {qb.topic} "
                         + f"scheduled {time.time() - qb.start_time:3f} sec ago "
                         + f"with sender {qb.sender}, waiting for previous broadcast on this topic to finish"
                     )
             if dequeued_broadcasts:
-                logger.info(f"{len(dequeued_broadcasts)} broadcasts popped from the queue and started broadcasting")
+                self.logger.info(
+                    f"{len(dequeued_broadcasts)} broadcasts popped from the queue and started broadcasting"
+                )
                 for b in dequeued_broadcasts:
                     await self.broadcast_queue_store.remove(self.CONST_KEY, b)
                 queued_broadcasts = await self.broadcast_queue_store.all(self.CONST_KEY)
             self.next_broadcast_queue_processing_time = (
                 min([qb.start_time for qb in queued_broadcasts]) if queued_broadcasts else time.time() + 300
             )
-            logger.info(
+            self.logger.info(
                 "The next broadcast queue processing scheduled "
                 + f"in {self.next_broadcast_queue_processing_time - time.time():.2f} sec"
             )
@@ -228,13 +228,13 @@ class BroadcastHandler:
             if not self.is_broadcasting:
                 continue
 
-            logger.info("Sending messages to subscribers")
+            self.logger.info("Sending messages to subscribers")
             topics_to_send = await self.currently_broadcasting_topics()
             # sorting in decreasing priority order (top priority = first)
             topics_to_send.sort(key=self.topic_priority_key, reverse=True)
-            logger.info(f"Current topic priority: {topics_to_send}")
+            self.logger.info(f"Current topic priority: {topics_to_send}")
 
-            logger.info(f"Loading subscriber batch to send (target size {BATCH_SIZE})")
+            self.logger.info(f"Loading subscriber batch to send (target size {BATCH_SIZE})")
             batch: list[tuple[QueuedBroadcast, Subscriber]] = []
             for topic in topics_to_send:
                 batch_from_topic = BATCH_SIZE - len(batch)
@@ -248,22 +248,22 @@ class BroadcastHandler:
                     await self.current_broadcast_by_topic_store.drop(topic)
                     await self.current_pending_subscribers_by_topic_store.drop(topic)
                     if broadcast is not None:
-                        logger.info(f"Broadcast completed: {broadcast}")
+                        self.logger.info(f"Broadcast completed: {broadcast}")
                         if on_broadcast_end is not None:
                             try:
                                 await on_broadcast_end(broadcast)
                             except Exception:
-                                logger.exception("Unexpected error in on_broadcast_end callback, ignoring")
+                                self.logger.exception("Unexpected error in on_broadcast_end callback, ignoring")
                     continue
-                logger.info(f"{len(subscribers)} subscribers from topic {topic} with sender {broadcast}")
+                self.logger.info(f"{len(subscribers)} subscribers from topic {topic} with sender {broadcast}")
                 batch.extend([(broadcast, subscriber) for subscriber in subscribers])
 
             if not batch:
-                logger.info("No subscribers to send to, seems like the broadcast is done!")
+                self.logger.info("No subscribers to send to, seems like the broadcast is done!")
                 self.is_broadcasting = False
                 continue
 
-            logger.info(f"Sending a batch of {len(batch)} messages...")
+            self.logger.info(f"Sending a batch of {len(batch)} messages...")
             start_time = time.time()
 
             async def _send_broadcasted_message(
@@ -276,15 +276,15 @@ class BroadcastHandler:
                         return True
                     except telegram_api.ApiHTTPException as exc:
                         if exc.response.status == 429:
-                            logger.info(f"Rate limiting error received from Telegram: {exc!r}")
+                            self.logger.info(f"Rate limiting error received from Telegram: {exc!r}")
                             await asyncio.sleep(1)
                         else:
-                            logger.info(f"HTTP error received from Telegram: {exc!r}")
+                            self.logger.info(f"HTTP error received from Telegram: {exc!r}")
                             return False
                     except Exception:
-                        logger.exception(f"Unexpected error sending message to {subscriber = }")
+                        self.logger.exception(f"Unexpected error sending message to {subscriber = }")
                         return False
-                logger.error("All retry attempts exhausted :(")
+                self.logger.error("All retry attempts exhausted :(")
                 return False
 
             coroutines = [
@@ -293,7 +293,7 @@ class BroadcastHandler:
             ]
             success_flags = await asyncio.gather(*coroutines)
 
-            logger.info(
+            self.logger.info(
                 f"Batch sent: {sum(success_flags)} / {len(batch)} messages are successful; "
                 + f"took {time.time() - start_time:.3f} sec"
             )
