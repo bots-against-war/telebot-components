@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "telebot-components"
-version = "0.11.7-post.3+c2e7271.dirty"
+version = "0.0.0"
 description = "Framework/toolkit for building Telegram bots with telebot and redis"
 authors = ["Igor Vaiman <gosha.vaiman@gmail.com>"]
 license = "GPLv3"
@@ -9,7 +9,7 @@ repository = "https://github.com/bots-against-war/telebot-components"
 packages = [{ include = "telebot_components" }]
 
 [tool.poetry-dynamic-versioning]
-enable = false
+enable = true
 vcs = "git"
 dirty = true
 style = "semver"
