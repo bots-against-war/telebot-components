@@ -591,25 +591,35 @@ class FeedbackHandler:
             return None
 
         category = await self.category_store.get_user_category(user) if self.category_store is not None else None
-        if self.forum_topic_store is not None:
-            message_thread_id: Optional[int] = await self.forum_topic_store.get_message_thread_id(category)
-        elif self.config.forum_topic_per_user:
-            message_thread_id = await self.message_thread_id_by_user_id_store.load(user.id)
-            await self.message_thread_id_by_user_id_store.touch(user.id)
-            if message_thread_id is None:
-                try:
-                    new_topic = await bot.create_forum_topic(
-                        chat_id=self.admin_chat_id,
-                        name=self.user_identifier(user, support_html=False),
-                    )
-                    message_thread_id = new_topic.message_thread_id
-                    await self.message_thread_id_by_user_id_store.save(user.id, message_thread_id)
-                except Exception:
-                    self.logger.exception(
-                        f"Error creating forum topic for user {user}, will send without message thread id"
-                    )
-        else:
-            message_thread_id = None
+
+        # HACK: at this point we want to define how message_thread_id should be obtained based on configuration
+        # however, in the following code we might end up returning without sending anything to this thread
+        # in case the thread is not there we may create it first only to then not use = generate a junk empty thread
+        # , we define "message thread id getter" function to defer thread creation until it's actually needed
+        # it's locally caching to avoid repeated DB lookups
+        _message_thread_id: Optional[int] = None
+
+        async def get_message_thread_id() -> Optional[int]:
+            nonlocal _message_thread_id
+            if _message_thread_id is None:
+                if self.forum_topic_store is not None:
+                    _message_thread_id = await self.forum_topic_store.get_message_thread_id(category)
+                elif self.config.forum_topic_per_user:
+                    _message_thread_id = await self.message_thread_id_by_user_id_store.load(user.id)
+                    await self.message_thread_id_by_user_id_store.touch(user.id)
+                    if _message_thread_id is None:
+                        try:
+                            new_topic = await bot.create_forum_topic(
+                                chat_id=self.admin_chat_id,
+                                name=self.user_identifier(user, support_html=False),
+                            )
+                            _message_thread_id = new_topic.message_thread_id
+                            await self.message_thread_id_by_user_id_store.save(user.id, _message_thread_id)
+                        except Exception:
+                            self.logger.exception(
+                                f"Error creating forum topic for user {user}, will send without message thread id"
+                            )
+            return _message_thread_id
 
         hashtag_msg_data: Optional[HashtagMessageData] = None
         if self.config.hashtags_in_admin_chat:
@@ -644,7 +654,7 @@ class FeedbackHandler:
                     hashtag_msg = await bot.send_message(
                         self.admin_chat_id,
                         _join_hashtags(hashtags),
-                        message_thread_id=message_thread_id,
+                        message_thread_id=await get_message_thread_id(),
                     )
                     await self.user_related_messages_store.add(user.id, hashtag_msg.id, reset_ttl=False)
                     hashtag_msg_data = HashtagMessageData(message_id=hashtag_msg.id, hashtags=hashtags)
@@ -657,29 +667,34 @@ class FeedbackHandler:
                 user_identifier_msg = await bot.send_message(
                     self.admin_chat_id,
                     user_identifier,
-                    message_thread_id=message_thread_id,
+                    message_thread_id=await get_message_thread_id(),
                     parse_mode="HTML",
                 )
                 await self.last_sent_user_identifier_store.save(self.CONST_KEY, user_identifier)
-                await self.save_message_from_user(user, user_identifier_msg.id, message_thread_id=message_thread_id)
+                await self.save_message_from_user(
+                    user, user_identifier_msg.id, message_thread_id=await get_message_thread_id()
+                )
 
         preforwarded_msg = None
         if self.config.before_forwarding is not None:
             preforwarded_msg = await self.config.before_forwarding(user)
             if isinstance(preforwarded_msg, tg.Message):
-                await self.save_message_from_user(user, preforwarded_msg.id, message_thread_id=message_thread_id)
+                await self.save_message_from_user(
+                    user, preforwarded_msg.id, message_thread_id=await get_message_thread_id()
+                )
 
-        # admin_chat_forwarded_msg_id, user_content_message = await message_forwarder()
-        message_forwarder_result = await message_forwarder(message_thread_id)
+        message_forwarder_result = await message_forwarder(await get_message_thread_id())
         await self.save_message_from_user(
-            user, message_forwarder_result.admin_chat_msg.id, message_thread_id=message_thread_id
+            user, message_forwarder_result.admin_chat_msg.id, message_thread_id=await get_message_thread_id()
         )
 
         postforwarded_msg = None
         if self.config.after_forwarding is not None:
             postforwarded_msg = await self.config.after_forwarding(user)
             if isinstance(postforwarded_msg, tg.Message):
-                await self.save_message_from_user(user, postforwarded_msg.id, message_thread_id=message_thread_id)
+                await self.save_message_from_user(
+                    user, postforwarded_msg.id, message_thread_id=await get_message_thread_id()
+                )
 
         if self.config.hashtags_in_admin_chat and hashtag_msg_data is not None:
             await self.hashtag_message_for_forwarded_message_store.save(
