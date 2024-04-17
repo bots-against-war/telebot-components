@@ -71,6 +71,11 @@ async def test_sets(redis: RedisInterface):
 
     assert await redis.spop("non-existent-key") is None
 
+    key2, value2 = generate_key_value()
+    assert await redis.sadd(key2, value2)
+    assert await redis.spop(key2) == value2
+    assert await redis.spop(key2) is None
+
 
 @pytest_skip_on_real_redis
 async def test_set_with_ttl(redis: RedisInterface, time_supplier: TimeSupplier):
@@ -207,6 +212,8 @@ async def test_hash_operations(redis: RedisInterface):
         b"4": b"bar",
     }
 
+    assert await redis.hlen(KEY) == 4
+
 
 async def test_rpush_rpop(redis: RedisInterface):
     for i in range(10):
@@ -215,6 +222,9 @@ async def test_rpush_rpop(redis: RedisInterface):
     assert await redis.rpop("my-list-key") == b"9"
     assert await redis.rpop("my-list-key", 3) == [b"8", b"7", b"6"]
     assert await redis.rpop("my-list-key", 100) == [b"5", b"4", b"3", b"2", b"1", b"0"]
+
+    assert await redis.rpop("doesn't exist") is None
+    assert await redis.rpop("doesn't exist", 100) is None
 
 
 @pytest.mark.parametrize("is_copy", [True, False])

@@ -234,6 +234,15 @@ class RedisInterface(ABC):
         ...
 
     @abstractmethod
+    async def hlen(self, name: str) -> int:
+        """
+        Return the number of elements in hash ``name``
+
+        For more information see https://redis.io/commands/hlen
+        """
+        ...
+
+    @abstractmethod
     async def hgetall(self, name: str) -> dict[bytes, bytes]:
         """
         Return a Python dict of the hash's name/value pairs

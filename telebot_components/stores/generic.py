@@ -3,19 +3,9 @@ import dataclasses
 import datetime
 import json
 import logging
-import secrets
 import uuid
 from hashlib import md5
-from typing import (
-    Callable,
-    ClassVar,
-    Generator,
-    Generic,
-    Optional,
-    Protocol,
-    TypeVar,
-    cast,
-)
+from typing import Callable, Generator, Generic, Optional, Protocol, TypeVar, cast
 
 import tenacity
 
@@ -64,10 +54,6 @@ class PrefixedStore:
     prefix: str  # used to identify bot that uses the store
     redis: RedisInterface
 
-    # useful for testing to allow multiple stores with one prefix to be created
-    # never set to True in actual usage!
-    RANDOMIZE_PREFIXES: ClassVar[bool] = False
-
     def __post_init__(self):
         self.logger = logging.getLogger(f"{__name__}[{self.prefix}-{self.name}]")
         # adding prefix hash to allow stores with nested prefixes
@@ -75,9 +61,6 @@ class PrefixedStore:
         # we transform them to 'a-0cc17' and 'ab-187ef' and voila
         plain_prefix = f"{self.prefix}-{self.name}"
         prefix_hash = md5(plain_prefix.encode("utf-8")).hexdigest()[:5]
-        if self.RANDOMIZE_PREFIXES:
-            # option for testing that allows creating unlimited number of independent copies for every store
-            prefix_hash += "-RANDOM" + secrets.token_hex(nbytes=8)
         self._full_prefix = f"{plain_prefix}-{prefix_hash}-"
 
     @classmethod
@@ -344,6 +327,10 @@ class KeyDictStore(SingleKeyStore[ValueT]):
     async def list_values(self, key: str_able) -> list[ValueT]:
         value_dumps = await self.redis.hvals(self._full_key(key))
         return [self.loader(dump.decode("utf-8")) for dump in value_dumps]
+
+    @redis_retry()
+    async def count_values(self, key: str_able) -> int:
+        return await self.redis.hlen(self._full_key(key))
 
     @redis_retry()
     async def load(self, key: str_able) -> dict[str, ValueT]:
