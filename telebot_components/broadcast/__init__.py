@@ -174,6 +174,7 @@ class BroadcastHandler:
                 continue
             logger.info("Processing broadcast queue")
             queued_broadcasts = await self.broadcast_queue_store.all(self.CONST_KEY)
+            logger.info(f"Found {len(queued_broadcasts)} queued broadcasts")
             dequeued_broadcasts: list[QueuedBroadcast] = []
             for qb in queued_broadcasts:
                 if qb.start_time > time.time():
@@ -258,11 +259,11 @@ class BroadcastHandler:
                 batch.extend([(broadcast, subscriber) for subscriber in subscribers])
 
             if not batch:
-                logger.info("No subscribers to send to, seems like we're done for now")
+                logger.info("No subscribers to send to, seems like the broadcast is done!")
                 self.is_broadcasting = False
                 continue
 
-            logger.info(f"Sending batch of {len(batch)} messages...")
+            logger.info(f"Sending a batch of {len(batch)} messages...")
             start_time = time.time()
 
             async def _send_broadcasted_message(
