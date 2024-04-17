@@ -113,7 +113,7 @@ async def create_bot(
     return bot
 
 
-async def test_main_to_aux_chat_migration(redis: RedisInterface, normal_store_behavior: None) -> None:
+async def test_main_to_aux_chat_migration(redis: RedisInterface) -> None:
     bot_prefix = "main-to-aux-chat-migration-test-bot-"
 
     before_bot = await create_bot(bot_prefix, redis, feedback_to_main_chat=True, feedback_to_aux_chat=True)

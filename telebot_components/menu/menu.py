@@ -539,12 +539,13 @@ class MenuHandler:
             new_menu_id = data["route_to"]
             if new_menu_id not in self.menu_by_id:
                 return tg_service_types.HandlerResult(continue_to_other_handlers=True)
-            return await self._route_to_menu(
+            await self._route_to_menu(
                 bot=bot,
                 user=call.from_user,
                 new_menu=self.menu_by_id[new_menu_id],
                 current_menu_message_id=call.message.id,
             )
+            return None
 
         @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA, auto_answer=True)
         async def handle_inactive_menu(call: tg.CallbackQuery):

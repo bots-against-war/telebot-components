@@ -134,6 +134,9 @@ class BroadcastHandler:
     async def topic_subscribers(self, topic: str) -> list[Subscriber]:
         return await self.subscribers_by_topic_store.list_values(topic)
 
+    async def count_subscribers(self, topic: str) -> int:
+        return await self.subscribers_by_topic_store.count_values(topic)
+
     async def all_subscribers(self) -> dict[str, list[Subscriber]]:
         return await self._map_topics(self.topic_subscribers)
 

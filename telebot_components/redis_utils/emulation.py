@@ -293,6 +293,10 @@ class RedisEmulation(RedisInterface):
         await self._bookkeeping(name)
         return [value for value in self.hashes.get(name, {}).values()]
 
+    async def hlen(self, name: str) -> int:
+        await self._bookkeeping(name)
+        return len(self.hashes.get(name, {}))
+
     async def hgetall(self, name: str) -> dict[bytes, bytes]:
         await self._bookkeeping(name)
         return {key.encode("utf-8"): value for key, value in self.hashes.get(name, {}).items()}
@@ -433,6 +437,10 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     async def hvals(self, name: str) -> list[bytes]:
         self._stack.append(self.redis_em.hvals(name))
         return []
+
+    async def hlen(self, name: str) -> int:
+        self._stack.append(self.redis_em.hlen(name))
+        return 0
 
     async def hdel(self, name: str, *keys: str) -> int:
         self._stack.append(self.redis_em.hdel(name, *keys))
