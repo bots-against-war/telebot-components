@@ -181,17 +181,20 @@ class KeyListStore(SingleKeyStore[ItemT]):
             after_push_len, *_ = await pipe.execute()
             return cast(int, after_push_len)
 
+    @redis_retry()
+    async def slice(self, key: str_able, start: int, end: int) -> list[ItemT] | None:
+        item_dumps = await self.redis.lrange(self._full_key(key), start, end)
+        return [self.loader(item_dump.decode("utf-8")) for item_dump in item_dumps] or None
+
+    async def tail(self, key: str_able, start: int) -> list[ItemT] | None:
+        return await self.slice(key, start=start, end=-1)
+
     async def all(self, key: str_able) -> list[ItemT]:
         return await self.tail(key, start=0) or []
 
     @redis_retry()
     async def length(self, key: str_able) -> int:
         return await self.redis.llen(self._full_key(key))
-
-    @redis_retry()
-    async def tail(self, key: str_able, start: int) -> list[ItemT] | None:
-        item_dumps = await self.redis.lrange(self._full_key(key), start, -1)
-        return [self.loader(item_dump.decode("utf-8")) for item_dump in item_dumps] or None
 
     @redis_retry()
     async def set(self, key: str_able, i: int, value: ItemT, reset_ttl: bool = True) -> bool:

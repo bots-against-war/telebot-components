@@ -140,6 +140,10 @@ async def test_key_list_store(redis: RedisInterface, key: str_able, jsonable_val
     assert await store.length(key) == 7
 
     assert await store.tail(key, 4) == [jsonable_value, "hello", 1312]
+    assert await store.slice(key, 4, 5) == [jsonable_value, "hello"]
+    assert await store.slice(key, 4, 4) == [jsonable_value]
+    assert await store.slice(key, -3, -2) == [jsonable_value, "hello"]
+
     assert await store.set(key, 4, "new value") is True
     assert await store.tail(key, 4) == ["new value", "hello", 1312]
 
