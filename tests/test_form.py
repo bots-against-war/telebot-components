@@ -338,7 +338,7 @@ async def test_form_handler(redis: RedisInterface) -> None:
     )
     bot.method_calls.clear()
 
-    await tgserv.send_message_to_bot(bot, user_id=1, text="pizza")
+    await tgserv.send_message_to_bot(bot, user_id=1, text="pizza (<b>)")
     assert len(bot.method_calls) == 1
     assert_list_of_required_subdicts(
         extract_full_kwargs(bot.method_calls["send_message"]),
@@ -353,9 +353,12 @@ async def test_form_handler(redis: RedisInterface) -> None:
     ctx = completed_ctxs[0]
     assert ctx.bot is bot
     assert ctx.result == {
-        "your favourite food": "pizza",
+        "your favourite food": "pizza (<b>)",
         "your name": "test user",
         "your pet's name": None,
     }
 
-    assert f.result_to_html(ctx.result, lang=None) == "<b>your name</b>: test user\n<b>your favourite food</b>: pizza"
+    assert (
+        f.result_to_html(ctx.result, lang=None)
+        == "<b>your name</b>: test user\n<b>your favourite food</b>: pizza (&lt;b&gt;)"
+    )

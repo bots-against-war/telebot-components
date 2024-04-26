@@ -1,5 +1,6 @@
 import copy
 import functools
+import html
 import operator
 from collections import defaultdict
 from dataclasses import dataclass
@@ -543,7 +544,7 @@ def pad_to_len(string: str, length: int) -> str:
 
 def format_named_value(name: str, value: str, single_line: bool = True) -> str:
     sep = ": " if single_line else "\n"
-    result = f"<b>{name}</b>{sep}{value}"
+    result = f"<b>{html.escape(name, quote=False)}</b>{sep}{html.escape(value, quote=False)}"
     if not single_line:
         result += "\n"
     return result
