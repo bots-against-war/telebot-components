@@ -2,6 +2,7 @@ import asyncio
 import collections
 import functools
 import hashlib
+import html
 import io
 import logging
 import string
@@ -90,7 +91,7 @@ def from_yaml_unsafe(dump: str) -> Any:
 
 def telegram_html_escape(string: str) -> str:
     """See https://core.telegram.org/bots/api#html-style"""
-    return string.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return html.escape(string, quote=False)
 
 
 def html_link(href: str, text: str) -> str:

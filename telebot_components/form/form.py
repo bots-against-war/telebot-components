@@ -25,6 +25,7 @@ from telebot_components.form.field import (
 from telebot_components.form.types import FormBranchCondition
 from telebot_components.language import any_text_to_str
 from telebot_components.stores.language import MaybeLanguage
+from telebot_components.utils import telegram_html_escape
 
 FieldName = Optional[str]
 
@@ -544,7 +545,7 @@ def pad_to_len(string: str, length: int) -> str:
 
 def format_named_value(name: str, value: str, single_line: bool = True) -> str:
     sep = ": " if single_line else "\n"
-    result = f"<b>{html.escape(name, quote=False)}</b>{sep}{html.escape(value, quote=False)}"
+    result = f"<b>{telegram_html_escape(name)}</b>{sep}{telegram_html_escape(value)}"
     if not single_line:
         result += "\n"
     return result

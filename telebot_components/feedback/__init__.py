@@ -516,8 +516,9 @@ class FeedbackHandler:
 
     def user_identifier(self, user: tg.User, support_html: bool) -> str:
         """Human readable identifier for the user (not to be confused with user id)"""
+        escape_text = telegram_html_escape if support_html else lambda x: x
         if self.config.user_anonymization is UserAnonymization.FULL:
-            return self.config.user_id_hash_func(user.id, self.bot_prefix)
+            return escape_text(self.config.user_id_hash_func(user.id, self.bot_prefix))
         elif self.config.user_anonymization is UserAnonymization.NONE:
             user_identifier = user.full_name
             if user.username:
@@ -529,7 +530,7 @@ class FeedbackHandler:
             else:
                 return html_link(href=f"tg://user?id={user.id}", text=user_identifier)
         elif self.config.user_anonymization is UserAnonymization.LEGACY:
-            return user.full_name  # it's shown on message forward anyway
+            return escape_text(user.full_name)  # it's shown on message forward anyway
 
     async def get_maybe_language(self, user: tg.User) -> MaybeLanguage:
         if self.language_store is not None:
