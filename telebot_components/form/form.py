@@ -1,6 +1,5 @@
 import copy
 import functools
-import html
 import operator
 from collections import defaultdict
 from dataclasses import dataclass
