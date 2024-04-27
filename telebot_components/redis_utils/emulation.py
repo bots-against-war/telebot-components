@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import timedelta
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Mapping, Optional, Union
+from typing import Any, Callable, Coroutine, Optional, Union
 
 from telebot_components.redis_utils.interface import (
     RedisCmdReturn,
@@ -270,15 +270,22 @@ class RedisEmulation(RedisInterface):
         name: str,
         key: Optional[str] = None,
         value: Optional[bytes] = None,
-        mapping: Optional[Mapping[str, bytes]] = None,
+        mapping: Optional[dict[str, bytes]] = None,
+        items: Optional[list[tuple[str, bytes]]] = None,
     ) -> int:
         await self._bookkeeping(name)
-        if mapping is None:
-            if key is None or value is None:
-                raise TypeError("If mapping is not specified, key and value must be set")
-            mapping = {key: value}
-        self.hashes[name].update(mapping)
-        return len(mapping)
+        if (key is None and value is None) and not mapping and not items:
+            raise ValueError("'hset' with no key value pairs")
+        updates: dict[str, bytes] = dict()
+        if mapping:
+            updates.update(mapping)
+        if key is not None and value is not None:
+            updates[key] = value
+        if items:
+            for k, v in items:
+                updates[k] = v
+        self.hashes[name].update(updates)
+        return len(updates)
 
     async def hget(self, name: str, key: str) -> Optional[bytes]:
         return self.hashes.get(name, {}).get(key)
@@ -421,9 +428,10 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
         name: str,
         key: Optional[str] = None,
         value: Optional[bytes] = None,
-        mapping: Optional[Mapping[str, bytes]] = None,
+        mapping: Optional[dict[str, bytes]] = None,
+        items: Optional[list[tuple[str, bytes]]] = None,
     ) -> int:
-        self._stack.append(self.redis_em.hset(name, key, value, mapping))
+        self._stack.append(self.redis_em.hset(name, key, value, mapping, items))
         return 0
 
     async def hget(self, name: str, key: str) -> Optional[bytes]:

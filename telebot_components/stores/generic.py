@@ -5,7 +5,16 @@ import json
 import logging
 import uuid
 from hashlib import md5
-from typing import Callable, Generator, Generic, Optional, Protocol, TypeVar, cast
+from typing import (
+    Callable,
+    Generator,
+    Generic,
+    Iterable,
+    Optional,
+    Protocol,
+    TypeVar,
+    cast,
+)
 
 import tenacity
 
@@ -131,10 +140,10 @@ ItemT = TypeVar("ItemT")
 @dataclasses.dataclass
 class KeySetStore(SingleKeyStore[ItemT]):
     async def add(self, key: str_able, item: ItemT, reset_ttl: bool = True) -> bool:
-        return await self.add_multiple(key, [item], reset_ttl)
+        return await self.add_multiple(key, (item,), reset_ttl)
 
     @redis_retry()
-    async def add_multiple(self, key: str_able, items: list[ItemT], reset_ttl: bool = True) -> bool:
+    async def add_multiple(self, key: str_able, items: Iterable[ItemT], reset_ttl: bool = True) -> bool:
         async with self.redis.pipeline() as pipe:
             item_dumps = [self.dumper(item).encode("utf-8") for item in items]
             await pipe.sadd(self._full_key(key), *item_dumps)
@@ -173,13 +182,16 @@ class KeySetStore(SingleKeyStore[ItemT]):
 @dataclasses.dataclass
 class KeyListStore(SingleKeyStore[ItemT]):
     @redis_retry()
-    async def push(self, key: str_able, item: ItemT, reset_ttl: bool = True) -> int:
+    async def push_multiple(self, key: str_able, items: Iterable[ItemT], reset_ttl: bool = True) -> int:
         async with self.redis.pipeline() as pipe:
-            await pipe.rpush(self._full_key(key), self.dumper(item).encode("utf-8"))
+            await pipe.rpush(self._full_key(key), *[self.dumper(item).encode("utf-8") for item in items])
             if reset_ttl and self.expiration_time is not None:
                 await pipe.expire(self._full_key(key), self.expiration_time)
             after_push_len, *_ = await pipe.execute()
             return cast(int, after_push_len)
+
+    async def push(self, key: str_able, item: ItemT, reset_ttl: bool = True) -> int:
+        return await self.push_multiple(key, (item,), reset_ttl=reset_ttl)
 
     @redis_retry()
     async def slice(self, key: str_able, start: int, end: int) -> list[ItemT] | None:
@@ -304,15 +316,30 @@ class KeyFlagStore(SingleKeyStore[bool]):
 @dataclasses.dataclass
 class KeyDictStore(SingleKeyStore[ValueT]):
     @redis_retry()
-    async def set_subkey(self, key: str_able, subkey: str_able, value: ValueT, reset_ttl: bool = True) -> bool:
-        # NOTE: this method copy-pastes most of KeySetStore.add and KeyListStore.push
-        #       we need some way to abstract this logic
+    async def set_multiple_subkeys(
+        self,
+        key: str_able,
+        subkey_to_value: dict[str_able, ValueT],
+        reset_ttl: bool = True,
+    ) -> bool:
         async with self.redis.pipeline() as pipe:
-            await pipe.hset(self._full_key(key), str(subkey), self.dumper(value).encode("utf-8"))
+            await pipe.hset(
+                self._full_key(key),
+                items=[
+                    (
+                        str(subkey),
+                        self.dumper(value).encode("utf-8"),
+                    )
+                    for subkey, value in subkey_to_value.items()
+                ],
+            )
             if reset_ttl and self.expiration_time is not None:
                 await pipe.expire(self._full_key(key), self.expiration_time)
             n_added_keys, *_ = await pipe.execute()
-            return n_added_keys == 1
+            return n_added_keys == len(subkey_to_value)
+
+    async def set_subkey(self, key: str_able, subkey: str_able, value: ValueT, reset_ttl: bool = True) -> bool:
+        return await self.set_multiple_subkeys(key, {subkey: value}, reset_ttl=reset_ttl)
 
     @redis_retry()
     async def get_subkey(self, key: str_able, subkey: str_able) -> Optional[ValueT]:
