@@ -50,11 +50,9 @@ class RedisEmulation(RedisInterface):
         if self.response_delay is not None:
             await asyncio.sleep(self.response_delay)
 
-    def _remove_from_storages(self, key: str, except_for: dict[str, Any] | None = None) -> int:
+    def _remove_from_storages(self, key: str) -> int:
         n_popped = 0
         for storage in self.storages:
-            if except_for is not None and storage is except_for:
-                continue
             if storage.pop(key, None) is not None:
                 n_popped += 1
         return n_popped
@@ -282,8 +280,8 @@ class RedisEmulation(RedisInterface):
         if key is not None and value is not None:
             updates[key] = value
         if items:
-            for k, v in zip(items[:1:-1], items[1:1:]):
-                updates[k] = v
+            for k, v in zip(items[:-1:2], items[1::2]):
+                updates[k] = v  # type: ignore
         self.hashes[name].update(updates)
         return len(updates)
 
