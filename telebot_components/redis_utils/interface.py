@@ -1,6 +1,6 @@
 import datetime
 from abc import ABC, abstractmethod
-from typing import Optional, Union
+from typing import Mapping, Optional, Union
 
 # type defs copied from redis
 
@@ -209,7 +209,7 @@ class RedisInterface(ABC):
         name: str,
         key: Optional[str] = None,
         value: Optional[bytes] = None,
-        mapping: Optional[dict[str, bytes]] = None,
+        mapping: Optional[Mapping[str, bytes]] = None,
         items: Optional[list[Union[str, bytes]]] = None,
     ) -> int:
         """

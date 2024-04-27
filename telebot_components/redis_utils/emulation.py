@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import timedelta
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Optional, Union
+from typing import Any, Callable, Coroutine, Mapping, Optional, Union
 
 from telebot_components.redis_utils.interface import (
     RedisCmdReturn,
@@ -268,7 +268,7 @@ class RedisEmulation(RedisInterface):
         name: str,
         key: Optional[str] = None,
         value: Optional[bytes] = None,
-        mapping: Optional[dict[str, bytes]] = None,
+        mapping: Optional[Mapping[str, bytes]] = None,
         items: Optional[list[Union[str, bytes]]] = None,
     ) -> int:
         await self._bookkeeping(name)
@@ -426,7 +426,7 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
         name: str,
         key: Optional[str] = None,
         value: Optional[bytes] = None,
-        mapping: Optional[dict[str, bytes]] = None,
+        mapping: Optional[Mapping[str, bytes]] = None,
         items: Optional[list[Union[str, bytes]]] = None,
     ) -> int:
         self._stack.append(self.redis_em.hset(name, key, value, mapping, items))

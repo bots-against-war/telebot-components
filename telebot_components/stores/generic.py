@@ -10,6 +10,7 @@ from typing import (
     Generator,
     Generic,
     Iterable,
+    Mapping,
     Optional,
     Protocol,
     TypeVar,
@@ -320,7 +321,7 @@ class KeyDictStore(SingleKeyStore[ValueT]):
     async def set_multiple_subkeys(
         self,
         key: str_able,
-        subkey_to_value: dict[str_able, ValueT],
+        subkey_to_value: Mapping[str_able, ValueT],
         reset_ttl: bool = True,
     ) -> bool:
         async with self.redis.pipeline() as pipe:

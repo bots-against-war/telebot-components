@@ -16,10 +16,12 @@ from telebot_components.redis_utils.interface import RedisInterface
 from tests.utils import TimeSupplier, using_real_redis
 
 
-@pytest.fixture(params=["ephemeral_emulation", "persistent_emulation"] if not using_real_redis() else ["real"])
+@pytest.fixture(
+    params=["ephemeral_emulation", "persistent_emulation"] + ([] if not using_real_redis() else ["real_redis"])
+)
 async def redis(request: pytest.FixtureRequest) -> AsyncGenerator[RedisInterface, None]:
     redis_type = request.param
-    if redis_type == "real":
+    if redis_type == "real_redis":
         redis_temp = Redis.from_url(os.environ["REDIS_URL"], single_connection_client=True)
         for free_db in range(1, 11):
             await redis_temp.select(free_db)
