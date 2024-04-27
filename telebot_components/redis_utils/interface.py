@@ -210,7 +210,7 @@ class RedisInterface(ABC):
         key: Optional[str] = None,
         value: Optional[bytes] = None,
         mapping: Optional[dict[str, bytes]] = None,
-        items: Optional[list[tuple[str, bytes]]] = None,
+        items: Optional[list[Union[str, bytes]]] = None,
     ) -> int:
         """
         Set ``key`` to ``value`` within hash ``name``,

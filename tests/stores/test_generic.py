@@ -154,6 +154,17 @@ async def test_key_list_store(redis: RedisInterface, key: str_able, jsonable_val
     assert await store.all(key) == []
 
 
+async def test_key_list_push_multiple(redis: RedisInterface):
+    store = KeyListStore[int](
+        name="lalala",
+        prefix=generate_str(),
+        redis=redis,
+    )
+
+    await store.push_multiple("key", (1, 2, 3, 4, 5))
+    assert await store.slice("key", 2, 4) == [3, 4, 5]
+
+
 @pytest.fixture(
     params=[
         lambda: random.randint(0, 10000),
@@ -340,6 +351,19 @@ async def test_key_dict_store(redis: RedisInterface):
     await user_data_store.remove_subkey("good", "9")
     assert set(await user_data_store.list_subkeys("good")) == {"1"}
     assert await user_data_store.get_subkey("good", "9") is None
+
+
+async def test_key_dict_store_multiple_write(redis: RedisInterface):
+    store = KeyDictStore[str](
+        name="strings",
+        prefix=generate_str(),
+        redis=redis,
+    )
+    await store.set_multiple_subkeys("one", {1: "a", 2: "b", 3: "c"})
+    await store.set_multiple_subkeys("two", {4: "d", 5: "e", 6: "f"})
+    assert set(await store.list_keys()) == {"one", "two"}
+    assert await store.load("one") == {"1": "a", "2": "b", "3": "c"}
+    assert await store.load("two") == {"4": "d", "5": "e", "6": "f"}
 
 
 @pytest.mark.parametrize("store_class", [KeyValueStore, KeyVersionedValueStore])

@@ -271,7 +271,7 @@ class RedisEmulation(RedisInterface):
         key: Optional[str] = None,
         value: Optional[bytes] = None,
         mapping: Optional[dict[str, bytes]] = None,
-        items: Optional[list[tuple[str, bytes]]] = None,
+        items: Optional[list[Union[str, bytes]]] = None,
     ) -> int:
         await self._bookkeeping(name)
         if (key is None and value is None) and not mapping and not items:
@@ -282,7 +282,7 @@ class RedisEmulation(RedisInterface):
         if key is not None and value is not None:
             updates[key] = value
         if items:
-            for k, v in items:
+            for k, v in zip(items[:1:-1], items[1:1:]):
                 updates[k] = v
         self.hashes[name].update(updates)
         return len(updates)
@@ -429,7 +429,7 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
         key: Optional[str] = None,
         value: Optional[bytes] = None,
         mapping: Optional[dict[str, bytes]] = None,
-        items: Optional[list[tuple[str, bytes]]] = None,
+        items: Optional[list[Union[str, bytes]]] = None,
     ) -> int:
         self._stack.append(self.redis_em.hset(name, key, value, mapping, items))
         return 0

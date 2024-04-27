@@ -44,6 +44,7 @@ WrappedFuncT = TypeVar("WrappedFuncT")
 
 
 def redis_retry() -> Callable[[WrappedFuncT], WrappedFuncT]:
+    return lambda x: x  # TEMP
     return tenacity.retry(  # type: ignore
         wait=tenacity.wait.wait_random_exponential(multiplier=1, max=30, exp_base=2, min=0.5),
         stop=tenacity.stop.stop_after_delay(max_delay=60),
@@ -195,6 +196,7 @@ class KeyListStore(SingleKeyStore[ItemT]):
 
     @redis_retry()
     async def slice(self, key: str_able, start: int, end: int) -> list[ItemT] | None:
+        """End index is inclusive, according to Redis convention and unlike Python convention"""
         item_dumps = await self.redis.lrange(self._full_key(key), start, end)
         return [self.loader(item_dump.decode("utf-8")) for item_dump in item_dumps] or None
 
@@ -325,13 +327,7 @@ class KeyDictStore(SingleKeyStore[ValueT]):
         async with self.redis.pipeline() as pipe:
             await pipe.hset(
                 self._full_key(key),
-                items=[
-                    (
-                        str(subkey),
-                        self.dumper(value).encode("utf-8"),
-                    )
-                    for subkey, value in subkey_to_value.items()
-                ],
+                mapping={str(subkey): self.dumper(value).encode("utf-8") for subkey, value in subkey_to_value.items()},
             )
             if reset_ttl and self.expiration_time is not None:
                 await pipe.expire(self._full_key(key), self.expiration_time)
