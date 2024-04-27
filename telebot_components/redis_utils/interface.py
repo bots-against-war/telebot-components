@@ -1,18 +1,19 @@
 import datetime
 from abc import ABC, abstractmethod
-from typing import Mapping, Optional, Union
+from typing import Optional, Union
 
 # type defs copied from redis
 
 
 class RedisInterface(ABC):
-    """Abstract interface for the parts of redis.asyncio.Redis class we're using;
-    please update when utilizing new methods.
+    """Abstract interface for the parts of redis.asyncio.Redis class we're using. Update when using
+    new methods from Redis, not listed here, and when updating Redis client library.
 
     Note that this is an interface for Redis configured to not decode responses and return plain bytes
     (i.e. it must not specify decode_responses=True option).
 
-    When using real Redis instance in place of RedisInterface, mypy may complain, but we have to ignore it
+    This is not a true typeshed because Redis library uses a lot of dynamic features and complex inheritance.
+    When using real Redis instance in place of RedisInterface, mypy may complain, but we have to ignore it.
     """
 
     @abstractmethod
@@ -208,13 +209,18 @@ class RedisInterface(ABC):
         name: str,
         key: Optional[str] = None,
         value: Optional[bytes] = None,
-        mapping: Optional[Mapping[str, bytes]] = None,
+        mapping: Optional[dict[str, bytes]] = None,
+        items: Optional[list[Union[str, bytes]]] = None,
     ) -> int:
         """
         Set ``key`` to ``value`` within hash ``name``,
-        ``mapping`` accepts a dict of key/value pairs that that will be
+        ``mapping`` accepts a dict of key/value pairs that will be
+        added to hash ``name``.
+        ``items`` accepts a list of key/value pairs that will be
         added to hash ``name``.
         Returns the number of fields that were added.
+
+        For more information see https://redis.io/commands/hset
         """
         ...
 

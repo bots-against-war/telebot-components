@@ -1,6 +1,6 @@
 import string
 from datetime import timedelta
-from typing import Callable, Coroutine
+from typing import Any, Callable, Coroutine
 from uuid import uuid4
 
 import pytest
@@ -215,6 +215,28 @@ async def test_hash_operations(redis: RedisInterface):
     assert await redis.hlen(KEY) == 4
 
 
+@pytest.mark.parametrize(
+    "hset_kwargs, expected_mapping",
+    [
+        pytest.param(
+            dict(key="k0", value=b"v0"),
+            {b"k0": b"v0"},
+        ),
+        pytest.param(
+            dict(mapping={"k1": b"v1", "k2": b"v2"}),
+            {b"k1": b"v1", b"k2": b"v2"},
+        ),
+        pytest.param(
+            dict(items=["k3", b"v3", "k4", b"v4"]),
+            {b"k3": b"v3", b"k4": b"v4"},
+        ),
+    ],
+)
+async def test_hset_multiple(redis: RedisInterface, hset_kwargs: dict[str, Any], expected_mapping: dict[str, bytes]):
+    assert await redis.hset("dummy-key", **hset_kwargs)
+    assert await redis.hgetall("dummy-key") == expected_mapping
+
+
 async def test_rpush_rpop(redis: RedisInterface):
     for i in range(10):
         await redis.rpush("my-list-key", str(i).encode())
@@ -255,6 +277,21 @@ async def test_copy_or_rename_key(redis: RedisInterface, is_copy: bool) -> None:
     assert await redis.hget(key1, "subkey2") == (b"b" if is_copy else None)
     assert await redis.hget(key2, "subkey1") == b"a"
     assert await redis.hget(key2, "subkey2") == b"b"
+
+
+async def test_copy_key(redis: RedisInterface) -> None:
+    assert not await redis.copy("non-existent", "target")
+
+    await redis.set("source", b"1")
+    await redis.set("target", b"2")
+    # without replace
+    assert not await redis.copy("source", "target", replace=False)
+    assert await redis.get("source") == b"1"
+    assert await redis.get("target") == b"2"
+    # with replace
+    assert await redis.copy("source", "target", replace=True)
+    assert await redis.get("source") == b"1"
+    assert await redis.get("target") == b"1"
 
 
 async def test_rename_non_existent(redis: RedisInterface) -> None:

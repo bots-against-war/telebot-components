@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import timedelta
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Mapping, Optional, Union
+from typing import Any, Callable, Coroutine, Optional, Union
 
 from telebot_components.redis_utils.interface import (
     RedisCmdReturn,
@@ -50,11 +50,9 @@ class RedisEmulation(RedisInterface):
         if self.response_delay is not None:
             await asyncio.sleep(self.response_delay)
 
-    def _remove_from_storages(self, key: str, except_for: dict[str, Any] | None = None) -> int:
+    def _remove_from_storages(self, key: str) -> int:
         n_popped = 0
         for storage in self.storages:
-            if except_for is not None and storage is except_for:
-                continue
             if storage.pop(key, None) is not None:
                 n_popped += 1
         return n_popped
@@ -270,15 +268,22 @@ class RedisEmulation(RedisInterface):
         name: str,
         key: Optional[str] = None,
         value: Optional[bytes] = None,
-        mapping: Optional[Mapping[str, bytes]] = None,
+        mapping: Optional[dict[str, bytes]] = None,
+        items: Optional[list[Union[str, bytes]]] = None,
     ) -> int:
         await self._bookkeeping(name)
-        if mapping is None:
-            if key is None or value is None:
-                raise TypeError("If mapping is not specified, key and value must be set")
-            mapping = {key: value}
-        self.hashes[name].update(mapping)
-        return len(mapping)
+        if (key is None and value is None) and not mapping and not items:
+            raise ValueError("'hset' with no key value pairs")
+        updates: dict[str, bytes] = dict()
+        if mapping:
+            updates.update(mapping)
+        if key is not None and value is not None:
+            updates[key] = value
+        if items:
+            for k, v in zip(items[:-1:2], items[1::2]):
+                updates[k] = v  # type: ignore
+        self.hashes[name].update(updates)
+        return len(updates)
 
     async def hget(self, name: str, key: str) -> Optional[bytes]:
         return self.hashes.get(name, {}).get(key)
@@ -421,9 +426,10 @@ class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
         name: str,
         key: Optional[str] = None,
         value: Optional[bytes] = None,
-        mapping: Optional[Mapping[str, bytes]] = None,
+        mapping: Optional[dict[str, bytes]] = None,
+        items: Optional[list[Union[str, bytes]]] = None,
     ) -> int:
-        self._stack.append(self.redis_em.hset(name, key, value, mapping))
+        self._stack.append(self.redis_em.hset(name, key, value, mapping, items))
         return 0
 
     async def hget(self, name: str, key: str) -> Optional[bytes]:
