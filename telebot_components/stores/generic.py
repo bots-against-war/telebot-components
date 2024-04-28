@@ -272,6 +272,17 @@ class KeyValueStore(SingleKeyStore[ValueT]):
         )
 
     @redis_retry()
+    async def save_multiple(self, mapping: Mapping[str, ValueT]) -> bool:
+        async with self.redis.pipeline() as pipe:
+            for key, value in mapping.items():
+                await pipe.set(
+                    self._full_key(key),
+                    self.dumper(value).encode("utf-8"),
+                    ex=self.expiration_time,
+                )
+            return all(await pipe.execute())
+
+    @redis_retry()
     async def touch(self, key: str_able) -> bool:
         if self.expiration_time is not None:
             return (await self.redis.expire(self._full_key(key), self.expiration_time)) == 1
@@ -284,6 +295,14 @@ class KeyValueStore(SingleKeyStore[ValueT]):
         if value_dump is None:
             return None
         return self.loader(value_dump.decode("utf-8"))
+
+    @redis_retry()
+    async def load_multiple(self, keys: Iterable[str_able]) -> list[Optional[ValueT]]:
+        async with self.redis.pipeline() as pipe:
+            for key in keys:
+                await pipe.get(self._full_key(key))
+            value_dumps: list[Optional[bytes]] = await pipe.execute()  # type: ignore
+        return [self.loader(v.decode("utf-8")) if v is not None else None for v in value_dumps]
 
 
 @dataclasses.dataclass

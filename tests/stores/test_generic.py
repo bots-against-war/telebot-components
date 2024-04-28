@@ -676,3 +676,34 @@ async def test_key_versioned_store_revert(redis: RedisInterface) -> None:
             meta={"message": "hi"},
         ),
     ]
+
+
+async def test_key_value_store_multiple_load(redis: RedisInterface):
+    store = KeyValueStore[int](
+        name="test123",
+        prefix=generate_str(),
+        redis=redis,
+    )
+    await store.save("key1", 1)
+    await store.save("key2", 2)
+    await store.save("key3", 3)
+    assert await store.load_multiple(["key1", "key2", "key3"]) == [1, 2, 3]
+    assert await store.load_multiple(["key1", "key2", "???"]) == [1, 2, None]
+    assert await store.load_multiple(["key1", "nope", "key3"]) == [1, None, 3]
+    assert await store.load_multiple(["what", "?"]) == [None, None]
+    assert await store.load_multiple([]) == []
+
+
+async def test_key_value_store_multiple_save(redis: RedisInterface):
+    store = KeyValueStore[int](
+        name="test123",
+        prefix=generate_str(),
+        redis=redis,
+    )
+    assert await store.save_multiple({"one": 1, "two": 2})
+    assert await store.load_multiple(["one", "two"]) == [1, 2]
+    assert await store.load("one") == 1
+    assert await store.load("three") is None
+
+    assert await store.save_multiple({"one": 10, "three": 30})
+    assert await store.load_multiple(["one", "two", "three"]) == [10, 2, 30]
