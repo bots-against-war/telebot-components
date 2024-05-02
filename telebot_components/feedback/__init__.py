@@ -9,9 +9,19 @@ import warnings
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Callable, Coroutine, Optional, Protocol, TypedDict, cast
+from typing import (
+    Any,
+    Callable,
+    Coroutine,
+    Optional,
+    Protocol,
+    TypedDict,
+    TypeVar,
+    cast,
+)
 
 from telebot import AsyncTeleBot
+from telebot import api as tgapi
 from telebot import types as tg
 from telebot.api import ApiHTTPException
 from telebot.formatting import hbold
@@ -60,6 +70,8 @@ from telebot_components.utils import (
     telegram_html_escape,
     telegram_message_url,
 )
+
+T = TypeVar("T")
 
 
 @dataclass
@@ -593,34 +605,67 @@ class FeedbackHandler:
 
         category = await self.category_store.get_user_category(user) if self.category_store is not None else None
 
-        # HACK: at this point we want to define how message_thread_id should be obtained based on configuration
-        # however, in the following code we might end up returning without sending anything to this thread
-        # in case the thread is not there we may create it first only to then not use = generate a junk empty thread
-        # , we define "message thread id getter" function to defer thread creation until it's actually needed
-        # it's locally caching to avoid repeated DB lookups
         _message_thread_id: Optional[int] = None
 
-        async def get_message_thread_id() -> Optional[int]:
+        async def with_message_thread_id(fn: Callable[[int | None], Awaitable[T]]) -> T:
+            """
+            Message thread id is an identifier of "forum topic", we use it in various ways based on configuration.
+
+            Determining message thread id can be tricky, for example we may find out the thread saved in bot's
+            memory had ben deleted and we need to re-create it. To facilitate this, all logic dealing with message
+            thread id must be packed into a function and passed into function. This function is intended for use
+            with actions that actually depend on forum topic's validity (e.g. sending message), simple saving can
+            be done with "getter" funciton (see below).
+            """
+            # using "cached" value to avoid double loading
             nonlocal _message_thread_id
-            if _message_thread_id is None:
-                if self.forum_topic_store is not None:
-                    _message_thread_id = await self.forum_topic_store.get_message_thread_id(category)
-                elif self.config.forum_topic_per_user:
-                    _message_thread_id = await self.message_thread_id_by_user_id_store.load(user.id)
-                    await self.message_thread_id_by_user_id_store.touch(user.id)
-                    if _message_thread_id is None:
-                        try:
-                            new_topic = await bot.create_forum_topic(
-                                chat_id=self.admin_chat_id,
-                                name=self.user_identifier(user, support_html=False),
-                            )
-                            _message_thread_id = new_topic.message_thread_id
-                            await self.message_thread_id_by_user_id_store.save(user.id, _message_thread_id)
-                        except Exception:
-                            self.logger.exception(
-                                f"Error creating forum topic for user {user}, will send without message thread id"
-                            )
-            return _message_thread_id
+            if _message_thread_id is not None:
+                return await fn(_message_thread_id)
+
+            # the case of topic = category, loading message thread id from the store
+            if self.forum_topic_store is not None:
+                _message_thread_id = await self.forum_topic_store.get_message_thread_id(category)
+                # TODO: handle case when category's topic was deleted?
+                return await fn(_message_thread_id)
+
+            # the case of topic = user
+            if self.config.forum_topic_per_user:
+                _message_thread_id = await self.message_thread_id_by_user_id_store.load(user.id)
+                await self.message_thread_id_by_user_id_store.touch(user.id)
+
+                # first, trying to use saved message thread id
+                if _message_thread_id is not None:
+                    try:
+                        return await fn(_message_thread_id)
+                    except tgapi.ApiHTTPException as e:
+                        # if it was deleted, proceed to topic creation
+                        if "message thread not found" in str(e):
+                            self.logger.info("Saved message thread seems to be deleted, will create new one")
+                            _message_thread_id = None
+                        else:
+                            raise e
+
+                # no saved valid message thread id, will create new one
+                if _message_thread_id is None:
+                    try:
+                        new_topic = await bot.create_forum_topic(
+                            chat_id=self.admin_chat_id,
+                            name=self.user_identifier(user, support_html=False),
+                        )
+                        _message_thread_id = new_topic.message_thread_id
+                        await self.message_thread_id_by_user_id_store.save(user.id, _message_thread_id)
+                        return await fn(_message_thread_id)
+                    except Exception:
+                        self.logger.exception(
+                            f"Error creating forum topic for user {user}, will send without message thread id"
+                        )
+
+            # no message thread id, default case or fallback for errors in the code above
+            return await fn(None)
+
+        async def get_message_thread_id() -> int | None:
+            # hack to turn call_with_... function into a simple getter
+            return await with_message_thread_id(async_noop)
 
         hashtag_msg_data: Optional[HashtagMessageData] = None
         if self.config.hashtags_in_admin_chat:
@@ -652,10 +697,12 @@ class FeedbackHandler:
                     hashtags.append(category_hashtag)
 
                 if hashtags:
-                    hashtag_msg = await bot.send_message(
-                        self.admin_chat_id,
-                        _join_hashtags(hashtags),
-                        message_thread_id=await get_message_thread_id(),
+                    hashtag_msg = await with_message_thread_id(
+                        lambda message_thread_id: bot.send_message(
+                            self.admin_chat_id,
+                            _join_hashtags(hashtags),
+                            message_thread_id=message_thread_id,
+                        )
                     )
                     await self.user_related_messages_store.add(user.id, hashtag_msg.id, reset_ttl=False)
                     hashtag_msg_data = HashtagMessageData(message_id=hashtag_msg.id, hashtags=hashtags)
@@ -665,11 +712,13 @@ class FeedbackHandler:
             user_identifier = self.user_identifier(user, support_html=True)
             last_sent_user_identifier = await self.last_sent_user_identifier_store.load(self.CONST_KEY)
             if last_sent_user_identifier is None or last_sent_user_identifier != user_identifier:
-                user_identifier_msg = await bot.send_message(
-                    self.admin_chat_id,
-                    user_identifier,
-                    message_thread_id=await get_message_thread_id(),
-                    parse_mode="HTML",
+                user_identifier_msg = await with_message_thread_id(
+                    lambda message_thread_id: bot.send_message(
+                        self.admin_chat_id,
+                        user_identifier,
+                        message_thread_id=message_thread_id,
+                        parse_mode="HTML",
+                    )
                 )
                 await self.last_sent_user_identifier_store.save(self.CONST_KEY, user_identifier)
                 await self.save_message_from_user(
@@ -684,7 +733,7 @@ class FeedbackHandler:
                     user, preforwarded_msg.id, message_thread_id=await get_message_thread_id()
                 )
 
-        message_forwarder_result = await message_forwarder(await get_message_thread_id())
+        message_forwarder_result = await with_message_thread_id(message_forwarder)
         await self.save_message_from_user(
             user, message_forwarder_result.admin_chat_msg.id, message_thread_id=await get_message_thread_id()
         )
@@ -1194,3 +1243,7 @@ class FeedbackHandler:
 
 def _join_hashtags(hashtags: list[str]) -> str:
     return " ".join(["#" + h for h in hashtags])
+
+
+async def async_noop(x: int | None) -> int | None:
+    return x
