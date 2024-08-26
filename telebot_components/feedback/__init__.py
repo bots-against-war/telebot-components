@@ -200,6 +200,9 @@ class FeedbackConfig:
 
     user_forum_topic_lifetime: timedelta = timedelta(days=90)
 
+    # default values for data retention are multiplied by this factor
+    data_lifetime_multiplier: float = 1.0
+
     def __post_init__(self):
         if self.full_user_anonymization:
             warnings.warn(
@@ -292,7 +295,7 @@ class FeedbackHandler:
             name="origin-chat-for-msg",
             prefix=bot_prefix,
             redis=redis,
-            expiration_time=times.YEAR,
+            expiration_time=times.YEAR * config.data_lifetime_multiplier,
         )
         # origin chat id -> set of message ids in admin chat related to user
         # NOTE: stores not only forwarded message ids but also service messages
@@ -301,14 +304,14 @@ class FeedbackHandler:
             name="msgs-from-user",
             prefix=bot_prefix,
             redis=redis,
-            expiration_time=times.MONTH,
+            expiration_time=times.MONTH * config.data_lifetime_multiplier,
         )
         # origin chat id -> list of messages from or to the user
         self.message_log_store = KeyListStore[int](
             name="message-log-with",
             prefix=bot_prefix,
             redis=redis,
-            expiration_time=times.MONTH,
+            expiration_time=times.MONTH * config.data_lifetime_multiplier,
         )
         # [optional] user id -> flag if the "forwarded to admin" confirmation has recently been
         # sent to them
