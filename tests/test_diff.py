@@ -1,4 +1,5 @@
 import copy
+import string
 from typing import Any
 
 import pytest
@@ -181,6 +182,13 @@ from telebot_components.utils.diff import (
                 }
             ],
         ),
+        pytest.param({"data": "short"}, {"data": "short"}, [], id="no diff for similar strings"),
+        pytest.param(
+            {"data": "very long string that is processed by DMP internally!"},
+            {"data": "very long string that is processed by DMP internally!"},
+            [],
+            id="no diff for similar strings even if they are long",
+        ),
     ],
 )
 @pytest.mark.parametrize("invert_a_b", [True, False])
@@ -219,16 +227,28 @@ def test_diff(a: Any, b: Any, expected_diff: list[DiffAction], invert_a_b: bool)
     [
         pytest.param("aaaa", "bbbb"),
         pytest.param("hello", "Hello!"),
-        pytest.param("", ""),
         pytest.param("aaa", ""),
         pytest.param("", "abcdef"),
     ],
 )
-def test_diff_text(a: str, b: str) -> None:
+def test_diff_different_text(a: str, b: str) -> None:
     diff_ = diff_text(a, b)
+    assert diff_ is not None
     b_patched = patch_text(a, diff_)
     assert b_patched == b
     assert len(diff_) <= len(a) + len(b) + 1
+
+
+@pytest.mark.parametrize(
+    "string",
+    [
+        pytest.param(""),
+        pytest.param(string.printable),
+        pytest.param("abcdef"),
+    ],
+)
+def test_diff_equal_text(string: str) -> None:
+    assert diff_text(string, string) is None
 
 
 class Unhashable:

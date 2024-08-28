@@ -9,7 +9,6 @@ with the main changes:
   (as proposed in https://github.com/inveniosoftware/dictdiffer/issues/100)
 """
 
-
 import copy
 import dataclasses
 import difflib
@@ -118,13 +117,20 @@ def copy_list(iterable: Iterable[ItemT]) -> list[ItemT]:
 
 
 # google's diff-match-patch wrapper functions
+# for reference see https://github.com/google/diff-match-patch/wiki/API
 
 
 _dmp = diff_match_patch()
 
 
-def diff_text(first: str, second: str) -> str:
+def diff_text(first: str, second: str) -> str | None:
     str_diff = _dmp.diff_main(first, second)
+    if not str_diff or (
+        # in case two strings are equal, diff main returns [(0, 'string')]
+        len(str_diff) == 1
+        and str_diff[0][0] == 0
+    ):
+        return None
     _dmp.diff_cleanupEfficiency(str_diff)
     return _dmp.diff_toDelta(str_diff)
 
@@ -221,11 +227,13 @@ def diff_gen(
                             values=copy_list(second[j1:j2]),
                         )
         elif isinstance(first, str) and isinstance(second, str) and len(first) > 32 and len(second) > 32:
-            yield PatchStringAction(
-                path=path,
-                action="patch_string",
-                delta=diff_text(first, second),
-            )
+            dmp_delta = diff_text(first, second)
+            if dmp_delta is not None:
+                yield PatchStringAction(
+                    path=path,
+                    action="patch_string",
+                    delta=dmp_delta,
+                )
         elif are_different(first, second, float_tol):
             yield SetPathAction(
                 path=path,
