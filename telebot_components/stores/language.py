@@ -168,7 +168,12 @@ class LanguageStore(LanguageStoreInterface):
         validate_multilang_text(ml_text, list(self.languages))
 
     async def get_selected_user_language(self, user: types.User) -> Optional[LanguageData]:
-        return await self.user_language_store.load(user.id)
+        selected_language = await self.user_language_store.load(user.id)
+        if selected_language not in self.languages:
+            # = the language was selected at some point in the past but is no longer supported
+            return None
+        else:
+            return selected_language
 
     async def get_user_language(self, user: types.User) -> LanguageData:
         stored_lang = await self.get_selected_user_language(user)
