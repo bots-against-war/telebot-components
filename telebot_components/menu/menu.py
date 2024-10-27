@@ -22,7 +22,7 @@ from telebot_components.language import (
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.category import Category, CategoryStore
 from telebot_components.stores.generic import KeyValueStore
-from telebot_components.utils import telegram_html_escape
+from telebot_components.utils import TextMarkup
 
 ROUTE_MENU_CALLBACK_DATA = CallbackData("route_to", prefix="menu")
 TERMINATE_MENU_CALLBACK_DATA = CallbackData("id", prefix="terminator")
@@ -139,12 +139,19 @@ class MenuMechanism(enum.Enum):
     REPLY_KEYBOARD = "reply_keyboard"
 
 
-@dataclass(frozen=True)
+@dataclass
 class MenuConfig:
     back_label: Optional[AnyText]  # None = no back button = submenu cannot be exited
     lock_after_termination: bool = False
     is_text_html: bool = False
+    text_markup: TextMarkup = TextMarkup.NONE
     mechanism: MenuMechanism = MenuMechanism.INLINE_BUTTONS
+
+    def __post_init__(self) -> None:
+        if self.is_text_html:
+            if self.text_markup is not TextMarkup.NONE:
+                raise ValueError("is_text_html and text_markup properties are mutually exclusive")
+            self.text_markup = TextMarkup.HTML
 
 
 class Menu:
@@ -179,14 +186,6 @@ class Menu:
                 back_label="back",
                 lock_after_termination=True,
             )  # backwards compatibility for pre-config code
-
-    def html_text(self, language: MaybeLanguage) -> str:
-        text = any_text_to_str(self.text, language)
-        if not self.config.is_text_html:
-            text = telegram_html_escape(
-                text
-            )  # menu handler always uses parse_mode="HTML", so we need to escape plain text
-        return text
 
     @property
     def id(self) -> str:
@@ -426,10 +425,10 @@ class MenuHandler:
             try:
                 await bot.edit_message_text(
                     chat_id=user.id,
-                    text=new_menu.html_text(language),
+                    text=any_text_to_str(new_menu.text, language),
+                    parse_mode=new_menu.config.text_markup.parse_mode(),
                     message_id=current_menu_message_id,
                     reply_markup=new_menu.get_keyboard_markup(language),
-                    parse_mode="HTML",
                 )
                 return
             except ApiHTTPException as e:
@@ -437,9 +436,9 @@ class MenuHandler:
 
         new_menu_message = await bot.send_message(
             chat_id=user.id,
-            text=new_menu.html_text(language),
+            text=any_text_to_str(new_menu.text, language),
+            parse_mode=new_menu.config.text_markup.parse_mode(),
             reply_markup=new_menu.get_keyboard_markup(language),
-            parse_mode="HTML",
         )
         await self.last_menu_message_id_store.save(user.id, new_menu_message.id)
 

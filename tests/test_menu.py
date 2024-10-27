@@ -14,6 +14,7 @@ from telebot_components.menu.menu import (
 )
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.language import Language, LanguageStore
+from telebot_components.utils import TextMarkup
 from tests.utils import TelegramServerMock, extract_full_kwargs, reply_markups_to_dict
 
 
@@ -123,14 +124,14 @@ async def test_menu_handler_basic(example_menu: Menu, legacy_id_in_buttons: bool
     assert extract_full_kwargs(bot.method_calls.pop("send_message")) == [
         {
             "chat_id": 1312,
-            "text": "example menu =&lt;^_^&gt;=",  # NOTE: properly escaped for parse mode HTML
+            "text": "example menu =<^_^>=",
             "reply_markup": tg.InlineKeyboardMarkup(
                 [
                     [tg.InlineKeyboardButton(text="picking game", callback_data="menu:55a8b659b3cd3593-1")],
                     [tg.InlineKeyboardButton(text="feedback", callback_data="terminator:55a8b659b3cd3593-1")],
                 ]
             ),
-            "parse_mode": "HTML",
+            "parse_mode": None,
         }
     ]
     bot.method_calls.clear()
@@ -174,7 +175,7 @@ async def test_menu_handler_basic(example_menu: Menu, legacy_id_in_buttons: bool
             "chat_id": 1312,
             "message_id": 11111,
             "text": "pick color",
-            "parse_mode": "HTML",
+            "parse_mode": None,
             "reply_markup": {
                 "inline_keyboard": [
                     [{"text": "red", "callback_data": "terminator:55a8b659b3cd3593-5"}],
@@ -222,8 +223,8 @@ async def test_menu_handler_basic(example_menu: Menu, legacy_id_in_buttons: bool
     assert reply_markups_to_dict(extract_full_kwargs(bot.method_calls["send_message"])) == [
         {
             "chat_id": 1312,
-            "parse_mode": "HTML",
-            "text": "example menu =&lt;^_^&gt;=",
+            "parse_mode": None,
+            "text": "example menu =<^_^>=",
             "reply_markup": {
                 "inline_keyboard": [
                     [{"text": "picking game", "callback_data": "menu:55a8b659b3cd3593-1"}],
@@ -321,7 +322,7 @@ async def test_several_menus_per_bot(redis: RedisInterface) -> None:
                     [{"text": "option 2", "callback_data": "terminator:efa8ddb0b524eb41-1"}],
                 ]
             },
-            "parse_mode": "HTML",
+            "parse_mode": None,
         }
     ]
     bot.method_calls.clear()
@@ -340,7 +341,7 @@ async def test_several_menus_per_bot(redis: RedisInterface) -> None:
                     [tg.InlineKeyboardButton(text="option 3", callback_data="terminator:84c76de37c5679e0-2")],
                 ]
             ),
-            "parse_mode": "HTML",
+            "parse_mode": None,
         }
     ]
     bot.method_calls.clear()
@@ -407,7 +408,7 @@ async def test_menu_handler_with_language_store(redis: RedisInterface):
     assert send_message_kw == {
         "chat_id": 161,
         "text": "заголовок",
-        "parse_mode": "HTML",
+        "parse_mode": None,
     }
     assert reply_markup.to_dict() == {
         "inline_keyboard": [
@@ -428,7 +429,7 @@ async def test_menu_handler_with_language_store(redis: RedisInterface):
     assert send_message_kw == {
         "chat_id": 161,
         "text": "header",
-        "parse_mode": "HTML",
+        "parse_mode": None,
     }
     assert reply_markup.to_dict() == {
         "inline_keyboard": [
@@ -501,7 +502,7 @@ async def test_menu_handler_with_reply_buttons(redis: RedisInterface):
     assert send_message_kw == {
         "chat_id": 161,
         "text": "menu",
-        "parse_mode": "HTML",
+        "parse_mode": None,
     }
     assert reply_markup.to_dict() == {
         "keyboard": [[{"text": "one"}], [{"text": "no-escape"}]],
@@ -519,7 +520,7 @@ async def test_menu_handler_with_reply_buttons(redis: RedisInterface):
     assert send_message_kw == {
         "chat_id": 161,
         "text": "submenu one",
-        "parse_mode": "HTML",
+        "parse_mode": None,
     }
     assert reply_markup.to_dict() == {
         "keyboard": [[{"text": "1 sub 1"}], [{"text": "1 sub 2"}], [{"text": "<-"}]],
@@ -546,7 +547,7 @@ async def test_menu_handler_with_reply_buttons(redis: RedisInterface):
     assert send_message_kw == {
         "chat_id": 161,
         "text": "no escape submenu",
-        "parse_mode": "HTML",
+        "parse_mode": None,
     }
     assert reply_markup.to_dict() == {
         "keyboard": [[{"text": "red pill"}], [{"text": "blue pill"}]],
@@ -599,7 +600,7 @@ async def test_menu_with_different_mechanisms(redis: RedisInterface):
         {
             "chat_id": 1234,
             "text": "top level",
-            "parse_mode": "HTML",
+            "parse_mode": None,
             "reply_markup": {
                 "keyboard": [[{"text": "one"}]],
                 "one_time_keyboard": True,
@@ -615,7 +616,7 @@ async def test_menu_with_different_mechanisms(redis: RedisInterface):
         {
             "chat_id": 1234,
             "text": "submenu one",
-            "parse_mode": "HTML",
+            "parse_mode": None,
             "reply_markup": {
                 "inline_keyboard": [
                     [{"text": "1 sub 1", "callback_data": "terminator:6b36666a13608c19-1"}],
@@ -634,11 +635,94 @@ async def test_menu_with_different_mechanisms(redis: RedisInterface):
         {
             "chat_id": 1234,
             "text": "top level",
-            "parse_mode": "HTML",
+            "parse_mode": None,
             "reply_markup": {
                 "keyboard": [[{"text": "one"}]],
                 "one_time_keyboard": True,
                 "resize_keyboard": True,
+            },
+        }
+    ]
+    bot.method_calls.clear()
+
+
+@pytest.mark.parametrize(
+    "markup, is_text_html, expected_parse_mode",
+    [
+        pytest.param(TextMarkup.NONE, False, None),
+        pytest.param(TextMarkup.HTML, False, "HTML"),
+        pytest.param(TextMarkup.MARKDOWN, False, "MarkdownV2"),
+        pytest.param(TextMarkup.NONE, True, "HTML"),
+    ],
+)
+async def test_text_markups(
+    redis: RedisInterface, markup: TextMarkup, is_text_html: bool, expected_parse_mode: str | None
+):
+    bot = MockedAsyncTeleBot(token="token")
+    user = tg.User(id=1234, is_bot=False, first_name="Andy", last_name="Bernard")
+    telegram = TelegramServerMock()
+
+    menu = Menu(
+        text="menu",
+        config=MenuConfig(
+            back_label=None,
+            mechanism=MenuMechanism.INLINE_BUTTONS,
+            text_markup=markup,
+            is_text_html=is_text_html,
+        ),
+        menu_items=[
+            MenuItem(
+                label="option",
+                submenu=Menu(
+                    text="submenu",
+                    menu_items=[
+                        MenuItem(label="fin", terminator="fin"),
+                    ],
+                    config=MenuConfig(
+                        back_label=None,
+                        mechanism=MenuMechanism.INLINE_BUTTONS,
+                        text_markup=markup,
+                        is_text_html=is_text_html,
+                    ),
+                ),
+            ),
+        ],
+    )
+
+    menu_handler = MenuHandler(
+        bot_prefix="test-1-2-1-2",
+        menu_tree=menu,
+        name="testing",
+        redis=redis,
+    )
+
+    async def on_menu_termination(context: TerminatorContext) -> None:
+        pass
+
+    menu_handler.setup(bot, on_terminal_menu_option_selected=on_menu_termination)
+
+    await menu_handler.start_menu(bot, user)
+    assert len(bot.method_calls) == 1
+    assert reply_markups_to_dict(extract_full_kwargs(bot.method_calls["send_message"])) == [
+        {
+            "chat_id": 1234,
+            "text": "menu",
+            "parse_mode": expected_parse_mode,
+            "reply_markup": {"inline_keyboard": [[{"text": "option", "callback_data": "menu:ae2b1fca515949e5-1"}]]},
+        }
+    ]
+    bot.method_calls.clear()
+
+    await telegram.press_button(bot, user.id, "menu:ae2b1fca515949e5-1")
+    assert set(bot.method_calls.keys()) == {"edit_message_text", "answer_callback_query"}
+    assert reply_markups_to_dict(extract_full_kwargs(bot.method_calls["edit_message_text"])) == [
+        {
+            "chat_id": 1234,
+            "message_id": 11111,
+            "text": "submenu",
+            "parse_mode": expected_parse_mode,
+            "reply_markup": {
+                "inline_keyboard": [[{"callback_data": "terminator:ae2b1fca515949e5-1", "text": "fin"}]],
             },
         }
     ]
