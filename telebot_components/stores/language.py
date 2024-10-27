@@ -37,7 +37,7 @@ from telebot_components.menu.menu import (
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import KeyValueStore
 from telebot_components.stores.utils import callback_query_processing_error
-from telebot_components.utils.strings import telegram_html_escape
+from telebot_components.utils import TextMarkup
 
 
 class LanguageLabelPart(enum.Enum):
@@ -54,10 +54,16 @@ class LanguageSelectionMenuConfig:
     select_with_checkmark: bool = True
     prompt: Optional[MultilangText] = None
     is_prompt_html: bool = False
+    prompt_markup: TextMarkup = TextMarkup.NONE
 
     language_label_template: Optional[list[Union[str, LanguageLabelPart]]] = None
 
     def __post_init__(self) -> None:
+        if self.is_prompt_html:
+            if self.prompt_markup is not TextMarkup.NONE:
+                raise ValueError("is_prompt_html and prompt_markup properties are mutually exclusive")
+            self.prompt_markup = TextMarkup.HTML
+
         if self.emojj_buttons and self.language_label_template is not None:
             raise RuntimeError("emoji buttons and button template options are mutually exclusive")
 
@@ -82,15 +88,6 @@ class LanguageSelectionMenuConfig:
             elif part is LanguageLabelPart.NAME_LOCAL:
                 str_parts.append(lang.local_name or lang.name)
         return "".join(str_parts)
-
-    def html_menu_prompt(self, language: AnyLanguage) -> str:
-        if self.prompt is None:
-            raise ValueError("To use this method, prompt must be specified in the menu config")
-        localized = any_text_to_str(self.prompt, language=language)
-        if self.is_prompt_html:
-            return localized
-        else:
-            return telegram_html_escape(localized)
 
 
 class LanguageStore(LanguageStoreInterface):
@@ -132,7 +129,7 @@ class LanguageStore(LanguageStoreInterface):
                     config=MenuConfig(
                         back_label=None,
                         lock_after_termination=False,
-                        is_text_html=self.menu_config.is_prompt_html,
+                        text_markup=self.menu_config.prompt_markup,
                         mechanism=MenuMechanism.REPLY_KEYBOARD,
                     ),
                     menu_items=[
@@ -147,15 +144,14 @@ class LanguageStore(LanguageStoreInterface):
                 language_store=self,
             )
 
-    async def send_inline_selector(
-        self,
-        bot: AsyncTeleBot,
-        user: types.User,
-    ) -> None:
+    async def send_inline_selector(self, bot: AsyncTeleBot, user: types.User) -> None:
         language = await self.get_user_language(user)
+        if self.menu_config.prompt is None:
+            raise ValueError("To use send_inline_selector method, prompt must be specified in the menu config")
         await bot.send_message(
             chat_id=user.id,
-            text=self.menu_config.html_menu_prompt(language),
+            text=any_text_to_str(self.menu_config.prompt, language),
+            parse_mode=self.menu_config.prompt_markup.parse_mode(),
             reply_markup=self.markup_for_selected_language(selected_language=language),
         )
 
@@ -243,7 +239,8 @@ class LanguageStore(LanguageStoreInterface):
                     await bot.edit_message_text(
                         chat_id=user.id,
                         message_id=call.message.id,
-                        text=self.menu_config.html_menu_prompt(language=language),
+                        text=any_text_to_str(self.menu_config.prompt, language),
+                        parse_mode=self.menu_config.prompt_markup.parse_mode(),
                         reply_markup=self.markup_for_selected_language(language),
                     )
                 else:

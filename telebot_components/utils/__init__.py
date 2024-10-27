@@ -1,5 +1,6 @@
 import asyncio
 import collections
+import enum
 import functools
 import hashlib
 import html
@@ -286,3 +287,19 @@ ItemT = TypeVar("ItemT")
 def tail(n: int, iterable: Iterable[ItemT]) -> Iterator[ItemT]:
     "Return an iterator over the last n items."
     return iter(collections.deque(iterable, maxlen=n))
+
+
+class TextMarkup(enum.Enum):
+
+    NONE = "none"
+    HTML = "html"
+    MARKDOWN = "markdown"
+
+    def parse_mode(self) -> Optional[str]:
+        """See https://core.telegram.org/bots/api#formatting-options"""
+        if self is TextMarkup.NONE:
+            return None
+        elif self is TextMarkup.HTML:
+            return "HTML"
+        elif self is TextMarkup.MARKDOWN:
+            return "MarkdownV2"

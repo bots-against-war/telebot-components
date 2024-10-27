@@ -25,6 +25,7 @@ from telebot_components.stores.language import (
     LanguageSelectionMenuConfig,
     LanguageStore,
 )
+from telebot_components.utils import TextMarkup
 
 
 def create_menu_bot(token: str):
@@ -61,7 +62,7 @@ def create_menu_bot(token: str):
                 Language.EN: "🔙 Back",
             },
             lock_after_termination=False,
-            is_text_html=True,
+            text_markup=TextMarkup.HTML,
         ),
         menu_items=[
             MenuItem(
