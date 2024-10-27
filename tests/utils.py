@@ -105,6 +105,16 @@ def extract_full_kwargs(method_calls: list[MethodCall]) -> list[dict[str, Any]]:
     return [mc.full_kwargs for mc in method_calls]
 
 
+def reply_markups_to_dict(method_call_kwargs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            k: (v.to_dict() if isinstance(v, (tg.InlineKeyboardMarkup, tg.ReplyKeyboardMarkup)) else v)
+            for k, v in kw.items()
+        }
+        for kw in method_call_kwargs
+    ]
+
+
 class TelegramServerMock:
     def __init__(self, admin_chats: set[int] | None = None) -> None:
         self._message_id_counter = 0
@@ -156,4 +166,31 @@ class TelegramServerMock:
                 "text": "unused-replied-to-message-text",
             }
 
+        await bot.process_new_updates([tg.Update.de_json(update_json)])  # type: ignore
+
+    async def press_button(self, bot: AsyncTeleBot, user_id: int, callback_data: str) -> None:
+        user_json = {
+            "id": user_id,
+            "is_bot": False,
+            "first_name": "User",
+        }
+        update_json = {
+            "update_id": 19283649187364,
+            "callback_query": {
+                "id": 40198734019872364,
+                "chat_instance": "wtf is this",
+                "from": user_json,
+                "data": callback_data,
+                "message": {
+                    "message_id": 11111,
+                    "from": user_json,
+                    "chat": {
+                        "id": user_id,
+                        "type": "private",
+                    },
+                    "date": int(datetime.datetime.now().timestamp()),
+                    "text": "whatever",
+                },
+            },
+        }
         await bot.process_new_updates([tg.Update.de_json(update_json)])  # type: ignore

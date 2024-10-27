@@ -234,6 +234,12 @@ def create_menu_bot(token: str):
     )
 
 
+async def main(br: BotRunner):
+    print(await br.bot.get_me())
+    print()
+    await br.run_polling()
+
+
 if __name__ == "__main__":
     import asyncio
     import os
@@ -246,4 +252,4 @@ if __name__ == "__main__":
         token=os.environ["TOKEN"],
     )
 
-    asyncio.run(bot_runner.run_polling())
+    asyncio.run(main(bot_runner))
