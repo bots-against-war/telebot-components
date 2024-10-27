@@ -415,8 +415,8 @@ class MenuHandler:
         current_menu_message_id: Optional[int],
     ) -> None:
         language = await self.get_maybe_language(user)
-        await self.current_menu_store.save(user.id, new_menu.id)
         current_menu = await self.get_current_menu(user.id)
+        await self.current_menu_store.save(user.id, new_menu.id)
         if (
             current_menu_message_id is not None
             and current_menu is not None
@@ -431,16 +431,17 @@ class MenuHandler:
                     reply_markup=new_menu.get_keyboard_markup(language),
                     parse_mode="HTML",
                 )
+                return
             except ApiHTTPException as e:
-                self.logger.info(f"Error editing message text and reply markup: {e!r}")
-        else:
-            new_menu_message = await bot.send_message(
-                chat_id=user.id,
-                text=new_menu.html_text(language),
-                reply_markup=new_menu.get_keyboard_markup(language),
-                parse_mode="HTML",
-            )
-            await self.last_menu_message_id_store.save(user.id, new_menu_message.id)
+                self.logger.info(f"Error editing message text and reply markup, will send a new message: {e!r}")
+
+        new_menu_message = await bot.send_message(
+            chat_id=user.id,
+            text=new_menu.html_text(language),
+            reply_markup=new_menu.get_keyboard_markup(language),
+            parse_mode="HTML",
+        )
+        await self.last_menu_message_id_store.save(user.id, new_menu_message.id)
 
     async def _terminate_menu(
         self,
