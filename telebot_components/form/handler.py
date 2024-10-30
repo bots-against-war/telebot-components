@@ -29,6 +29,7 @@ from telebot_components.form.field import (
     InlineFormField,
 )
 from telebot_components.form.form import Form
+from telebot_components.form.types import FormDynamicDataT, FormResultT
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import KeyValueStore
 from telebot_components.stores.language import (
@@ -40,9 +41,6 @@ from telebot_components.stores.language import (
 )
 from telebot_components.utils import from_yaml_unsafe, join_paragraphs, to_yaml_unsafe
 from telebot_components.utils.strings import telegram_html_escape
-
-FormResultT = TypeVar("FormResultT", bound=Mapping[str, Any])
-
 
 logger = logging.getLogger(__name__)
 
@@ -144,39 +142,50 @@ class _FormStateUpdateEffect:
 
 
 @dataclass
-class FormState(Generic[FormResultT]):
+class _FormState(Generic[FormResultT, FormDynamicDataT]):
     """User's state when they are filling out a form. Please note that a single object is
     used throughout the form with result_so_far mutating attribute.
     """
 
     current_field: FormField
     result_so_far: FormResultT
+    dynamic_data: Optional[FormDynamicDataT] = None
 
     def to_store(self) -> str:
         return json.dumps(
             {
                 "current_field": self.current_field.name,
                 "result_so_far": to_yaml_unsafe(self.result_so_far),
+                "dynamic_data": to_yaml_unsafe(self.dynamic_data),
             }
         )
 
     @classmethod
-    def from_store(self, dump: str, form_fields: list[FormField]) -> Optional["FormState"]:
+    def from_store(self, dump: str, form_fields: list[FormField]) -> Optional["_FormState"]:
         try:
             asdict = json.loads(dump)
             form_field_by_name = {f.name: f for f in form_fields}
-            return FormState(
+            return _FormState(
                 current_field=form_field_by_name[asdict["current_field"]],
                 result_so_far=from_yaml_unsafe(asdict["result_so_far"]),
+                dynamic_data=from_yaml_unsafe(asdict["dynamic_data"]) if "dynamic_data" in asdict else None,
             )
         except Exception:
             logger.exception("Error loading form state from persistent storage")
             return None
 
-    async def get_current_query_message(
+    async def get_current_field_message(
         self, user: tg.User, language: MaybeLanguage, form_handler_config: FormHandlerConfig
     ) -> str:
-        sentences = [any_text_to_str(await self.current_field.get_query_message(user), language)]
+        maybe_query: Optional[AnyText] = None
+        if self.dynamic_data is not None:
+            maybe_query = await self.current_field.get_dynamic_query_message(
+                dynamic_data=self.dynamic_data,
+                user=user,
+            )
+        query = maybe_query or await self.current_field.get_query_message(user)
+
+        sentences = [any_text_to_str(query, language)]
         if not self.current_field.required:
             sentences.append(form_handler_config.can_skip_field_msg(language))
         existing_field_value = self.result_so_far.get(self.current_field.name)
@@ -190,7 +199,15 @@ class FormState(Generic[FormResultT]):
 
         return " ".join(sentences)
 
-    def get_current_reply_markup(self, language: MaybeLanguage) -> tg.ReplyMarkup:
+    def get_current_field_reply_markup(self, language: MaybeLanguage) -> tg.ReplyMarkup:
+        if self.dynamic_data is not None:
+            maybe_dynamic_markup = self.current_field.get_dynamic_reply_markup(
+                dynamic_data=self.dynamic_data,
+                language=language,
+                current_value=self.result_so_far.get(self.current_field.name),
+            )
+            if maybe_dynamic_markup is not None:
+                return maybe_dynamic_markup
         return self.current_field.get_reply_markup(
             language,
             current_value=self.result_so_far.get(self.current_field.name),
@@ -232,7 +249,7 @@ class FormState(Generic[FormResultT]):
                     _FormAction.KEEP_GOING,
                     user_action=_UserAction(
                         send_message_html=form_handler_config.unsupported_cmd_error_msg(language),
-                        send_reply_keyboard=self.get_current_reply_markup(language),
+                        send_reply_keyboard=self.get_current_field_reply_markup(language),
                     ),
                 )
         else:
@@ -240,6 +257,8 @@ class FormState(Generic[FormResultT]):
             value = result.parsed_value
             response_to_user = result.response_to_user
             is_field_ok = result.parsed_value is not None
+            if result.new_dynamic_data is not None:
+                self.dynamic_data = result.new_dynamic_data
             if result.no_form_state_mutation:
                 return _FormStateUpdateEffect(
                     _FormAction.KEEP_GOING,
@@ -257,7 +276,7 @@ class FormState(Generic[FormResultT]):
                 _FormAction.KEEP_GOING,
                 user_action=_UserAction(
                     send_message_html=join_paragraphs(reply_paragraphs),
-                    send_reply_keyboard=self.get_current_reply_markup(language),
+                    send_reply_keyboard=self.get_current_field_reply_markup(language),
                 ),
             )
 
@@ -286,12 +305,12 @@ class FormState(Generic[FormResultT]):
                 ),
             )
         self.current_field = next_field
-        reply_paragraphs.append(await self.get_current_query_message(message.from_user, language, form_handler_config))
+        reply_paragraphs.append(await self.get_current_field_message(message.from_user, language, form_handler_config))
         return _FormStateUpdateEffect(
             _FormAction.KEEP_GOING,
             user_action=_UserAction(
                 send_message_html=join_paragraphs(reply_paragraphs),
-                send_reply_keyboard=self.get_current_reply_markup(language),
+                send_reply_keyboard=self.get_current_field_reply_markup(language),
             ),
         )
 
@@ -306,39 +325,41 @@ class FormState(Generic[FormResultT]):
         callback_data = INLINE_FIELD_CALLBACK_DATA.parse(call.data)
         if callback_data["fieldname"] != self.current_field.name:
             return _FormStateUpdateEffect(_FormAction.DO_NOTHING)
-        field_result = await self.current_field.process_callback_query(
+        result = await self.current_field.process_callback_query(
             callback_payload=callback_data["payload"],
             current_value=self.result_so_far.get(self.current_field.name),
             language=language,
         )
-        if field_result.new_field_value is not None:
+        if result.new_dynamic_data is not None:
+            self.dynamic_data = result.new_dynamic_data
+        if result.new_field_value is not None:
             # result_so_far is typed as immutable Mapping to allow TypedDict's, but here we actually construct it
-            self.result_so_far[self.current_field.name] = field_result.new_field_value  # type: ignore
+            self.result_so_far[self.current_field.name] = result.new_field_value  # type: ignore
         paragraphs: list[str] = []
-        if field_result.response_to_user:
-            paragraphs.append(field_result.response_to_user)
+        if result.response_to_user:
+            paragraphs.append(result.response_to_user)
 
         send_reply_keyboard: tg.ReplyMarkup = tg.ReplyKeyboardRemove()
         form_action = _FormAction.KEEP_GOING
-        if field_result.complete_field:
+        if result.complete_field:
             next_field = await self.current_field.get_next_field_getter()(
                 user=call.from_user,
-                value=field_result.new_field_value,
+                value=result.new_field_value,
                 current_field_name=self.current_field.name,
             )
             if next_field is None:
                 form_action = _FormAction.COMPLETE
             else:
                 self.current_field = next_field
-                paragraphs.append(await self.get_current_query_message(call.from_user, language, form_handler_config))
-                send_reply_keyboard = self.get_current_reply_markup(language)
+                paragraphs.append(await self.get_current_field_message(call.from_user, language, form_handler_config))
+                send_reply_keyboard = self.get_current_field_reply_markup(language)
 
         return _FormStateUpdateEffect(
             form_action=form_action,
             user_action=_UserAction(
                 send_message_html=join_paragraphs(paragraphs),
                 send_reply_keyboard=send_reply_keyboard,
-                update_inline_markup=field_result.updated_inline_markup,
+                update_inline_markup=result.updated_inline_markup,
             ),
         )
 
@@ -353,7 +374,7 @@ class FormExitContext(Generic[FormResultT]):
 FormExitCallback = Callable[[FormExitContext], Coroutine[None, None, None]]
 
 
-class FormHandler(Generic[FormResultT]):
+class FormHandler(Generic[FormResultT, FormDynamicDataT]):
     def __init__(
         self,
         redis: RedisInterface,
@@ -366,13 +387,13 @@ class FormHandler(Generic[FormResultT]):
         self.config = config
         self.form = form
 
-        self.form_state_store = KeyValueStore[Optional[FormState]](
+        self.form_state_store = KeyValueStore[Optional[_FormState]](
             name=f"form-state-for-{name}",
             prefix=bot_prefix,
             redis=redis,
             expiration_time=3 * times.HOUR,
             dumper=lambda fs: fs.to_store() if fs is not None else "",
-            loader=lambda dump: FormState.from_store(dump, form.fields),
+            loader=lambda dump: _FormState.from_store(dump, form.fields),
         )
 
         self.language_store = language_store
@@ -401,7 +422,7 @@ class FormHandler(Generic[FormResultT]):
         async def form_action_handler(
             user: tg.User,
             last_message_id: int,
-            form_state_updater: Callable[[FormState, MaybeLanguage], Coroutine[None, None, _FormStateUpdateEffect]],
+            form_state_updater: Callable[[_FormState, MaybeLanguage], Coroutine[None, None, _FormStateUpdateEffect]],
             form_exit_context_constructor: Callable[[AsyncTeleBot, FormResultT], FormExitContext],
         ):
             user_id = user.id
@@ -458,7 +479,7 @@ class FormHandler(Generic[FormResultT]):
 
         @bot.message_handler(func=currently_filling_form, chat_types=[constants.ChatType.private], priority=100)
         async def form_message_action_handler(message: tg.Message):
-            async def form_state_updater(form_state: FormState, language: MaybeLanguage):
+            async def form_state_updater(form_state: _FormState, language: MaybeLanguage):
                 return await form_state.update_with_message(message, language, self.config)
 
             def form_exit_context_constructor(bot: AsyncTeleBot, result: FormResultT):
@@ -473,7 +494,7 @@ class FormHandler(Generic[FormResultT]):
 
         @bot.callback_query_handler(func=currently_filling_form, callback_data=INLINE_FIELD_CALLBACK_DATA)
         async def form_inline_action_handler(call: tg.CallbackQuery):
-            async def form_state_updater(form_state: FormState, language: MaybeLanguage):
+            async def form_state_updater(form_state: _FormState, language: MaybeLanguage):
                 return await form_state.update_with_callback_query(call, language, self.config)
 
             def form_exit_context_constructor(bot: AsyncTeleBot, result: FormResultT):
@@ -497,10 +518,12 @@ class FormHandler(Generic[FormResultT]):
         user: tg.User,
         initial_form_result: Optional[FormResultT] = None,
         separate_field_prompt_message: bool = False,
+        dynamic_data: Optional[FormDynamicDataT] = None,
     ) -> tg.Message:
-        initial_form_state = FormState(
+        initial_form_state = _FormState[FormResultT, FormDynamicDataT](
             current_field=self.form.start_field,
             result_so_far=initial_form_result or cast(FormResultT, dict()),
+            dynamic_data=dynamic_data,
         )
         await self.form_state_store.save(user.id, initial_form_state)
         language = await self.get_maybe_language(user)
@@ -511,10 +534,10 @@ class FormHandler(Generic[FormResultT]):
                 text=join_paragraphs(
                     [
                         self.config.form_starting_msg(language),
-                        await initial_form_state.get_current_query_message(user, language, self.config),
+                        await initial_form_state.get_current_field_message(user, language, self.config),
                     ]
                 ),
-                reply_markup=initial_form_state.get_current_reply_markup(language),
+                reply_markup=initial_form_state.get_current_field_reply_markup(language),
                 parse_mode="HTML",
             )
         else:
@@ -525,7 +548,7 @@ class FormHandler(Generic[FormResultT]):
             )
             return await bot.send_message(
                 user.id,
-                text=await initial_form_state.get_current_query_message(user, language, self.config),
-                reply_markup=initial_form_state.get_current_reply_markup(language),
+                text=await initial_form_state.get_current_field_message(user, language, self.config),
+                reply_markup=initial_form_state.get_current_field_reply_markup(language),
                 parse_mode="HTML",
             )

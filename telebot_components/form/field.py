@@ -166,12 +166,20 @@ class FormFieldResultExportOpts(Generic[FieldValueT]):
 class MessageProcessingResult(Generic[FieldValueT]):
     response_to_user: Optional[str]
     parsed_value: Optional[FieldValueT]
-
     # special flag to tell the form "we didn't produce any value but it's not an error! it's really ok,
     # the form is continuing, we are awaiting some further input from the user or something like this"
     no_form_state_mutation: bool = False
-
     response_reply_markup: Optional[tg.ReplyMarkup] = None
+    new_dynamic_data: Optional[Any] = None
+
+
+@dataclass
+class CallbackProcessingResult(Generic[FieldValueT]):
+    response_to_user: Optional[str]
+    updated_inline_markup: Optional[tg.InlineKeyboardMarkup]
+    complete_field: bool
+    new_field_value: Optional[FieldValueT]
+    new_dynamic_data: Optional[Any] = None
 
 
 FormFieldT = TypeVar("FormFieldT", bound="FormField")
@@ -205,7 +213,8 @@ class FormField(Generic[FieldValueT]):
         return self.next_field_getter
 
     def custom_value_type(self) -> Optional[Type]:
-        """Used for validation of a form's result type (see Form.validate_result_type). In trivial cases
+        """
+        Used for validation of a form's result type (see Form.validate_result_type). In trivial cases
         like PlainTextField field value type is obtained from introspection, but sometimes this is
         impossible (e.g. in MultipleSelectField), and this method is used.
 
@@ -232,6 +241,9 @@ class FormField(Generic[FieldValueT]):
     async def get_query_message(self, user: tg.User) -> AnyText:
         return self.query_message
 
+    async def get_dynamic_query_message(self, dynamic_data: Any, user: tg.User) -> Optional[AnyText]:
+        return None
+
     def value_to_str(self, value: FieldValueT, language: MaybeLanguage) -> str:
         """Human-readable string formatting of the value"""
         return self.value_id(value)
@@ -248,6 +260,14 @@ class FormField(Generic[FieldValueT]):
 
     def get_reply_markup(self, language: MaybeLanguage, current_value: Optional[FieldValueT] = None) -> tg.ReplyMarkup:
         return tg.ReplyKeyboardRemove()
+
+    def get_dynamic_reply_markup(
+        self,
+        dynamic_data: Any,
+        language: MaybeLanguage,
+        current_value: Optional[FieldValueT] = None,
+    ) -> Optional[tg.ReplyMarkup]:
+        return None
 
     # NOTE: not using abstractmethod here because of https://github.com/python/mypy/issues/5374
     def parse(self, message: tg.Message) -> FieldValueT:
@@ -683,14 +703,6 @@ class SearchableSingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
 
 
 INLINE_FIELD_CALLBACK_DATA = CallbackData("fieldname", "payload", prefix="inline_field")
-
-
-@dataclass
-class CallbackProcessingResult(Generic[FieldValueT]):
-    response_to_user: Optional[str]
-    updated_inline_markup: Optional[tg.InlineKeyboardMarkup]
-    complete_field: bool
-    new_field_value: Optional[FieldValueT]
 
 
 @dataclass

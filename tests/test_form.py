@@ -291,7 +291,7 @@ async def test_form_handler(redis: RedisInterface) -> None:
         ]
     )
 
-    fh = FormHandler[Any](
+    fh = FormHandler[Any, Any](
         redis=redis,
         bot_prefix=bot_prefix,
         name="test-form",

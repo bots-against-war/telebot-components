@@ -306,7 +306,7 @@ async def create_form_bot(redis: RedisInterface, token: str):
             reply_markup=(await language_store.markup_for_user(message.from_user)),
         )
 
-    form_handler = FormHandler[FormResultT](
+    form_handler = FormHandler[FormResultT, None](
         redis=redis,
         bot_prefix=bot_prefix,
         name="example",
@@ -349,7 +349,7 @@ async def create_form_bot(redis: RedisInterface, token: str):
         language_store=language_store,
     )
 
-    aux_form_handler = FormHandler[dict](
+    aux_form_handler = FormHandler[dict, None](
         redis=redis,
         bot_prefix=bot_prefix,
         name="simple-aux-form",
