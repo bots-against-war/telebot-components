@@ -141,9 +141,9 @@ class FormFieldResultFormattingOpts(Generic[FieldValueT]):
 
     descr: AnyText  # used for telegram message formatting
     is_multiline: bool = False
-    value_formatter: Optional[
-        Callable[[FieldValueT, MaybeLanguage], str]
-    ] = None  # if not specified, field's default formatter is used
+    value_formatter: Optional[Callable[[FieldValueT, MaybeLanguage], str]] = (
+        None  # if not specified, field's default formatter is used
+    )
 
 
 @dataclass
@@ -224,7 +224,10 @@ class FormField(Generic[FieldValueT]):
         return None
 
     async def process_message(
-        self, message: tg.Message, language: MaybeLanguage
+        self,
+        message: tg.Message,
+        language: MaybeLanguage,
+        dynamic_data: Any,
     ) -> MessageProcessingResult[FieldValueT]:
         try:
             value = self.parse(message)
@@ -238,11 +241,16 @@ class FormField(Generic[FieldValueT]):
                 parsed_value=None,
             )
 
-    async def get_query_message(self, user: tg.User) -> AnyText:
-        return self.query_message
+    def parse(self, message: tg.Message) -> FieldValueT:
+        """
+        Simplified interface for common use-case of parsing a single value directly from the message;
+        subclasses are free to leave this unimplemented, but in this case they need to
+        override process_message
+        """
+        raise NotImplementedError("FormField cannot be used directly, please use concrete subclasses")
 
-    async def get_dynamic_query_message(self, dynamic_data: Any, user: tg.User) -> Optional[AnyText]:
-        return None
+    async def get_query_message(self, user: tg.User, dynamic_data: Any) -> AnyText:
+        return self.query_message
 
     def value_to_str(self, value: FieldValueT, language: MaybeLanguage) -> str:
         """Human-readable string formatting of the value"""
@@ -258,20 +266,13 @@ class FormField(Generic[FieldValueT]):
         else:
             return any_text_to_str(self.echo_result_template, language).format(self.value_to_str(value, language))
 
-    def get_reply_markup(self, language: MaybeLanguage, current_value: Optional[FieldValueT] = None) -> tg.ReplyMarkup:
-        return tg.ReplyKeyboardRemove()
-
-    def get_dynamic_reply_markup(
+    def get_reply_markup(
         self,
-        dynamic_data: Any,
         language: MaybeLanguage,
-        current_value: Optional[FieldValueT] = None,
-    ) -> Optional[tg.ReplyMarkup]:
-        return None
-
-    # NOTE: not using abstractmethod here because of https://github.com/python/mypy/issues/5374
-    def parse(self, message: tg.Message) -> FieldValueT:
-        raise NotImplementedError("FormField cannot be used directly, please use concrete subclasses")
+        current_value: Optional[FieldValueT],
+        dynamic_data: Any,
+    ) -> tg.ReplyMarkup:
+        return tg.ReplyKeyboardRemove()
 
     def texts(self) -> list[AnyText]:
         """Used for build-time validation that all the fields in the form are properly localised.
@@ -465,7 +466,7 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
         return hash_.hexdigest()
 
     async def process_message(
-        self, message: tg.Message, language: MaybeLanguage
+        self, message: tg.Message, language: MaybeLanguage, dynamic_data: Any
     ) -> MessageProcessingResult[list[TelegramAttachment]]:
         """HACK: we want to process media group, but telegram passes them as separate messages,
         linked only with ID with no info on the total number of items, order or whatever.
@@ -559,7 +560,7 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
     def custom_value_type(self) -> Type:
         return self.EnumClass
 
-    def parse_enum(self, text: str) -> Optional[Enum]:
+    def match_enum(self, text: str) -> Optional[Enum]:
         for enum in self.EnumClass:
             if isinstance(enum.value, str):
                 if text == enum.value:
@@ -571,14 +572,17 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
         return None
 
     def get_reply_markup(
-        self, language: MaybeLanguage, current_value: Optional[FieldValueT] = None
+        self,
+        language: MaybeLanguage,
+        current_value: Optional[FieldValueT] = None,
+        dynamic_data: Any = None,
     ) -> tg.ReplyKeyboardMarkup:
         kbd = tg.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=self.menu_row_width)
         kbd.add(*[tg.KeyboardButton(any_text_to_str(option.value, language)) for option in self.EnumClass])
         return kbd
 
     def parse(self, message: tg.Message) -> Enum:
-        parsed_enum = self.parse_enum(message.text_content)
+        parsed_enum = self.match_enum(message.text_content)
         if parsed_enum is None:
             raise BadFieldValueError(self.invalid_enum_value_error_msg)
         else:
@@ -652,14 +656,24 @@ class SearchableSingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
     def custom_texts(self) -> list[AnyText]:
         return [self._as_item(e).button_label for e in self.EnumClass]
 
-    def get_reply_markup(self, language: MaybeLanguage, current_value: Enum | None = None) -> ReplyMarkup:
+    def get_reply_markup(
+        self,
+        language: MaybeLanguage,
+        current_value: Enum | None,
+        dynamic_data: Any,
+    ) -> ReplyMarkup:
         # NOTE: no markup at the start, as in text field; later we set to "search results"
         return tg.ReplyKeyboardRemove()
 
     def find_matches(self, text: str, exact: bool) -> list[Enum]:
         return [e for e in self.EnumClass if self._as_item(e).matches(text, exact=exact)]
 
-    async def process_message(self, message: tg.Message, language: MaybeLanguage) -> MessageProcessingResult[Enum]:
+    async def process_message(
+        self,
+        message: tg.Message,
+        language: MaybeLanguage,
+        dynamic_data: Any,
+    ) -> MessageProcessingResult[Enum]:
         exact_matches = self.find_matches(message.text_content, exact=True)
         if exact_matches:
             if len(exact_matches) > 1:
@@ -711,7 +725,11 @@ class InlineFormField(FormField[FieldValueT]):
         return INLINE_FIELD_CALLBACK_DATA.new(fieldname=self.name, payload=payload)
 
     async def process_callback_query(
-        self, callback_payload: str, current_value: Optional[FieldValueT], language: MaybeLanguage
+        self,
+        callback_payload: str,
+        current_value: Optional[FieldValueT],
+        language: MaybeLanguage,
+        dynamic_data: Any,
     ) -> CallbackProcessingResult[FieldValueT]:
         raise NotImplementedError("InlineFormField cannot be used directly, please use concrete subclasses")
 
@@ -721,7 +739,10 @@ class StrictlyInlineFormField(InlineFormField[FieldValueT]):
     please_use_inline_menu: AnyText
 
     async def process_message(
-        self, message: tg.Message, language: MaybeLanguage
+        self,
+        message: tg.Message,
+        language: MaybeLanguage,
+        dynamic_data: Any,
     ) -> MessageProcessingResult[FieldValueT]:
         return MessageProcessingResult(
             any_text_to_str(self.please_use_inline_menu, language),
@@ -780,7 +801,11 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
         return 1 + (len(self.EnumClass) // self.options_per_page)
 
     async def process_callback_query(
-        self, callback_payload: str, current_value: Optional[set[Enum]], language: MaybeLanguage
+        self,
+        callback_payload: str,
+        current_value: Optional[set[Enum]],
+        language: MaybeLanguage,
+        dynamic_data: Any,
     ) -> CallbackProcessingResult[set[Enum]]:
         if current_value is None:
             current_value = set()
@@ -897,7 +922,11 @@ class DateMenuField(StrictlyInlineFormField[date]):
     calendar_keyboard_config: CalendarKeyboardConfig = CalendarKeyboardConfig(selectable_dates=SelectableDates.all())
 
     async def process_callback_query(
-        self, callback_payload: str, current_value: Optional[date], language: MaybeLanguage
+        self,
+        callback_payload: str,
+        current_value: Optional[date],
+        language: MaybeLanguage,
+        dynamic_data: Any,
     ) -> CallbackProcessingResult[date]:
         payload = CalendarCallbackPayload.load(callback_payload)
         if payload is None:
@@ -949,7 +978,9 @@ class DateMenuField(StrictlyInlineFormField[date]):
             selected_date=selected_value,
         )
 
-    def get_reply_markup(self, language: MaybeLanguage, current_value: Optional[date] = None) -> tg.ReplyMarkup:
+    def get_reply_markup(
+        self, language: MaybeLanguage, current_value: Optional[date], dynamic_data: Any
+    ) -> tg.ReplyMarkup:
         return self._calendar_keyboard(
             year=current_value.year if current_value else None,
             month=current_value.month if current_value else None,
@@ -961,3 +992,66 @@ class DateMenuField(StrictlyInlineFormField[date]):
 
     def value_id(self, value: date) -> str:
         return value.isoformat()
+
+
+@dataclass
+class DynamicOption:
+    id: str
+    label: AnyText
+
+
+@dataclass
+class DynamicSingleSelectField(FormField[str]):
+    invalid_enum_value_error_msg: AnyText
+    menu_row_width: int = 2
+
+    def parse_dynamic_data(self, dynamic_data: Any) -> list[DynamicOption]:
+        try:
+            options: list[DynamicOption] = dynamic_data["dynamic_options"][self.name]
+            assert isinstance(options, list) and len(options) > 0 and all(isinstance(o, DynamicOption) for o in options)
+            return options
+        except Exception:
+            raise ValueError(
+                "Invalid dynamic data format, expected "
+                + '{"dynamic_options": {<field_name>: [DynamicOption(...), ...], ...}, ...}'
+            )
+
+    def get_reply_markup(
+        self,
+        language: MaybeLanguage,
+        current_value: Optional[FieldValueT],
+        dynamic_data: Any,
+    ) -> tg.ReplyKeyboardMarkup:
+        options = self.parse_dynamic_data(dynamic_data)
+        kbd = tg.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=self.menu_row_width)
+        kbd.add(*[tg.KeyboardButton(any_text_to_str(option.label, language)) for option in options])
+        return kbd
+
+    def match_option(self, options: list[DynamicOption], text: str) -> Optional[DynamicOption]:
+        for option in options:
+            if isinstance(option.label, str):
+                if text == option.label:
+                    return option
+            elif isinstance(option.label, dict):
+                for _, lang_text in option.label.items():
+                    if lang_text == text:
+                        return option
+        return None
+
+    async def process_message(
+        self,
+        message: tg.Message,
+        language: MaybeLanguage,
+        dynamic_data: Any,
+    ) -> MessageProcessingResult[str]:
+        options = self.parse_dynamic_data(dynamic_data)
+        selected = self.match_option(options=options, text=message.text_content)
+        if selected is None:
+            return MessageProcessingResult(
+                response_to_user=any_text_to_str(self.invalid_enum_value_error_msg, language),
+                parsed_value=None,
+            )
+        return MessageProcessingResult(
+            response_to_user=self.get_result_message(selected.id, language),
+            parsed_value=selected.id,
+        )

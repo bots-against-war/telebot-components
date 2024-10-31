@@ -177,14 +177,7 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
     async def get_current_field_message(
         self, user: tg.User, language: MaybeLanguage, form_handler_config: FormHandlerConfig
     ) -> str:
-        maybe_query: Optional[AnyText] = None
-        if self.dynamic_data is not None:
-            maybe_query = await self.current_field.get_dynamic_query_message(
-                dynamic_data=self.dynamic_data,
-                user=user,
-            )
-        query = maybe_query or await self.current_field.get_query_message(user)
-
+        query = await self.current_field.get_query_message(user, dynamic_data=self.dynamic_data)
         sentences = [any_text_to_str(query, language)]
         if not self.current_field.required:
             sentences.append(form_handler_config.can_skip_field_msg(language))
@@ -200,17 +193,10 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
         return " ".join(sentences)
 
     def get_current_field_reply_markup(self, language: MaybeLanguage) -> tg.ReplyMarkup:
-        if self.dynamic_data is not None:
-            maybe_dynamic_markup = self.current_field.get_dynamic_reply_markup(
-                dynamic_data=self.dynamic_data,
-                language=language,
-                current_value=self.result_so_far.get(self.current_field.name),
-            )
-            if maybe_dynamic_markup is not None:
-                return maybe_dynamic_markup
         return self.current_field.get_reply_markup(
             language,
             current_value=self.result_so_far.get(self.current_field.name),
+            dynamic_data=self.dynamic_data,
         )
 
     async def update_with_message(
@@ -253,7 +239,11 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
                     ),
                 )
         else:
-            result = await self.current_field.process_message(message, language)
+            result = await self.current_field.process_message(
+                message=message,
+                language=language,
+                dynamic_data=self.dynamic_data,
+            )
             value = result.parsed_value
             response_to_user = result.response_to_user
             is_field_ok = result.parsed_value is not None
@@ -329,6 +319,7 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
             callback_payload=callback_data["payload"],
             current_value=self.result_so_far.get(self.current_field.name),
             language=language,
+            dynamic_data=self.dynamic_data,
         )
         if result.new_dynamic_data is not None:
             self.dynamic_data = result.new_dynamic_data
