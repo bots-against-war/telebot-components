@@ -141,9 +141,9 @@ class FormFieldResultFormattingOpts(Generic[FieldValueT]):
 
     descr: AnyText  # used for telegram message formatting
     is_multiline: bool = False
-    value_formatter: Optional[Callable[[FieldValueT, MaybeLanguage], str]] = (
-        None  # if not specified, field's default formatter is used
-    )
+    value_formatter: Optional[
+        Callable[[FieldValueT, MaybeLanguage], str]
+    ] = None  # if not specified, field's default formatter is used
 
 
 @dataclass

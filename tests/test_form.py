@@ -7,6 +7,8 @@ from telebot import types as tg
 from telebot.test_util import MockedAsyncTeleBot
 
 from telebot_components.form.field import (
+    DynamicOption,
+    DynamicSingleSelectField,
     FormField,
     FormFieldResultExportOpts,
     FormFieldResultFormattingOpts,
@@ -27,6 +29,7 @@ from tests.utils import (
     assert_list_of_required_subdicts,
     extract_full_kwargs,
     generate_str,
+    reply_markups_to_dict,
 )
 
 DUMMY_FORM_FIELD_KW = {"required": True, "query_message": "aaa", "empty_text_error_msg": "fail :("}
@@ -320,9 +323,9 @@ async def test_form_handler(redis: RedisInterface) -> None:
     async def form_start(message: tg.Message) -> None:
         await fh.start(bot, user=message.from_user)
 
-    tgserv = TelegramServerMock()
+    telegram = TelegramServerMock()
 
-    await tgserv.send_message_to_bot(bot, user_id=1, text="/form")
+    await telegram.send_message_to_bot(bot, user_id=1, text="/form")
     assert len(bot.method_calls) == 1
     assert_list_of_required_subdicts(
         extract_full_kwargs(bot.method_calls["send_message"]),
@@ -330,7 +333,7 @@ async def test_form_handler(redis: RedisInterface) -> None:
     )
     bot.method_calls.clear()
 
-    await tgserv.send_message_to_bot(bot, user_id=1, text="test user")
+    await telegram.send_message_to_bot(bot, user_id=1, text="test user")
     assert len(bot.method_calls) == 1
     assert_list_of_required_subdicts(
         extract_full_kwargs(bot.method_calls["send_message"]),
@@ -338,7 +341,7 @@ async def test_form_handler(redis: RedisInterface) -> None:
     )
     bot.method_calls.clear()
 
-    await tgserv.send_message_to_bot(bot, user_id=1, text="pizza (<b>)")
+    await telegram.send_message_to_bot(bot, user_id=1, text="pizza (<b>)")
     assert len(bot.method_calls) == 1
     assert_list_of_required_subdicts(
         extract_full_kwargs(bot.method_calls["send_message"]),
@@ -346,7 +349,7 @@ async def test_form_handler(redis: RedisInterface) -> None:
     )
     bot.method_calls.clear()
 
-    await tgserv.send_message_to_bot(bot, user_id=1, text="/skip")
+    await telegram.send_message_to_bot(bot, user_id=1, text="/skip")
     assert len(bot.method_calls) == 0
 
     assert len(completed_ctxs) == 1
@@ -362,3 +365,151 @@ async def test_form_handler(redis: RedisInterface) -> None:
         f.result_to_html(ctx.result, lang=None)
         == "<b>your name</b>: test user\n<b>your favourite food</b>: pizza (&lt;b&gt;)"
     )
+
+
+async def test_dynamic_select_form(redis: RedisInterface) -> None:
+    bot_prefix = generate_str()
+
+    form = Form.branching(
+        [
+            PlainTextField(
+                name="name",
+                required=True,
+                query_message="Your name.",
+                empty_text_error_msg="empty test error",
+                result_formatting_opts=FormFieldResultFormattingOpts(descr="Name", is_multiline=False),
+            ),
+            DynamicSingleSelectField(
+                name="number",
+                required=True,
+                query_message="Select a number.",
+                invalid_enum_value_error_msg="nope",
+                menu_row_width=1,
+                result_formatting_opts=FormFieldResultFormattingOpts(descr="Number", is_multiline=False),
+            ),
+            DynamicSingleSelectField(
+                name="letter",
+                required=True,
+                query_message="Select a letter.",
+                invalid_enum_value_error_msg="nope",
+                menu_row_width=1,
+                result_formatting_opts=FormFieldResultFormattingOpts(descr="Letter", is_multiline=False),
+            ),
+        ]
+    )
+
+    handler = FormHandler[Any, Any](
+        redis=redis,
+        bot_prefix=bot_prefix,
+        name="testing-form",
+        form=form,
+        config=FormHandlerConfig(
+            echo_filled_field=False,
+            retry_field_msg="retry",
+            unsupported_cmd_error_template="unsupported ({})",
+            cancelling_because_of_error_template="error: {}",
+            form_starting_template="form start ({} - cancel)",
+            can_skip_field_template="({} to skip)",
+            cant_skip_field_msg="cant skip this",
+        ),
+    )
+
+    bot = MockedAsyncTeleBot(token="foobar")
+
+    completed_ctxs: list[FormExitContext] = []
+
+    async def on_form_completed(ctx: FormExitContext):
+        completed_ctxs.append(ctx)
+
+    handler.setup(bot, on_form_completed=on_form_completed)
+
+    @bot.message_handler(commands=["form"])
+    async def form_start(message: tg.Message) -> None:
+        await handler.start(
+            bot,
+            user=message.from_user,
+            dynamic_data={
+                "dynamic_options": {
+                    "number": [
+                        DynamicOption(id="1", label="1"),
+                        DynamicOption(id="3", label="3"),
+                        DynamicOption(id="1564", label="1564"),
+                    ],
+                    "letter": [
+                        DynamicOption(id="A", label="A"),
+                        DynamicOption(id="C", label="C"),
+                        DynamicOption(id="L", label="L"),
+                    ],
+                }
+            },
+        )
+
+    telegram = TelegramServerMock()
+
+    await telegram.send_message_to_bot(bot, user_id=1, text="/form")
+    assert len(bot.method_calls) == 1
+    assert_list_of_required_subdicts(
+        extract_full_kwargs(bot.method_calls["send_message"]),
+        [{"chat_id": 1, "text": "form start (/cancel - cancel)\n\nYour name."}],
+    )
+    bot.method_calls.clear()
+
+    await telegram.send_message_to_bot(bot, user_id=1, text="Alice")
+    assert len(bot.method_calls) == 1
+    assert_list_of_required_subdicts(
+        reply_markups_to_dict(extract_full_kwargs(bot.method_calls["send_message"])),
+        [
+            {
+                "chat_id": 1,
+                "text": "Select a number.",
+                "parse_mode": "HTML",
+                "reply_markup": {
+                    "keyboard": [[{"text": "1"}], [{"text": "3"}], [{"text": "1564"}]],
+                    "one_time_keyboard": True,
+                    "resize_keyboard": True,
+                },
+            }
+        ],
+    )
+    bot.method_calls.clear()
+
+    await telegram.send_message_to_bot(bot, user_id=1, text="bad answer")
+    assert len(bot.method_calls) == 1
+    assert_list_of_required_subdicts(
+        extract_full_kwargs(bot.method_calls["send_message"]),
+        [{"chat_id": 1, "text": "nope\n\nretry"}],
+    )
+    bot.method_calls.clear()
+
+    await telegram.send_message_to_bot(bot, user_id=1, text="1564")
+    assert len(bot.method_calls) == 1
+    assert_list_of_required_subdicts(
+        reply_markups_to_dict(extract_full_kwargs(bot.method_calls["send_message"])),
+        [
+            {
+                "chat_id": 1,
+                "text": "Select a letter.",
+                "parse_mode": "HTML",
+                "reply_markup": {
+                    "keyboard": [[{"text": "A"}], [{"text": "C"}], [{"text": "L"}]],
+                    "one_time_keyboard": True,
+                    "resize_keyboard": True,
+                },
+            }
+        ],
+    )
+    bot.method_calls.clear()
+
+    await telegram.send_message_to_bot(bot, user_id=1, text="C")
+    assert len(bot.method_calls) == 0
+
+    assert len(completed_ctxs) == 1
+    ctx = completed_ctxs[0]
+    assert ctx.bot is bot
+    assert ctx.result == {
+        "name": "Alice",
+        "number": "1564",
+        "letter": "C",
+    }
+
+    assert form.result_to_html(ctx.result, lang=None) == "<b>Name</b>: Alice\n<b>Number</b>: 1564\n<b>Letter</b>: C"
