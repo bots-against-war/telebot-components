@@ -6,15 +6,7 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from enum import Enum, auto
 from itertools import chain
-from typing import (
-    Any,
-    Callable,
-    Coroutine,
-    Generic,
-    Optional,
-    Union,
-    cast,
-)
+from typing import Any, Callable, Coroutine, Generic, Optional, Union, cast
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
