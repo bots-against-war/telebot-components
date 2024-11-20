@@ -138,8 +138,10 @@ class MenuMechanism(enum.Enum):
     INLINE_BUTTONS = "inline_buttons"
     REPLY_KEYBOARD = "reply_keyboard"
 
+    INLINE_BUTTONS_IMMUTABLE = "inline_buttons_immutable"
+
     def is_inline_kbd(self) -> bool:
-        return self is MenuMechanism.INLINE_BUTTONS
+        return self in {MenuMechanism.INLINE_BUTTONS, MenuMechanism.INLINE_BUTTONS_IMMUTABLE}
 
     def is_reply_kbd(self) -> bool:
         return not self.is_inline_kbd()

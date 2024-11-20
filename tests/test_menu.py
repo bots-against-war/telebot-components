@@ -495,38 +495,34 @@ async def test_menu_handler_with_reply_buttons(redis: RedisInterface):
 
     await menu_handler.start_menu(bot, example_user)
     assert len(bot.method_calls) == 1
-    all_send_message_kw = extract_full_kwargs(bot.method_calls["send_message"])
-    assert len(all_send_message_kw) == 1
-    send_message_kw = all_send_message_kw[0]
-    reply_markup = send_message_kw.pop("reply_markup")
-    assert send_message_kw == {
-        "chat_id": 161,
-        "text": "menu",
-        "parse_mode": None,
-    }
-    assert reply_markup.to_dict() == {
-        "keyboard": [[{"text": "one"}], [{"text": "no-escape"}]],
-        "one_time_keyboard": True,
-        "resize_keyboard": True,
-    }
+    assert reply_markups_to_dict(extract_full_kwargs(bot.method_calls["send_message"])) == [
+        {
+            "chat_id": 161,
+            "text": "menu",
+            "parse_mode": None,
+            "reply_markup": {
+                "keyboard": [[{"text": "one"}], [{"text": "no-escape"}]],
+                "one_time_keyboard": True,
+                "resize_keyboard": True,
+            },
+        }
+    ]
     bot.method_calls.clear()
 
     await telegram.send_message_to_bot(bot, user_id=example_user.id, text="one")
     assert len(bot.method_calls) == 1
-    all_send_message_kw = extract_full_kwargs(bot.method_calls["send_message"])
-    assert len(all_send_message_kw) == 1
-    send_message_kw = all_send_message_kw[0]
-    reply_markup = send_message_kw.pop("reply_markup")
-    assert send_message_kw == {
-        "chat_id": 161,
-        "text": "submenu one",
-        "parse_mode": None,
-    }
-    assert reply_markup.to_dict() == {
-        "keyboard": [[{"text": "1 sub 1"}], [{"text": "1 sub 2"}], [{"text": "<-"}]],
-        "one_time_keyboard": True,
-        "resize_keyboard": True,
-    }
+    assert reply_markups_to_dict(extract_full_kwargs(bot.method_calls["send_message"])) == [
+        {
+            "chat_id": 161,
+            "text": "submenu one",
+            "parse_mode": None,
+            "reply_markup": {
+                "keyboard": [[{"text": "1 sub 1"}], [{"text": "1 sub 2"}], [{"text": "<-"}]],
+                "one_time_keyboard": True,
+                "resize_keyboard": True,
+            },
+        }
+    ]
     bot.method_calls.clear()
 
     await telegram.send_message_to_bot(
@@ -540,20 +536,108 @@ async def test_menu_handler_with_reply_buttons(redis: RedisInterface):
 
     await telegram.send_message_to_bot(bot, user_id=example_user.id, text="no-escape")
     assert len(bot.method_calls) == 1
-    all_send_message_kw = extract_full_kwargs(bot.method_calls["send_message"])
-    assert len(all_send_message_kw) == 1
-    send_message_kw = all_send_message_kw[0]
-    reply_markup = send_message_kw.pop("reply_markup")
-    assert send_message_kw == {
-        "chat_id": 161,
-        "text": "no escape submenu",
-        "parse_mode": None,
-    }
-    assert reply_markup.to_dict() == {
-        "keyboard": [[{"text": "red pill"}], [{"text": "blue pill"}]],
-        "one_time_keyboard": True,
-        "resize_keyboard": True,
-    }
+    assert reply_markups_to_dict(extract_full_kwargs(bot.method_calls["send_message"])) == [
+        {
+            "chat_id": 161,
+            "text": "no escape submenu",
+            "parse_mode": None,
+            "reply_markup": {
+                "keyboard": [[{"text": "red pill"}], [{"text": "blue pill"}]],
+                "one_time_keyboard": True,
+                "resize_keyboard": True,
+            },
+        }
+    ]
+    bot.method_calls.clear()
+
+
+async def test_menu_handler_with_immutable_inline_buttons(redis: RedisInterface):
+    bot = MockedAsyncTeleBot(token="1234567")
+
+    catch_all_received_messages: list[tg.Message] = []
+
+    @bot.message_handler()
+    async def catch_all_handler(message: tg.Message):
+        catch_all_received_messages.append(message)
+
+    example_user = tg.User(id=161, is_bot=False, first_name="Ivan", last_name="Ivanov")
+
+    telegram = TelegramServerMock()
+
+    menu = Menu(
+        text="menu",
+        config=MenuConfig(back_label="<-", mechanism=MenuMechanism.INLINE_BUTTONS_IMMUTABLE),
+        menu_items=[
+            MenuItem(
+                label="one",
+                submenu=Menu(
+                    text="submenu one",
+                    menu_items=[
+                        MenuItem(label="1 sub 1", terminator="1.1"),
+                        MenuItem(label="1 sub 2", terminator="1.2"),
+                    ],
+                ),
+            ),
+            MenuItem(
+                label="no-escape",
+                submenu=Menu(
+                    text="no escape submenu",
+                    config=MenuConfig(back_label=None, mechanism=MenuMechanism.INLINE_BUTTONS_IMMUTABLE),
+                    menu_items=[
+                        MenuItem(label="red pill", terminator="red"),
+                        MenuItem(label="blue pill", terminator="blue"),
+                    ],
+                ),
+            ),
+        ],
+    )
+
+    menu_handler = MenuHandler(
+        bot_prefix="testing",
+        menu_tree=menu,
+        name="test-menu-on-reply-buttons",
+        redis=redis,
+    )
+
+    async def on_menu_termination(context: TerminatorContext) -> None:
+        pass
+
+    menu_handler.setup(bot, on_terminal_menu_option_selected=on_menu_termination)
+
+    await menu_handler.start_menu(bot, example_user)
+    assert len(bot.method_calls) == 1
+    assert reply_markups_to_dict(extract_full_kwargs(bot.method_calls["send_message"])) == [
+        {
+            "chat_id": 161,
+            "text": "menu",
+            "parse_mode": None,
+            "reply_markup": {
+                "inline_keyboard": [
+                    [{"text": "one", "callback_data": "menu:6b36666a13608c19-1"}],
+                    [{"text": "no-escape", "callback_data": "menu:6b36666a13608c19-2"}],
+                ]
+            },
+        }
+    ]
+    bot.method_calls.clear()
+
+    await telegram.press_button(bot, user_id=example_user.id, callback_data="menu:6b36666a13608c19-1")
+    assert len(bot.method_calls) == 2
+    assert "answer_callback_query" in bot.method_calls
+    assert reply_markups_to_dict(extract_full_kwargs(bot.method_calls["send_message"])) == [
+        {
+            "chat_id": 161,
+            "text": "submenu one",
+            "parse_mode": None,
+            "reply_markup": {
+                "inline_keyboard": [
+                    [{"text": "1 sub 1", "callback_data": "terminator:6b36666a13608c19-2"}],
+                    [{"text": "1 sub 2", "callback_data": "terminator:6b36666a13608c19-3"}],
+                    [{"text": "<-", "callback_data": "menu:6b36666a13608c19-0"}],
+                ]
+            },
+        }
+    ]
     bot.method_calls.clear()
 
 
