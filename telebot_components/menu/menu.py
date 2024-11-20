@@ -138,6 +138,17 @@ class MenuMechanism(enum.Enum):
     INLINE_BUTTONS = "inline_buttons"
     REPLY_KEYBOARD = "reply_keyboard"
 
+    INLINE_BUTTONS_IMMUTABLE = "inline_buttons_immutable"
+
+    def is_inline_kbd(self) -> bool:
+        return self in {MenuMechanism.INLINE_BUTTONS, MenuMechanism.INLINE_BUTTONS_IMMUTABLE}
+
+    def is_reply_kbd(self) -> bool:
+        return not self.is_inline_kbd()
+
+    def is_updateable(self) -> bool:
+        return self is MenuMechanism.INLINE_BUTTONS
+
 
 @dataclass
 class MenuConfig:
@@ -215,7 +226,7 @@ class Menu:
         return children + grandchildren
 
     def get_keyboard_markup(self, language: MaybeLanguage) -> Union[tg.InlineKeyboardMarkup, tg.ReplyKeyboardMarkup]:
-        if self.config.mechanism is MenuMechanism.INLINE_BUTTONS:
+        if self.config.mechanism.is_inline_kbd():
             return tg.InlineKeyboardMarkup(
                 keyboard=[[menu_item.get_inline_button(language)] for menu_item in self.displayed_items]
             )
@@ -226,12 +237,17 @@ class Menu:
             reply_markup.keyboard = [[item.get_keyboard_button(language).to_dict()] for item in self.displayed_items]
             return reply_markup
 
-    def get_inactive_keyboard_markup(self, selected_item_id: str, language: MaybeLanguage):
-        return tg.InlineKeyboardMarkup(
-            keyboard=[
-                [menu_item.get_inactive_inline_button(selected_item_id, language)] for menu_item in self.menu_items
-            ]
-        )
+    def get_inactive_keyboard_markup(
+        self, selected_item_id: str, language: MaybeLanguage
+    ) -> tg.InlineKeyboardMarkup | None:
+        if self.config.mechanism.is_inline_kbd():
+            return tg.InlineKeyboardMarkup(
+                keyboard=[
+                    [menu_item.get_inactive_inline_button(selected_item_id, language)] for menu_item in self.menu_items
+                ]
+            )
+        else:
+            return None
 
 
 @dataclass
@@ -284,7 +300,7 @@ class MenuHandler:
         # validating keyboard button types against menu types
         self.has_reply_keyboard_menus = False
         for menu in self.menus_list:
-            if menu.config.mechanism is MenuMechanism.REPLY_KEYBOARD:
+            if menu.config.mechanism.is_reply_kbd():
                 self.has_reply_keyboard_menus = True
                 for item in menu.menu_items:
                     if item.link_url is not None:
@@ -419,8 +435,8 @@ class MenuHandler:
         if (
             current_menu_message_id is not None
             and current_menu is not None
-            and current_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS
-            and new_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS
+            and current_menu.config.mechanism.is_updateable()
+            and new_menu.config.mechanism.is_updateable()
         ):
             try:
                 await bot.edit_message_text(
@@ -493,8 +509,8 @@ class MenuHandler:
                 reason: Optional[str] = None
                 if menu_message_id is None:
                     reason = "message id is not passed to _teminate_menu"
-                elif terminal_menu.config.mechanism is MenuMechanism.REPLY_KEYBOARD:
-                    reason = "last menu is on reply keyboards and such messages can't be updated"
+                elif not terminal_menu.config.mechanism.is_updateable():
+                    reason = f"last menu has non-updateable mechanism {terminal_menu.config.mechanism}"
 
                 if reason is not None:
                     self.logger.error(
@@ -514,15 +530,17 @@ class MenuHandler:
                             exc_info=True,
                         )
 
-        if lock_menu and menu_message_id is not None and terminal_menu.config.mechanism is MenuMechanism.INLINE_BUTTONS:
-            try:
-                await bot.edit_message_reply_markup(
-                    chat_id=user.id,
-                    message_id=menu_message_id,
-                    reply_markup=terminal_menu.get_inactive_keyboard_markup(terminal_menu_item_id, language),
-                )
-            except ApiHTTPException:
-                self.logger.info("Error locking menu", exc_info=True)
+        if lock_menu and menu_message_id is not None:
+            inactive_inline_markup = terminal_menu.get_inactive_keyboard_markup(terminal_menu_item_id, language)
+            if inactive_inline_markup is not None:
+                try:
+                    await bot.edit_message_reply_markup(
+                        chat_id=user.id,
+                        message_id=menu_message_id,
+                        reply_markup=inactive_inline_markup,
+                    )
+                except ApiHTTPException:
+                    self.logger.info("Error locking menu", exc_info=True)
 
         return None
 
