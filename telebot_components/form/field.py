@@ -269,7 +269,7 @@ class FormField(Generic[FieldValueT]):
     def get_reply_markup(
         self,
         language: MaybeLanguage,
-        current_value: Optional[FieldValueT],
+        current_value: FieldValueT | None,
         dynamic_data: Any,
     ) -> tg.ReplyMarkup:
         return tg.ReplyKeyboardRemove()
@@ -574,8 +574,8 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
     def get_reply_markup(
         self,
         language: MaybeLanguage,
-        current_value: Optional[FieldValueT] = None,
-        dynamic_data: Any = None,
+        current_value: FieldValueT | None,
+        dynamic_data: Any,
     ) -> tg.ReplyKeyboardMarkup:
         kbd = tg.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=self.menu_row_width)
         kbd.add(*[tg.KeyboardButton(any_text_to_str(option.value, language)) for option in self.EnumClass])
@@ -828,7 +828,11 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                 to_page = int(callback_payload.removeprefix(self.TO_PAGE_PAYLOAD_PREFIX))
                 return CallbackProcessingResult(
                     response_to_user=None,
-                    updated_inline_markup=self.get_reply_markup(language, current_value, to_page),
+                    updated_inline_markup=self._get_reply_markup_for_page(
+                        language=language,
+                        current_value=current_value,
+                        page=to_page,
+                    ),
                     complete_field=False,
                     new_field_value=current_value,
                 )
@@ -847,7 +851,11 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                 page = list(self.EnumClass).index(selected_option) // self.options_per_page  # type: ignore
                 return CallbackProcessingResult(
                     response_to_user=None,
-                    updated_inline_markup=self.get_reply_markup(language, new_value, page),
+                    updated_inline_markup=self._get_reply_markup_for_page(
+                        language=language,
+                        current_value=new_value,
+                        page=page,
+                    ),
                     complete_field=False,
                     new_field_value=new_value,
                 )
@@ -865,8 +873,16 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
     def get_reply_markup(
         self,
         language: MaybeLanguage,
-        current_value: Optional[set[Enum]] = None,
-        page: int = 0,
+        current_value: set[Enum] | None,
+        dynamic_data: Any,
+    ) -> tg.InlineKeyboardMarkup:
+        return self._get_reply_markup_for_page(language=language, current_value=current_value, page=0)
+
+    def _get_reply_markup_for_page(
+        self,
+        language: MaybeLanguage,
+        current_value: set[Enum] | None,
+        page: int,
     ) -> tg.InlineKeyboardMarkup:
         if current_value is None:
             current_value = set()
@@ -979,7 +995,7 @@ class DateMenuField(StrictlyInlineFormField[date]):
         )
 
     def get_reply_markup(
-        self, language: MaybeLanguage, current_value: Optional[date], dynamic_data: Any
+        self, language: MaybeLanguage, current_value: date | None, dynamic_data: Any
     ) -> tg.ReplyMarkup:
         return self._calendar_keyboard(
             year=current_value.year if current_value else None,
@@ -1019,7 +1035,7 @@ class DynamicSingleSelectField(FormField[str]):
     def get_reply_markup(
         self,
         language: MaybeLanguage,
-        current_value: Optional[FieldValueT],
+        current_value: FieldValueT | None,
         dynamic_data: Any,
     ) -> tg.ReplyKeyboardMarkup:
         options = self.parse_dynamic_data(dynamic_data)
