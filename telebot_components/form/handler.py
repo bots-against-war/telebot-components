@@ -16,6 +16,7 @@ from telebot_components.constants import times
 from telebot_components.form.field import (
     INLINE_FIELD_CALLBACK_DATA,
     FormField,
+    InlineFormCallbackQueryProcessingContext,
     InlineFormField,
 )
 from telebot_components.form.form import Form
@@ -31,8 +32,6 @@ from telebot_components.stores.language import (
 )
 from telebot_components.utils import from_yaml_unsafe, join_paragraphs, to_yaml_unsafe
 from telebot_components.utils.strings import telegram_html_escape
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -139,6 +138,7 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
 
     current_field: FormField
     result_so_far: FormResultT
+    logger: logging.Logger
     dynamic_data: Optional[FormDynamicDataT] = None
 
     def to_store(self) -> str:
@@ -151,7 +151,7 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
         )
 
     @classmethod
-    def from_store(self, dump: str, form_fields: list[FormField]) -> Optional["_FormState"]:
+    def from_store(self, dump: str, form_fields: list[FormField], logger: logging.Logger) -> Optional["_FormState"]:
         try:
             asdict = json.loads(dump)
             form_field_by_name = {f.name: f for f in form_fields}
@@ -159,9 +159,10 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
                 current_field=form_field_by_name[asdict["current_field"]],
                 result_so_far=from_yaml_unsafe(asdict["result_so_far"]),
                 dynamic_data=from_yaml_unsafe(asdict["dynamic_data"]) if "dynamic_data" in asdict else None,
+                logger=logger,
             )
         except Exception:
-            logger.exception("Error loading form state from persistent storage")
+            logger.exception("Error loading form state from persistent storage, ignoring it")
             return None
 
     async def get_current_field_message(
@@ -306,10 +307,13 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
         if callback_data["fieldname"] != self.current_field.name:
             return _FormStateUpdateEffect(_FormAction.DO_NOTHING)
         result = await self.current_field.process_callback_query(
-            callback_payload=callback_data["payload"],
-            current_value=self.result_so_far.get(self.current_field.name),
-            language=language,
-            dynamic_data=self.dynamic_data,
+            context=InlineFormCallbackQueryProcessingContext(
+                callback_payload=callback_data["payload"],
+                current_value=self.result_so_far.get(self.current_field.name),
+                language=language,
+                dynamic_data=self.dynamic_data,
+                logger=self.logger,
+            )
         )
         if result.new_dynamic_data is not None:
             self.dynamic_data = result.new_dynamic_data
@@ -367,6 +371,8 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
     ):
         self.config = config
         self.form = form
+        self.bot_prefix = bot_prefix
+        self.logger = logging.getLogger(f"{__name__}[{self.bot_prefix}]")
 
         self.form_state_store = KeyValueStore[Optional[_FormState]](
             name=f"form-state-for-{name}",
@@ -374,7 +380,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
             redis=redis,
             expiration_time=3 * times.HOUR,
             dumper=lambda fs: fs.to_store() if fs is not None else "",
-            loader=lambda dump: _FormState.from_store(dump, form.fields),
+            loader=lambda dump: _FormState.from_store(dump, form.fields, logger=self.logger),
         )
 
         self.language_store = language_store
@@ -410,13 +416,13 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
             language = await self.get_maybe_language(user)
             form_state = await self.form_state_store.load(user_id)
             if form_state is None:
-                logger.error("Error loading form state from the store, dropping it")
+                self.logger.error("Error loading form state from the store, dropping it")
                 await self.form_state_store.drop(user_id)
                 return
             try:
                 state_update_effect = await form_state_updater(form_state, language)
             except Exception as e:
-                logger.exception(f"Unexpected error updating form state with {form_state_updater!r}")
+                self.logger.exception(f"Unexpected error updating form state with {form_state_updater!r}")
                 state_update_effect = _FormStateUpdateEffect(
                     _FormAction.CANCEL,
                     user_action=_UserAction(
@@ -489,7 +495,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
                     form_exit_context_constructor=form_exit_context_constructor,
                 )
             except Exception:
-                logger.exception("Unexpected error processing form action")
+                self.logger.exception("Unexpected error processing form action")
             finally:
                 await bot.answer_callback_query(call.id)
 
@@ -505,6 +511,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
             current_field=self.form.start_field,
             result_so_far=initial_form_result or cast(FormResultT, dict()),
             dynamic_data=dynamic_data,
+            logger=self.logger,
         )
         await self.form_state_store.save(user.id, initial_form_state)
         language = await self.get_maybe_language(user)

@@ -9,9 +9,6 @@ from telebot.types.service import HandlerFunction
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import SetStore
 
-logger = logging.getLogger(__name__)
-
-
 ArgT = TypeVar("ArgT")
 
 
@@ -24,9 +21,11 @@ async def telegram_user_id_identity(user: tg.User) -> str:
 
 
 class UserGroupStore:
-    """Generic user group store with an arbitrary user identity function.
+    """
+    Generic user group store with an arbitrary user identity function.
 
-    User identity is an async User -> str function, allowing user identification by id, username or any other attribute.
+    User identity is an async User -> str function, allowing user identification by id, username
+    or any other attribute.
     """
 
     def __init__(
@@ -38,6 +37,7 @@ class UserGroupStore:
     ):
         self.name = group_name
         self.user_identity = user_identity
+        self.logger = logging.getLogger(__name__ + f"[{prefix}]")
 
         self.store = SetStore[str](
             name=f"user-group-{group_name}",
@@ -81,7 +81,7 @@ class UserGroupStore:
                         if membership_required_reply_text:
                             await bot.send_message(message.from_user.id, membership_required_reply_text)
                 except Exception:
-                    logger.exception("Unexpected error in membership_required decorator")
+                    self.logger.exception("Unexpected error in membership_required decorator")
                     raise
 
             return wrapped  # type: ignore
@@ -94,7 +94,7 @@ class UserGroupStore:
             self.cache.add(uid)
             return True
         else:
-            logger.error("Error saving user identity to the store")
+            self.logger.error("Error saving user identity to the store")
             return False
 
     async def add(self, user: tg.User) -> bool:
@@ -109,7 +109,7 @@ class UserGroupStore:
             self.cache.discard(uid)
             return True
         else:
-            logger.error("Error removing user identity from the store")
+            self.logger.error("Error removing user identity from the store")
             return False
 
     async def remove(self, user: tg.User) -> bool:

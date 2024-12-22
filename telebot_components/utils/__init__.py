@@ -26,8 +26,6 @@ from telebot import types as tg
 
 from telebot_components.constants.emoji import EMOJI
 
-logger = logging.getLogger(__name__)
-
 
 def telegram_message_url(
     chat_id: Union[int, str],
@@ -168,6 +166,7 @@ async def send_attachment(
     caption: Optional[str] = None,
     remove_metadata: bool = True,
     message_thread_id: Optional[int] = None,
+    logger: logging.Logger | None = None,
     **send_message_kwargs,
 ):
     if isinstance(attachment, list) and all(isinstance(att, tg.PhotoSize) for att in attachment):
@@ -182,7 +181,11 @@ async def send_attachment(
         doc_to_send: Union[str, bytes]
 
         if (attachment.mime_type == "image/jpeg" or attachment.mime_type == "image/png") and remove_metadata:
-            doc_to_send = await download_photo_document_and_remove_metadata(bot, attachment)
+            doc_to_send = await download_photo_document_and_remove_metadata(
+                bot,
+                attachment,
+                logger=logger or logging.getLogger(__name__),
+            )
         else:
             doc_to_send = attachment.file_id
 
@@ -222,7 +225,11 @@ async def send_attachment(
         raise TypeError(f"Can not send attachment of type: {type(attachment)!r}.")
 
 
-async def download_photo_document_and_remove_metadata(bot: AsyncTeleBot, document: tg.Document) -> Union[bytes, str]:
+async def download_photo_document_and_remove_metadata(
+    bot: AsyncTeleBot,
+    document: tg.Document,
+    logger: logging.Logger,
+) -> Union[bytes, str]:
     if document.mime_type != "image/jpeg" and document.mime_type != "image/png":
         logger.exception(
             f"Failed to download document and delete metadata from it. Must be jpeg/png document to delete its "
@@ -257,7 +264,7 @@ def restart_on_errors(function: AsyncFunctionT) -> AsyncFunctionT:
             try:
                 return await function(*args, **kwargs)
             except Exception:
-                logger.exception(f"Unexpected error in {function.__qualname__}, restarting")
+                logging.exception(f"Unexpected error in {function.__qualname__}, restarting")
 
     return decorated  # type: ignore
 
