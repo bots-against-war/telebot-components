@@ -283,6 +283,7 @@ class MenuHandler:
         self.language_store = language_store
         self.name = name
         self.redis = redis
+        self.logger = logging.getLogger(f"{__name__}[{bot_prefix}]")
 
         self.menus_list: list[Menu] = [menu_tree]
         self.menus_list.extend(menu_tree.descendants())
@@ -368,8 +369,6 @@ class MenuHandler:
                 self.language_store.validate_multilang(any_text)
             else:
                 vaildate_singlelang_text(any_text)
-
-        self.logger = logging.getLogger(f"{__name__}[{bot_prefix}]")
 
         # chat id -> id for the last menu sent to user
         self.current_menu_store = KeyValueStore[str](
@@ -496,7 +495,7 @@ class MenuHandler:
                 )
             )
         except Exception:
-            self.logger.exception("Unexpected error in on_terminal_menu_option_selected callback, ignoring")
+            self.logger.exception("Unexpected error handling terminal menu option, ignoring")
             terminator_handler_result = None
 
         terminal_menu = self.menu_by_id[selected_menu_item.parent_menu.id]

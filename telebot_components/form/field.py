@@ -720,16 +720,21 @@ INLINE_FIELD_CALLBACK_DATA = CallbackData("fieldname", "payload", prefix="inline
 
 
 @dataclass
+class InlineFormCallbackQueryProcessingContext(Generic[FieldValueT]):
+    callback_payload: str
+    current_value: Optional[FieldValueT]
+    language: MaybeLanguage
+    dynamic_data: Any
+    logger: logging.Logger
+
+
+@dataclass
 class InlineFormField(FormField[FieldValueT]):
     def new_callback_data(self, payload: str) -> str:
         return INLINE_FIELD_CALLBACK_DATA.new(fieldname=self.name, payload=payload)
 
     async def process_callback_query(
-        self,
-        callback_payload: str,
-        current_value: Optional[FieldValueT],
-        language: MaybeLanguage,
-        dynamic_data: Any,
+        self, context: InlineFormCallbackQueryProcessingContext[FieldValueT]
     ) -> CallbackProcessingResult[FieldValueT]:
         raise NotImplementedError("InlineFormField cannot be used directly, please use concrete subclasses")
 
@@ -801,47 +806,43 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
         return 1 + (len(self.EnumClass) // self.options_per_page)
 
     async def process_callback_query(
-        self,
-        callback_payload: str,
-        current_value: Optional[set[Enum]],
-        language: MaybeLanguage,
-        dynamic_data: Any,
+        self, context: InlineFormCallbackQueryProcessingContext[set[Enum]]
     ) -> CallbackProcessingResult[set[Enum]]:
-        if current_value is None:
-            current_value = set()
+        current_value = context.current_value or set()
         try:
-            if callback_payload == self.NOOP_PAYLOAD:
+            if context.callback_payload == self.NOOP_PAYLOAD:
                 return CallbackProcessingResult(
                     response_to_user=None,
                     updated_inline_markup=None,
                     complete_field=False,
                     new_field_value=current_value,
                 )
-            if callback_payload == self.FINISH_FIELD_PAYLOAD:
+            if context.callback_payload == self.FINISH_FIELD_PAYLOAD:
                 return CallbackProcessingResult(
-                    response_to_user=self.get_result_message(current_value, language),
+                    response_to_user=self.get_result_message(current_value, context.language),
                     updated_inline_markup=None,
                     complete_field=True,
                     new_field_value=current_value,
                 )
-            elif callback_payload.startswith(self.TO_PAGE_PAYLOAD_PREFIX):
-                to_page = int(callback_payload.removeprefix(self.TO_PAGE_PAYLOAD_PREFIX))
+            elif context.callback_payload.startswith(self.TO_PAGE_PAYLOAD_PREFIX):
+                to_page = int(context.callback_payload.removeprefix(self.TO_PAGE_PAYLOAD_PREFIX))
                 return CallbackProcessingResult(
                     response_to_user=None,
                     updated_inline_markup=self._get_reply_markup_for_page(
-                        language=language,
+                        language=context.language,
                         current_value=current_value,
                         page=to_page,
                     ),
                     complete_field=False,
                     new_field_value=current_value,
                 )
-            elif callback_payload.startswith(self.OPTION_PAYLOAD_PREFIX):
-                option_hash = callback_payload.removeprefix(self.OPTION_PAYLOAD_PREFIX)
+            elif context.callback_payload.startswith(self.OPTION_PAYLOAD_PREFIX):
+                option_hash = context.callback_payload.removeprefix(self.OPTION_PAYLOAD_PREFIX)
                 selected_option = self._option_by_hash.get(option_hash)
                 if selected_option is None:
                     raise RuntimeError(
-                        f"Error parsing callback payload {callback_payload!r} as Enum value {list(self.EnumClass)}"
+                        f"Error parsing callback payload {context.callback_payload!r} "
+                        + f"as Enum value {list(self.EnumClass)}"
                     )
                 new_value = copy.deepcopy(current_value)
                 if selected_option in new_value:
@@ -852,7 +853,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                 return CallbackProcessingResult(
                     response_to_user=None,
                     updated_inline_markup=self._get_reply_markup_for_page(
-                        language=language,
+                        language=context.language,
                         current_value=new_value,
                         page=page,
                     ),
@@ -860,11 +861,11 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                     new_field_value=new_value,
                 )
             else:
-                raise ValueError(f"Unknown callback payload prefix: {callback_payload!r}!")
+                raise ValueError(f"Unknown callback payload prefix: {context.callback_payload!r}!")
         except Exception as e:
-            logger.exception("Unexpected error processing callback query")
+            context.logger.exception("Unexpected error processing callback query")
             return CallbackProcessingResult(
-                response_to_user=f"Something went wrong, we're on it! Details: {e}",
+                response_to_user=f"Something went wrong! Details: {e}",
                 updated_inline_markup=None,
                 complete_field=False,
                 new_field_value=current_value,
@@ -938,15 +939,11 @@ class DateMenuField(StrictlyInlineFormField[date]):
     calendar_keyboard_config: CalendarKeyboardConfig = CalendarKeyboardConfig(selectable_dates=SelectableDates.all())
 
     async def process_callback_query(
-        self,
-        callback_payload: str,
-        current_value: Optional[date],
-        language: MaybeLanguage,
-        dynamic_data: Any,
+        self, context: InlineFormCallbackQueryProcessingContext[date]
     ) -> CallbackProcessingResult[date]:
-        payload = CalendarCallbackPayload.load(callback_payload)
+        payload = CalendarCallbackPayload.load(context.callback_payload)
         if payload is None:
-            raise RuntimeError(f"Failed to parse CalendarCallbackPayload from {callback_payload!r}")
+            raise RuntimeError(f"Failed to parse CalendarCallbackPayload from {context.callback_payload!r}")
         if payload.action is CalendarAction.NOOP:
             return CallbackProcessingResult(
                 response_to_user=None,
@@ -960,7 +957,7 @@ class DateMenuField(StrictlyInlineFormField[date]):
                 updated_inline_markup=self._calendar_keyboard(
                     year=payload.year,
                     month=payload.month,
-                    selected_value=current_value,
+                    selected_value=context.current_value,
                 ),
                 complete_field=False,
                 new_field_value=None,
@@ -970,7 +967,7 @@ class DateMenuField(StrictlyInlineFormField[date]):
             selected_date = date(cast(int, payload.year), cast(int, payload.month), cast(int, payload.day))
             return CallbackProcessingResult(
                 response_to_user=(
-                    any_text_to_str(self.echo_result_template, language).format(selected_date)
+                    any_text_to_str(self.echo_result_template, context.language).format(selected_date)
                     if self.echo_result_template
                     else None
                 ),

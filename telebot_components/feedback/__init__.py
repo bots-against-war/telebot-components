@@ -1037,8 +1037,8 @@ class FeedbackHandler:
                 if self.service_messages.deleted_message_ok is not None:
                     await bot.reply_to(message, self.service_messages.deleted_message_ok)
                 await self.copied_to_user_data_store.drop(replied_to_message.id)
-            except Exception as e:
-                self.logger.exception("error deleting message")
+            except Exception:
+                self.logger.exception("Error deleting message from the user chat")
                 if self.service_messages.can_not_delete_message is not None:
                     await bot.reply_to(message, self.service_messages.can_not_delete_message)
 
@@ -1241,7 +1241,7 @@ class FeedbackHandler:
                             )
             except Exception as e:
                 await bot.reply_to(message, f"Something went wrong! {e}")
-                self.logger.exception("Unexpected error while replying to forwarded msg")
+                self.logger.exception("Unexpected error replying to user")
 
 
 def _join_hashtags(hashtags: list[str]) -> str:
