@@ -898,7 +898,7 @@ class FeedbackHandler:
             func=cast(FilterFunc, self._user_message_filter),
             chat_types=[tg_constants.ChatType.private],
             content_types=list(tg_constants.MediaContentType),
-            priority=-100,  # lower priority to process the rest of the handlers first
+            priority=-200,  # lowest priority to process the rest of the handlers first
         )
         async def handle_user_message(message: tg.Message) -> None:
             await self.handle_user_message(message, bot=bot, reply_to_user=True)
@@ -1045,7 +1045,7 @@ class FeedbackHandler:
         @bot.message_handler(
             chat_id=[self.admin_chat_id],
             content_types=list(tg_constants.MediaContentType),
-            priority=-100,  # to process user-space commands in admin chat first
+            priority=-100,  # to process commands in admin chat first
         )
         async def admin_to_bot(message: tg.Message):
             try:

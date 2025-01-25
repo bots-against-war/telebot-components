@@ -55,7 +55,7 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
             redis,
             bot_prefix,
             config=AntiSpamConfig(
-                throttle_after_messages=3,
+                throttle_after_messages=10,
                 throttle_duration=times.FIVE_MINUTES,
                 soft_ban_after_throttle_violations=5,
                 soft_ban_duration=times.HOUR,
@@ -95,8 +95,9 @@ if __name__ == "__main__":
         bot_runner = await create_feedback_bot(
             redis=redis,
             token=os.environ["TOKEN"],
-            admin_chat_id=int(os.environ["ADMIN_CHAT_ID"]),
+            admin_chat_id=310720152,
         )
+        print(await bot_runner.bot.get_me())
         await bot_runner.run_polling()
 
     asyncio.run(main())
