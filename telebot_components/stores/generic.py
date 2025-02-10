@@ -18,6 +18,7 @@ from typing import (
 )
 
 import tenacity
+from redis.exceptions import RedisError
 
 from telebot_components.constants.times import MONTH
 from telebot_components.redis_utils.interface import RedisInterface
@@ -47,8 +48,8 @@ WrappedFuncT = TypeVar("WrappedFuncT")
 def redis_retry() -> Callable[[WrappedFuncT], WrappedFuncT]:
     return tenacity.retry(  # type: ignore
         wait=tenacity.wait.wait_random_exponential(multiplier=1, max=30, exp_base=2, min=0.5),
-        stop=tenacity.stop.stop_after_delay(max_delay=15),
-        retry=tenacity.retry_if_exception_type(),
+        stop=tenacity.stop.stop_after_delay(max_delay=60),
+        retry=tenacity.retry_if_exception_type(RedisError),
         after=tenacity.after.after_log(logger, log_level=logging.WARNING),
     )
 
