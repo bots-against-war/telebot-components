@@ -47,7 +47,7 @@ WrappedFuncT = TypeVar("WrappedFuncT")
 def redis_retry() -> Callable[[WrappedFuncT], WrappedFuncT]:
     return tenacity.retry(  # type: ignore
         wait=tenacity.wait.wait_random_exponential(multiplier=1, max=30, exp_base=2, min=0.5),
-        stop=tenacity.stop.stop_after_delay(max_delay=60),
+        stop=tenacity.stop.stop_after_delay(max_delay=15),
         retry=tenacity.retry_if_exception_type(),
         after=tenacity.after.after_log(logger, log_level=logging.WARNING),
     )
