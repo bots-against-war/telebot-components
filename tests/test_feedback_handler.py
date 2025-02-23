@@ -196,7 +196,7 @@ async def test_feedback_handler_throttling(redis: RedisInterface):
         reply_to_message_id=6,
     )
 
-    assert set(bot.method_calls.keys()) == {"copy_message", "send_message", "delete_message"}
+    assert set(bot.method_calls.keys()) == {"copy_message", "send_message", "delete_message", "get_chat"}
     assert_list_of_required_subdicts(
         actual_dicts=[mc.full_kwargs for mc in bot.method_calls["copy_message"]],
         required_subdicts=[
@@ -256,7 +256,7 @@ async def test_message_log(redis: RedisInterface, time_supplier: TimeSupplier):
         text="/log",
         reply_to_message_id=26,
     )
-    assert set(bot.method_calls.keys()) == {"send_message", "forward_message"}
+    assert set(bot.method_calls.keys()) == {"send_message", "get_chat", "forward_message"}
     assert [mc.full_kwargs for mc in bot.method_calls["send_message"]] == [
         {"chat_id": 111, "text": "📜 Log page 1 / 6"},
         {"chat_id": 111, "text": "⬆️ Log page 1 / 6\nNext: <code>/log 2</code>", "parse_mode": "HTML"},
