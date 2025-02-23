@@ -252,7 +252,7 @@ class FeedbackHandler:
         name: str = "",
     ) -> None:
         self.name = name
-        bot_prefix = bot_prefix + name
+        bot_prefix = bot_prefix + name  # hacky solution to allow several feedback handlers per bot
         self.bot_prefix = bot_prefix
         self.logger = logging.getLogger(f"{__name__}[{self.bot_prefix}]")
 
@@ -899,7 +899,7 @@ class FeedbackHandler:
             chat_types=[tg_constants.ChatType.private],
             content_types=list(tg_constants.MediaContentType),
             priority=-200,  # lowest priority to process the rest of the handlers first
-            name=f"{self.bot_prefix}/feedback-user-to-admin",
+            name="feedback-user-to-admin",
         )
         async def handle_user_message(message: tg.Message) -> None:
             await self.handle_user_message(message, bot=bot, reply_to_user=True)
@@ -1047,7 +1047,7 @@ class FeedbackHandler:
             chat_id=[self.admin_chat_id],
             content_types=list(tg_constants.MediaContentType),
             priority=-100,  # to process commands in admin chat first
-            name=f"{self.bot_prefix}/feedback-admin-to-user",
+            name="feedback-admin-to-user",
         )
         async def admin_to_bot(message: tg.Message) -> HandlerResult | None:
             ignore_message = HandlerResult(
