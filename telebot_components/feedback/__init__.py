@@ -27,7 +27,7 @@ from telebot.api import ApiHTTPException
 from telebot.formatting import hbold
 from telebot.runner import AuxBotEndpoint
 from telebot.types import constants as tg_constants
-from telebot.types.service import FilterFunc
+from telebot.types.service import FilterFunc, HandlerResult
 from telebot.util import extract_arguments
 
 from telebot_components.constants import times
@@ -899,6 +899,7 @@ class FeedbackHandler:
             chat_types=[tg_constants.ChatType.private],
             content_types=list(tg_constants.MediaContentType),
             priority=-200,  # lowest priority to process the rest of the handlers first
+            name=f"{self.bot_prefix}/feedback-user-to-admin",
         )
         async def handle_user_message(message: tg.Message) -> None:
             await self.handle_user_message(message, bot=bot, reply_to_user=True)
@@ -1046,8 +1047,15 @@ class FeedbackHandler:
             chat_id=[self.admin_chat_id],
             content_types=list(tg_constants.MediaContentType),
             priority=-100,  # to process commands in admin chat first
+            name=f"{self.bot_prefix}/feedback-admin-to-user",
         )
-        async def admin_to_bot(message: tg.Message):
+        async def admin_to_bot(message: tg.Message) -> HandlerResult | None:
+            ignore_message = HandlerResult(
+                # in case the admin chat is a private one, it's very likely the bot-admin
+                # private messages; in this case we want to let users sent messages to bot
+                # as users, so it's necessary to let user message handler to do its job
+                continue_to_other_handlers=((await self.admin_chat()).type == "private"),
+            )
             try:
                 replied_to_msg = message.reply_to_message
                 if replied_to_msg is not None and replied_to_msg.forum_topic_created is None:
@@ -1058,29 +1066,29 @@ class FeedbackHandler:
                     self.logger.debug(
                         "Ignoring message in admin chat: not a reply and forum topic per user not enabled"
                     )
-                    return
+                    return ignore_message
                 elif not self.config.any_message_in_user_topic_is_reply:
                     self.logger.debug(
                         "Ignoring message in admin chat: not a reply and "
                         + f"{self.config.any_message_in_user_topic_is_reply = }"
                     )
-                    return
+                    return ignore_message
                 else:
                     forwarded_msg = None
                     if message.message_thread_id is None:
                         self.logger.debug("Message in admin chat is not a reply and not in topic")
-                        return
+                        return ignore_message
                     maybe_forwarded_msg_id = await self.last_forwarded_message_id_by_message_thread_id.load(
                         message.message_thread_id
                     )
                     if maybe_forwarded_msg_id is None:
                         self.logger.debug("Message in admin chat is not a reply and not in user's topic")
-                        return
+                        return ignore_message
                     forwarded_msg_id = maybe_forwarded_msg_id
 
                 origin_chat_id = await self.origin_chat_id_store.load(forwarded_msg_id)
                 if origin_chat_id is None:
-                    return
+                    return ignore_message
 
                 if message.text is not None and message.text.startswith("/"):
                     # admin chat commands
@@ -1108,7 +1116,7 @@ class FeedbackHandler:
                             await bot.reply_to(
                                 message, "Bad command, expected format is '/log' or '/log <page number>'"
                             )
-                            return
+                            return None
                         log_message_ids = await self.message_log_store.all(origin_chat_id)
                         total_pages = int(math.ceil(len(log_message_ids) / self.config.message_log_page_size))
                         if page < 0:
@@ -1130,7 +1138,7 @@ class FeedbackHandler:
                                     f"Only {len(log_message_ids)} messages are available in log, "
                                     + f"not enough messages for page {page}",
                                 )
-                            return
+                            return None
                         log_destination_chat_id = (
                             self.admin_chat_id if self.config.message_log_to_admin_chat else message.from_user.id
                         )
@@ -1187,7 +1195,7 @@ class FeedbackHandler:
                         # this is normal and most likely means that user has blocked the bot
                         self.logger.info(f"Error copying message to user chat. {e!r}")
                         await bot.reply_to(message, str(e))
-                        return
+                        return None
                     await self.message_log_store.push(origin_chat_id, message.id)
 
                     await self.copied_to_user_data_store.save(
@@ -1242,6 +1250,7 @@ class FeedbackHandler:
             except Exception as e:
                 await bot.reply_to(message, f"Something went wrong! {e}")
                 self.logger.exception("Unexpected error replying to user")
+            return None
 
 
 def _join_hashtags(hashtags: list[str]) -> str:
