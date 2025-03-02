@@ -36,30 +36,25 @@ async def test_redis_stream(redis: RedisInterface) -> None:
                 async for data in pubsub.consume(
                     group=group,
                     consumer_name=f"consumer-{idx}",
-                    consume_at_once=3,
+                    consume_at_once=1,
+                    auto_retry_after=datetime.timedelta(seconds=2),
+                    block_period=datetime.timedelta(seconds=0.1),
                 ):
+                    await asyncio.sleep(0.01 * random.random())
                     if is_faulty:
                         raise RuntimeError()
                     consumed_data.append(data)
             except RuntimeError:
                 pass
 
-    async def retry_consumer() -> None:
-        async for data in pubsub.consume_retry(
-            group=group,
-            retry_after=datetime.timedelta(seconds=1),
-        ):
-            consumed_data.append(data)
-
     try:
         await asyncio.wait_for(
             asyncio.gather(
                 producer(),
                 *(consumer(i, is_faulty=False) for i in range(3)),
-                consumer(idx=4, is_faulty=True),
-                retry_consumer(),
+                consumer(idx=3, is_faulty=True),
             ),
-            timeout=5,
+            timeout=10,
         )
     except TimeoutError:
         pass

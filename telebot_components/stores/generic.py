@@ -3,6 +3,7 @@ import dataclasses
 import datetime
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from hashlib import md5
@@ -589,10 +590,11 @@ class PubSub(PrefixedStore, Generic[ValueT]):
     field_name: str = "value"
     key: str = "stream"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         super().__post_init__()
         self._stream = self._full_key(self.key)
         self._field_name_encoded = self.field_name.encode("utf-8")
+        self._last_retry_timestamp = time.time()
 
     async def publish(self, value: ValueT) -> None:
         await self.redis.xadd(
@@ -624,21 +626,24 @@ class PubSub(PrefixedStore, Generic[ValueT]):
         consumer_name: str,
         consume_at_once: int = 1,
         auto_create: bool = True,
+        auto_retry_after: datetime.timedelta | None = datetime.timedelta(seconds=300),
+        block_period: datetime.timedelta = datetime.timedelta(seconds=1),
     ) -> AsyncGenerator[ValueT, None]:
         if auto_create:
             await self.ensure_group_exists(group)
 
         log_marker = self._log_marker(group, consumer_name)
-        self.logger.info(f"{log_marker}: starting ({consume_at_once=}")
+        self.logger.info(f"{log_marker}: starting ({consume_at_once=})")
 
         while not is_shutting_down():
+            # normal message consumption call
             try:
                 for stream_name, stream_messages in await self.redis.xreadgroup(
                     groupname=group,
                     consumername=consumer_name,
                     streams={self._stream: ">"},
                     count=consume_at_once,
-                    block=1000,
+                    block=int(1000 * block_period.total_seconds()),
                 ):
                     for message_id, fields in stream_messages:
                         self.logger.debug("%s: got message %s: %s", log_marker, message_id, fields)
@@ -650,35 +655,27 @@ class PubSub(PrefixedStore, Generic[ValueT]):
                     f"{log_marker}: error consuming, will try again; some messages might be still pending"
                 )
 
-    async def consume_retry(
-        self,
-        group: str,
-        consumer_name: str = "retry_consumer",
-        retry_after: datetime.timedelta = datetime.timedelta(seconds=300),
-        consume_at_once: int = 1,
-        auto_create: bool = True,
-    ) -> AsyncGenerator[ValueT, None]:
-        if auto_create:
-            await self.ensure_group_exists(group)
-
-        log_marker = self._log_marker(group, consumer_name)
-        self.logger.info(f"{log_marker}: starting ({consume_at_once=})")
-
-        while not is_shutting_down():
-            try:
+            # once in a while we reclaim and retry messages that are pending for a long time
+            if auto_retry_after is not None and (
+                self._last_retry_timestamp + auto_retry_after.total_seconds() < time.time()
+            ):
+                self.logger.info(
+                    f"{log_marker}: retrying messages that have been idle for longer than {auto_retry_after}"
+                )
+                self._last_retry_timestamp = time.time()
                 cursor = "0-0"
-                processing = True
-                while processing:
+                processing_pending_messages = True
+                while processing_pending_messages and not is_shutting_down():
                     new_cursor, entries, deleted = await self.redis.xautoclaim(
                         name=self._stream,
                         groupname=group,
                         consumername=consumer_name,
-                        min_idle_time=int(retry_after.total_seconds() * 1000),
+                        min_idle_time=int(auto_retry_after.total_seconds() * 1000),
                         count=consume_at_once,
                         start_id=cursor,
                     )
                     cursor = new_cursor.decode("utf-8")
-                    processing = cursor != "0-0"
+                    processing_pending_messages = cursor != "0-0"
                     if deleted:
                         self.logger.info(f"{log_marker}: can't retry consuming {len(deleted)} deleted messages")
                     for message_id, fields in entries:
@@ -686,8 +683,3 @@ class PubSub(PrefixedStore, Generic[ValueT]):
                         yield self.loader(fields[self._field_name_encoded].decode("utf-8"))
                         self.logger.debug("%s: acknowledging message %s", log_marker, message_id)
                         await self.redis.xack(self._stream, group, message_id)
-            except Exception:
-                self.logger.exception(
-                    f"{log_marker}: error consuming, will try again; some messages might be still pending"
-                )
-            await asyncio.sleep(retry_after.total_seconds() / 10.0)
