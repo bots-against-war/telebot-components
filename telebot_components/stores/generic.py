@@ -21,6 +21,7 @@ from typing import (
 import tenacity
 from redis import ResponseError
 from redis.exceptions import RedisError
+from telebot.graceful_shutdown import is_shutting_down
 
 from telebot_components.constants.times import MONTH
 from telebot_components.redis_utils.interface import RedisInterface
@@ -187,7 +188,10 @@ class KeyListStore(SingleKeyStore[ItemT]):
     @redis_retry()
     async def push_multiple(self, key: str_able, items: Iterable[ItemT], reset_ttl: bool = True) -> int:
         async with self.redis.pipeline() as pipe:
-            await pipe.rpush(self._full_key(key), *[self.dumper(item).encode("utf-8") for item in items])
+            await pipe.rpush(
+                self._full_key(key),
+                *[self.dumper(item).encode("utf-8") for item in items],
+            )
             if reset_ttl and self.expiration_time is not None:
                 await pipe.expire(self._full_key(key), self.expiration_time)
             after_push_len, *_ = await pipe.execute()
@@ -627,7 +631,7 @@ class PubSub(PrefixedStore, Generic[ValueT]):
         log_marker = self._log_marker(group, consumer_name)
         self.logger.info(f"{log_marker}: starting ({consume_at_once=}")
 
-        while True:
+        while not is_shutting_down():
             try:
                 for stream_name, stream_messages in await self.redis.xreadgroup(
                     groupname=group,
@@ -660,7 +664,7 @@ class PubSub(PrefixedStore, Generic[ValueT]):
         log_marker = self._log_marker(group, consumer_name)
         self.logger.info(f"{log_marker}: starting ({consume_at_once=})")
 
-        while True:
+        while not is_shutting_down():
             try:
                 cursor = "0-0"
                 processing = True
