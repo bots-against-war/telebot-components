@@ -13,7 +13,7 @@ jobs:
     name: Testing on python ${{ matrix.python-version }}
     steps:
       - name: Checkout latest version
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Setup python
         uses: actions/setup-python@v2
         with:
@@ -25,10 +25,9 @@ jobs:
           poetry-version: 1.7.1
       - name: Install dependencies
         run: poetry install
-      - name: Run linter and type checker tests
-        run: poetry run isort . --check &&
-          poetry run black . --check &&
-          poetry run mypy &&
-          poetry run flake8
+      - name: Run ruff linter/formatter
+        uses: astral-sh/ruff-action@v3
+      - name: Run mypy
+        run: poetry run mypy
       - name: Run unit tests
         run: poetry run pytest tests -vv
