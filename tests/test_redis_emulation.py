@@ -316,6 +316,7 @@ async def test_redis_stream(redis: RedisInterface) -> None:
                 {"data": str(number).encode("utf-8")},
             )
             print("xadd res", resp)
+            await asyncio.sleep(0.1)
 
     consumed_data: list[str] = []
 
