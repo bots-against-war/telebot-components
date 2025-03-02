@@ -206,7 +206,7 @@ class TrelloIntegration(FeedbackHandlerIntegration):
     def help_message_section(self) -> str:
         trello_help = "🗂️ <i>Интеграция с Trello</i>\n"
         trello_help += (
-            f'· Помимо чата сообщения выгружаются на {html_link(self.board.url, "доску Trello")} '
+            f"· Помимо чата сообщения выгружаются на {html_link(self.board.url, 'доску Trello')} "
             + "в списки: "
             + ", ".join(f"<b>{lst.name}</b>" for lst in self.lists_by_category_name.values())
             + "\n"

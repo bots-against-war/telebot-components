@@ -87,9 +87,9 @@ def assert_required_subdict(actual: dict, required: dict):
     """Actual dict is allowed to have extra keys beyond those required"""
     for required_key, required_value in required.items():
         assert required_key in actual, f"{actual} misses required key {required_key!r}"
-        assert (
-            actual[required_key] == required_value
-        ), f"{actual} contains {required_key!r}: {actual[required_key]} != {required_value}"
+        assert actual[required_key] == required_value, (
+            f"{actual} contains {required_key!r}: {actual[required_key]} != {required_value}"
+        )
 
 
 def assert_list_of_required_subdicts(actual_dicts: list[dict], required_subdicts: list[dict]):

@@ -22,12 +22,10 @@ class AbstractMessageSender(ABC):
 
     @classmethod
     @abstractmethod
-    def concrete_name(self) -> str:
-        ...
+    def concrete_name(self) -> str: ...
 
     @abstractmethod
-    def dump_concrete(self) -> dict:
-        ...
+    def dump_concrete(self) -> dict: ...
 
     def dump(self) -> dict:
         return {
@@ -37,8 +35,7 @@ class AbstractMessageSender(ABC):
 
     @classmethod
     @abstractmethod
-    def load_concrete(self, dump: dict) -> "AbstractMessageSender":
-        ...
+    def load_concrete(self, dump: dict) -> "AbstractMessageSender": ...
 
     @classmethod
     def load(cls, dump: dict) -> "AbstractMessageSender":
@@ -47,8 +44,7 @@ class AbstractMessageSender(ABC):
         return type_.load_concrete(dump["concrete_dump"])
 
     @abstractmethod
-    async def send(self, context: MessageSenderContext) -> None:
-        ...
+    async def send(self, context: MessageSenderContext) -> None: ...
 
 
 class DataclassMessageSender(AbstractMessageSender):

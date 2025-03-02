@@ -6,5 +6,4 @@ Use telebot_components.feedback.integration.trello in new code.
 
 # flake8: noqa
 
-
 from telebot_components.feedback.integration.trello import *
