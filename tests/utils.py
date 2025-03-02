@@ -48,11 +48,11 @@ class TimeSupplier:
         self.current_time += delay
 
 
-def using_real_redis() -> bool:
+def real_redis_available() -> bool:
     return "REDIS_URL" in os.environ
 
 
-pytest_skip_on_real_redis = pytest.mark.skipif(using_real_redis(), reason="Not running on real Redis")
+pytest_skip_on_real_redis = pytest.mark.skipif(real_redis_available(), reason="Not running on real Redis")
 
 
 def mock_bot_user_json() -> dict[str, Any]:

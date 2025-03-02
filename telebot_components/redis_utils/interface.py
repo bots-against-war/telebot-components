@@ -262,6 +262,87 @@ class RedisInterface(ABC):
         """Delete ``keys`` from hash ``name``"""
         ...
 
+    @abstractmethod
+    async def xadd(
+        self,
+        name: str,
+        fields: dict[str, bytes],
+        id: int | str = "*",
+        maxlen: int | None = None,
+        approximate: bool = True,
+        nomkstream: bool = False,
+        minid: int | str | None = None,
+        limit: int | None = None,
+    ) -> bytes | None:
+        """
+        Add to a stream.
+
+        For more information see https://redis.io/commands/xadd
+        """
+        ...
+
+    @abstractmethod
+    async def xack(self, name: str, groupname: str, *ids: int | str | bytes) -> int:
+        """
+        Acknowledges the successful processing of one or more messages.
+
+        For more information see https://redis.io/commands/xack
+        """
+        ...
+
+    @abstractmethod
+    async def xgroup_create(
+        self,
+        name: str,
+        groupname: str,
+        id: int | str = "$",
+        mkstream: bool = False,
+        entries_read: Optional[int] = None,
+    ) -> bool:
+        """
+        Create a new consumer group associated with a stream.
+
+        For more information see https://redis.io/commands/xgroup-create
+        """
+
+    @abstractmethod
+    async def xautoclaim(
+        self,
+        name: str,
+        groupname: str,
+        consumername: str,
+        min_idle_time: int,
+        start_id: str | int = "0-0",
+        count: Union[int, None] = None,
+        justid: bool = False,
+    ) -> tuple[bytes, list[tuple[bytes, dict[bytes, bytes]]], list[bytes]]:
+        """
+        Transfers ownership of pending stream entries that match the specified
+        criteria. Conceptually, equivalent to calling XPENDING and then XCLAIM,
+        but provides a more straightforward way to deal with message delivery
+        failures via SCAN-like semantics.
+
+        For more information see https://redis.io/commands/xautoclaim
+        """
+        ...
+
+    @abstractmethod
+    async def xreadgroup(
+        self,
+        groupname: str,
+        consumername: str,
+        streams: dict[str, str | int],
+        count: Union[int, None] = None,
+        block: Union[int, None] = None,
+        noack: bool = False,
+    ) -> list[tuple[bytes, list[tuple[bytes, dict[bytes, bytes]]]]]:
+        """
+        Read from a stream via a consumer group.
+
+        For more information see https://redis.io/commands/xreadgroup
+        """
+        ...
+
 
 RedisCmdReturn = Union[bytes, list[bytes], None, int, str]
 
