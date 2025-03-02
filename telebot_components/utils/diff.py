@@ -226,7 +226,9 @@ def diff_gen(
                             start=i1,
                             values=copy_list(second[j1:j2]),
                         )
-        elif isinstance(first, str) and isinstance(second, str) and len(first) > 32 and len(second) > 32:
+        elif (
+            isinstance(first, str) and isinstance(second, str) and len(first) > 32 and len(second) > 32 and diff_strings
+        ):
             dmp_delta = diff_text(first, second)
             if dmp_delta is not None:
                 yield PatchStringAction(
