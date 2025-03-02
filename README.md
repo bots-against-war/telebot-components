@@ -8,14 +8,14 @@ Framework / toolkit for building bots with [telebot](https://github.com/bots-aga
 
 1. Clone repository
    ```bash
-   git clone git@github.com:bots-against-war/telebot-components.git baw
-   cd ./baw
+   git clone git@github.com:bots-against-war/telebot-components.git
+   cd telebot-components
    ```
 
-2. The project requires Poerty 1.5.1 (see [installation instruction](https://python-poetry.org/docs/master#installing-with-the-official-installer)).
-   For example, to install `1.5.1` on Unix, run
+2. The project requires Poerty 1.7.1 (see [installation instruction](https://python-poetry.org/docs/master#installing-with-the-official-installer)).
+   For example, to install `1.7.1` on Unix, run
    ```bash
-   curl -sSL https://install.python-poetry.org | python3 - --version 1.5.1
+   curl -sSL https://install.python-poetry.org | python3 - --version 1.7.1
    ```
 
 3. Then, to install the library with all dependencies, run from project root

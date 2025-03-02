@@ -36,16 +36,14 @@ aiohttp = "^3.11.6"
 
 [tool.poetry.group.dev.dependencies]
 coverage = "^7.2.3"
-flake8-pyproject = "^1.2.3"
 mypy = "^1.9.0"
 pytest = "^7.1.2"
 pytest-aiohttp = "1.0.4"
 pytest-asyncio = "^0.18.3"
 python-dotenv = "^0.20.0"
 aioresponses = "0.7.6"
-black = "^22.3.0"
-isort = "^5.10.1"
 pre-commit = "^2.19.0"
+ruff = "^0.9.9"
 
 [build-system]
 requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning"]
@@ -66,15 +64,6 @@ markers = ['integration: requires a real bot to run']
 [tool.mypy]
 incremental = false
 files = '.'
-
-[tool.flake8]
-max-line-length = 120
-extend-ignore = [
-    "F841", # local variable 'xxx' is assigned to but never used
-    "E203", # whitespace before ':' (black formatting compatibility)
-    "E251", # unexpected spaces around keyword / parameter equals (disallows f"{variable = }")
-    "E202", # whitespace before '}' (same as above)
-]
 
 [tool.coverage.run]
 # this way coverage will show even files that are not imported at all
