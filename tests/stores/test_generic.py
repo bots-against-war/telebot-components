@@ -24,11 +24,11 @@ from telebot_components.stores.generic import (
     str_able,
 )
 from telebot_components.utils.diff import Diffable
-from tests.utils import TimeSupplier, generate_str, using_real_redis
+from tests.utils import TimeSupplier, generate_str, real_redis_available
 
 EXPIRATION_TIME_TEST_OPTIONS: list[Optional[timedelta]] = [None]
 
-if not using_real_redis():
+if not real_redis_available():
     EXPIRATION_TIME_TEST_OPTIONS.append(timedelta(seconds=30))
 
 

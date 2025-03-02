@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import uuid
+from collections.abc import AsyncGenerator
 from hashlib import md5
 from typing import (
     Callable,
@@ -18,7 +19,9 @@ from typing import (
 )
 
 import tenacity
+from redis import ResponseError
 from redis.exceptions import RedisError
+from telebot.graceful_shutdown import is_shutting_down
 
 from telebot_components.constants.times import MONTH
 from telebot_components.redis_utils.interface import RedisInterface
@@ -35,8 +38,7 @@ T = TypeVar("T")
 
 
 class str_able(Protocol):
-    def __str__(self) -> str:
-        ...
+    def __str__(self) -> str: ...
 
 
 logger = logging.getLogger(__name__)
@@ -74,6 +76,9 @@ class PrefixedStore:
         prefix_hash = md5(plain_prefix.encode("utf-8")).hexdigest()[:5]
         self._full_prefix = f"{plain_prefix}-{prefix_hash}-"
 
+    def _full_key(self, key: str_able) -> str:
+        return f"{self._full_prefix}{key}"
+
     @classmethod
     def allow_duplicate_stores(cls, prefix: str):
         logger.warning("allow_duplicate_stores is noop now, duplicate stores are globally allowed")
@@ -90,9 +95,6 @@ class SingleKeyStore(PrefixedStore, Generic[T]):
     expiration_time: Optional[datetime.timedelta] = MONTH
     dumper: Callable[[T], str] = json.dumps
     loader: Callable[[str], T] = json.loads
-
-    def _full_key(self, key: str_able) -> str:
-        return f"{self._full_prefix}{key}"
 
     @redis_retry()
     async def drop(self, key: str_able) -> bool:
@@ -186,7 +188,10 @@ class KeyListStore(SingleKeyStore[ItemT]):
     @redis_retry()
     async def push_multiple(self, key: str_able, items: Iterable[ItemT], reset_ttl: bool = True) -> int:
         async with self.redis.pipeline() as pipe:
-            await pipe.rpush(self._full_key(key), *[self.dumper(item).encode("utf-8") for item in items])
+            await pipe.rpush(
+                self._full_key(key),
+                *[self.dumper(item).encode("utf-8") for item in items],
+            )
             if reset_ttl and self.expiration_time is not None:
                 await pipe.expire(self._full_key(key), self.expiration_time)
             after_push_len, *_ = await pipe.execute()
@@ -574,3 +579,115 @@ class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
         await self._version_store.trim(temp_key, last=to_version)
         await self._version_store.rename(temp_key, key)
         return self.snapshot_loader(snapshot), new_last_version.meta
+
+
+@dataclasses.dataclass
+class PubSub(PrefixedStore, Generic[ValueT]):
+    dumper: Callable[[ValueT], str] = json.dumps
+    loader: Callable[[str], ValueT] = json.loads
+    max_len: int | None = None
+    field_name: str = "value"
+    key: str = "stream"
+
+    def __post_init__(self):
+        super().__post_init__()
+        self._stream = self._full_key(self.key)
+        self._field_name_encoded = self.field_name.encode("utf-8")
+
+    async def publish(self, value: ValueT) -> None:
+        await self.redis.xadd(
+            name=self._stream,
+            fields={self.field_name: self.dumper(value).encode("utf-8")},
+            maxlen=self.max_len,
+        )
+
+    async def ensure_group_exists(self, group: str) -> None:
+        """Create a consumer group if it doesn't exist."""
+        try:
+            await self.redis.xgroup_create(
+                name=self._stream,
+                groupname=group,
+                id="$",
+                mkstream=True,
+            )
+            self.logger.info(f"Created consumer group '{group}' on stream '{self._stream}'")
+        except ResponseError as e:
+            if "BUSYGROUP" not in str(e):
+                raise
+
+    def _log_marker(self, group: str, name: str) -> str:
+        return f"{self._stream} -> {group}/{name}"
+
+    async def consume(
+        self,
+        group: str,
+        consumer_name: str,
+        consume_at_once: int = 1,
+        auto_create: bool = True,
+    ) -> AsyncGenerator[ValueT, None]:
+        if auto_create:
+            await self.ensure_group_exists(group)
+
+        log_marker = self._log_marker(group, consumer_name)
+        self.logger.info(f"{log_marker}: starting ({consume_at_once=}")
+
+        while not is_shutting_down():
+            try:
+                for stream_name, stream_messages in await self.redis.xreadgroup(
+                    groupname=group,
+                    consumername=consumer_name,
+                    streams={self._stream: ">"},
+                    count=consume_at_once,
+                    block=1000,
+                ):
+                    for message_id, fields in stream_messages:
+                        self.logger.debug("%s: got message %s: %s", log_marker, message_id, fields)
+                        yield self.loader(fields[self._field_name_encoded].decode("utf-8"))
+                        self.logger.debug("%s: acknowledging message %s", log_marker, message_id)
+                        await self.redis.xack(self._stream, group, message_id)
+            except Exception:
+                self.logger.exception(
+                    f"{log_marker}: error consuming, will try again; some messages might be still pending"
+                )
+
+    async def consume_retry(
+        self,
+        group: str,
+        consumer_name: str = "retry_consumer",
+        retry_after: datetime.timedelta = datetime.timedelta(seconds=300),
+        consume_at_once: int = 1,
+        auto_create: bool = True,
+    ) -> AsyncGenerator[ValueT, None]:
+        if auto_create:
+            await self.ensure_group_exists(group)
+
+        log_marker = self._log_marker(group, consumer_name)
+        self.logger.info(f"{log_marker}: starting ({consume_at_once=})")
+
+        while not is_shutting_down():
+            try:
+                cursor = "0-0"
+                processing = True
+                while processing:
+                    new_cursor, entries, deleted = await self.redis.xautoclaim(
+                        name=self._stream,
+                        groupname=group,
+                        consumername=consumer_name,
+                        min_idle_time=int(retry_after.total_seconds() * 1000),
+                        count=consume_at_once,
+                        start_id=cursor,
+                    )
+                    cursor = new_cursor.decode("utf-8")
+                    processing = cursor != "0-0"
+                    if deleted:
+                        self.logger.info(f"{log_marker}: can't retry consuming {len(deleted)} deleted messages")
+                    for message_id, fields in entries:
+                        self.logger.debug("%s: got message %s: %s", log_marker, message_id, fields)
+                        yield self.loader(fields[self._field_name_encoded].decode("utf-8"))
+                        self.logger.debug("%s: acknowledging message %s", log_marker, message_id)
+                        await self.redis.xack(self._stream, group, message_id)
+            except Exception:
+                self.logger.exception(
+                    f"{log_marker}: error consuming, will try again; some messages might be still pending"
+                )
+            await asyncio.sleep(retry_after.total_seconds() / 10.0)

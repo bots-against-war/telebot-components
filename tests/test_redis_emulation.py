@@ -1,3 +1,4 @@
+import asyncio
 import string
 from datetime import timedelta
 from typing import Any, Callable, Coroutine
@@ -6,6 +7,7 @@ from uuid import uuid4
 import pytest
 from _pytest import fixtures
 
+from telebot_components.redis_utils.emulation import PersistentRedisEmulation, RedisEmulation
 from telebot_components.redis_utils.interface import RedisInterface
 from tests.utils import TimeSupplier, pytest_skip_on_real_redis
 
@@ -297,3 +299,85 @@ async def test_copy_key(redis: RedisInterface) -> None:
 async def test_rename_non_existent(redis: RedisInterface) -> None:
     with pytest.raises(Exception):
         assert await redis.rename("key-does-not-exist", "new")
+
+
+async def test_redis_stream(redis: RedisInterface) -> None:
+    if isinstance(redis, (RedisEmulation, PersistentRedisEmulation)):
+        pytest.skip("Streams are not emulated")
+    stream = "stream-" + str(uuid4())
+    group = "group-" + str(uuid4())
+    produced_data = [uuid4().hex for _ in range(30)]
+
+    async def producer() -> None:
+        await asyncio.sleep(0.1)
+        for number in produced_data:
+            resp = await redis.xadd(
+                stream,
+                {"data": str(number).encode("utf-8")},
+            )
+            print("xadd res", resp)
+            await asyncio.sleep(0.1)
+
+    consumed_data: list[str] = []
+
+    async def consumer(idx: int, is_faulty: bool) -> None:
+        while True:
+            for read_item in await redis.xreadgroup(
+                groupname=group,
+                consumername=f"consumer-{idx}",
+                streams={stream: ">"},
+                block=1000,
+            ):
+                print(read_item)
+                assert len(read_item) == 2
+                stream_, messages = read_item
+                assert isinstance(stream_, bytes)
+                assert stream_.decode("utf-8") == stream
+                assert isinstance(messages, list)
+                if not is_faulty:
+                    for message_id, message_body in messages:
+                        consumed_data.append(message_body[b"data"].decode("utf-8"))
+                        await redis.xack(stream, group, message_id)
+
+    await redis.xgroup_create(
+        name=stream,
+        groupname=group,
+        mkstream=True,
+    )
+
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(
+                producer(),
+                *(consumer(i, is_faulty=False) for i in range(3)),
+                consumer(idx=4, is_faulty=True),
+            ),
+            timeout=5,
+        )
+    except TimeoutError:
+        pass
+
+    await asyncio.sleep(0.1)
+
+    # claiming messages from faulty consumer
+    next_start_id, messages, deleted_message_ids = await redis.xautoclaim(
+        name=stream,
+        groupname=group,
+        consumername="consumer-extra",
+        min_idle_time=50,
+    )
+    assert not deleted_message_ids
+    assert next_start_id == b"0-0"
+    for message_id, message_body in messages:
+        consumed_data.append(message_body[b"data"].decode("utf-8"))
+        await redis.xack(stream, group, message_id)
+
+    next_start_id, messages, deleted_message_ids = await redis.xautoclaim(
+        name=stream,
+        groupname=group,
+        consumername="consumer-extra",
+        min_idle_time=50,
+    )
+    assert not messages
+
+    assert set(consumed_data) == set(produced_data)

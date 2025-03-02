@@ -124,8 +124,7 @@ class CopiedMessageToUserData(TypedDict):
 
 
 class AdminChatActionCallback(Protocol):
-    async def __call__(self, admin_message: tg.Message, forwarded_message: tg.Message, origin_chat_id: int) -> None:
-        ...
+    async def __call__(self, admin_message: tg.Message, forwarded_message: tg.Message, origin_chat_id: int) -> None: ...
 
 
 @dataclass

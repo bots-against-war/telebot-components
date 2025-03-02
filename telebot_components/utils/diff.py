@@ -127,8 +127,7 @@ def diff_text(first: str, second: str) -> str | None:
     str_diff = _dmp.diff_main(first, second)
     if not str_diff or (
         # in case two strings are equal, diff main returns [(0, 'string')]
-        len(str_diff) == 1
-        and str_diff[0][0] == 0
+        len(str_diff) == 1 and str_diff[0][0] == 0
     ):
         return None
     _dmp.diff_cleanupEfficiency(str_diff)
@@ -226,7 +225,9 @@ def diff_gen(
                             start=i1,
                             values=copy_list(second[j1:j2]),
                         )
-        elif isinstance(first, str) and isinstance(second, str) and len(first) > 32 and len(second) > 32:
+        elif (
+            isinstance(first, str) and isinstance(second, str) and len(first) > 32 and len(second) > 32 and diff_strings
+        ):
             dmp_delta = diff_text(first, second)
             if dmp_delta is not None:
                 yield PatchStringAction(
@@ -321,7 +322,7 @@ def patch(destination: Diffable, diff: Iterable[DiffAction], in_place: bool = Fa
             path_dotted = hashable(path)
             offset = list_idx_offset.get(path_dotted, 0)
             container = _access_path(destination, path)
-            assert isinstance(container, list), f'{item["action"]!r} can only be applied to lists'
+            assert isinstance(container, list), f"{item['action']!r} can only be applied to lists"
             if item["action"] == "remove_range":
                 end = item["start"] + item["length"]
                 del container[offset + item["start"] : offset + end]

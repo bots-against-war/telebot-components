@@ -122,7 +122,7 @@ class ForumTopicStore:
 
         while True:
             try:
-                for (topic_spec, default_color) in zip(self.topics, itertools.cycle(ForumTopicIconColor)):
+                for topic_spec, default_color in zip(self.topics, itertools.cycle(ForumTopicIconColor)):
                     existing_message_thread_id = await self.message_thread_id_by_topic.get_subkey(
                         self.admin_chat_id, topic_spec.id
                     )

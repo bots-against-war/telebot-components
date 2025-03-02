@@ -48,11 +48,11 @@ class TimeSupplier:
         self.current_time += delay
 
 
-def using_real_redis() -> bool:
+def real_redis_available() -> bool:
     return "REDIS_URL" in os.environ
 
 
-pytest_skip_on_real_redis = pytest.mark.skipif(using_real_redis(), reason="Not running on real Redis")
+pytest_skip_on_real_redis = pytest.mark.skipif(real_redis_available(), reason="Not running on real Redis")
 
 
 def mock_bot_user_json() -> dict[str, Any]:
@@ -87,9 +87,9 @@ def assert_required_subdict(actual: dict, required: dict):
     """Actual dict is allowed to have extra keys beyond those required"""
     for required_key, required_value in required.items():
         assert required_key in actual, f"{actual} misses required key {required_key!r}"
-        assert (
-            actual[required_key] == required_value
-        ), f"{actual} contains {required_key!r}: {actual[required_key]} != {required_value}"
+        assert actual[required_key] == required_value, (
+            f"{actual} contains {required_key!r}: {actual[required_key]} != {required_value}"
+        )
 
 
 def assert_list_of_required_subdicts(actual_dicts: list[dict], required_subdicts: list[dict]):

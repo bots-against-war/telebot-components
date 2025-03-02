@@ -316,6 +316,55 @@ class RedisEmulation(RedisInterface):
                 count += 1
         return count
 
+    async def xadd(
+        self,
+        name: str,
+        fields: dict[str, bytes],
+        id: int | str = "*",
+        maxlen: int | None = None,
+        approximate: bool = True,
+        nomkstream: bool = False,
+        minid: int | str | None = None,
+        limit: int | None = None,
+    ) -> bytes | None:
+        raise NotImplementedError("Streams are not emulated")
+
+    async def xack(self, name: str, groupname: str, *ids: int | str | bytes) -> int:
+        raise NotImplementedError("Streams are not emulated")
+
+    async def xgroup_create(
+        self,
+        name: str,
+        groupname: str,
+        id: int | str = "$",
+        mkstream: bool = False,
+        entries_read: Optional[int] = None,
+    ) -> bool:
+        raise NotImplementedError("Streams are not emulated")
+
+    async def xautoclaim(
+        self,
+        name: str,
+        groupname: str,
+        consumername: str,
+        min_idle_time: int,
+        start_id: str | int = "0-0",
+        count: Union[int, None] = None,
+        justid: bool = False,
+    ) -> tuple[bytes, list[tuple[bytes, dict[bytes, bytes]]], list[bytes]]:
+        raise NotImplementedError("Streams are not emulated")
+
+    async def xreadgroup(
+        self,
+        groupname: str,
+        consumername: str,
+        streams: dict[str, str | int],
+        count: Union[int, None] = None,
+        block: Union[int, None] = None,
+        noack: bool = False,
+    ) -> list[tuple[bytes, list[tuple[bytes, dict[bytes, bytes]]]]]:
+        raise NotImplementedError("Streams are not emulated")
+
 
 class RedisPipelineEmulatiom(RedisEmulation, RedisPipelineInterface):
     """Simple pipeline emulation that just stores parent redis emulation coroutines
@@ -471,8 +520,6 @@ class PersistentRedisEmulation(RedisInterface):
 
     Mypy will complain on this class' instantiation, but you can safely ignore it.
     """
-
-    # TODO: add lists support, add tests, fix defaultdict creation
 
     def __init__(
         self,

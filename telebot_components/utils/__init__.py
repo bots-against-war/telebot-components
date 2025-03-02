@@ -297,7 +297,6 @@ def tail(n: int, iterable: Iterable[ItemT]) -> Iterator[ItemT]:
 
 
 class TextMarkup(enum.Enum):
-
     NONE = "none"
     HTML = "html"
     MARKDOWN = "markdown"

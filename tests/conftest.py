@@ -13,11 +13,11 @@ from telebot_components.redis_utils.emulation import (
     RedisEmulation,
 )
 from telebot_components.redis_utils.interface import RedisInterface
-from tests.utils import TimeSupplier, using_real_redis
+from tests.utils import TimeSupplier, real_redis_available
 
 
 @pytest.fixture(
-    params=["ephemeral_emulation", "persistent_emulation"] + ([] if not using_real_redis() else ["real_redis"])
+    params=["ephemeral_emulation", "persistent_emulation"] + ([] if not real_redis_available() else ["real_redis"])
 )
 async def redis(request: pytest.FixtureRequest) -> AsyncGenerator[RedisInterface, None]:
     redis_type = request.param

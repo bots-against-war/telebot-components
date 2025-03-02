@@ -141,9 +141,9 @@ class FormFieldResultFormattingOpts(Generic[FieldValueT]):
 
     descr: AnyText  # used for telegram message formatting
     is_multiline: bool = False
-    value_formatter: Optional[
-        Callable[[FieldValueT, MaybeLanguage], str]
-    ] = None  # if not specified, field's default formatter is used
+    value_formatter: Optional[Callable[[FieldValueT, MaybeLanguage], str]] = (
+        None  # if not specified, field's default formatter is used
+    )
 
 
 @dataclass
@@ -391,7 +391,7 @@ class TimeField(FormField[time]):
     def parse(self, message: tg.Message) -> time:
         try:
             return time.fromisoformat(message.text_content)
-        except ValueError as e:
+        except ValueError:
             raise BadFieldValueError(self.bad_time_format_msg)
 
     def value_to_str(self, value: time, lang: MaybeLanguage) -> str:
