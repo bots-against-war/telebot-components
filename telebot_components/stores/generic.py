@@ -583,8 +583,8 @@ class KeyVersionedValueStore(PrefixedStore, Generic[ValueT, VersionMetaT]):
 
 @dataclasses.dataclass
 class PubSub(PrefixedStore, Generic[ValueT]):
-    dumper: Callable[[ItemT], str] = json.dumps
-    loader: Callable[[str], ItemT] = json.loads
+    dumper: Callable[[ValueT], str] = json.dumps
+    loader: Callable[[str], ValueT] = json.loads
     max_len: int | None = None
     field_name: str = "value"
     key: str = "stream"
