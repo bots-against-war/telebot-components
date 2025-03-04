@@ -654,6 +654,7 @@ class PubSub(PrefixedStore, Generic[ValueT]):
                 self.logger.exception(
                     f"{log_marker}: error consuming, will try again; some messages might be still pending"
                 )
+                await asyncio.sleep(1.0)
 
             # once in a while we reclaim and retry messages that are pending for a long time
             if auto_retry_after is not None and (
