@@ -633,7 +633,7 @@ class PubSub(PrefixedStore, Generic[ValueT]):
             await self.ensure_group_exists(group)
 
         log_marker = self._log_marker(group, consumer_name)
-        self.logger.info(f"{log_marker}: starting ({consume_at_once=})")
+        self.logger.debug(f"{log_marker}: starting ({consume_at_once=})")
 
         while not is_shutting_down():
             # normal message consumption call
