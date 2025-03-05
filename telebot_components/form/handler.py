@@ -15,9 +15,10 @@ from telebot.types import constants
 from telebot_components.constants import times
 from telebot_components.form.field import (
     INLINE_FIELD_CALLBACK_DATA,
+    CallbackQueryProcessingContext,
     FormField,
-    InlineFormCallbackQueryProcessingContext,
     InlineFormField,
+    MessageProcessingContext,
 )
 from telebot_components.form.form import Form
 from telebot_components.form.types import FormDynamicDataT, FormResultT
@@ -132,7 +133,8 @@ class _FormStateUpdateEffect:
 
 @dataclass
 class _FormState(Generic[FormResultT, FormDynamicDataT]):
-    """User's state when they are filling out a form. Please note that a single object is
+    """
+    User's state when they are filling out a form. A single object is
     used throughout the form with result_so_far mutating attribute.
     """
 
@@ -231,9 +233,13 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
                 )
         else:
             result = await self.current_field.process_message(
-                message=message,
-                language=language,
-                dynamic_data=self.dynamic_data,
+                MessageProcessingContext(
+                    message=message,
+                    language=language,
+                    dynamic_data=self.dynamic_data,
+                    current_value=self.result_so_far.get(self.current_field.name),
+                    logger=self.logger,
+                )
             )
             value = result.parsed_value
             response_to_user = result.response_to_user
@@ -307,7 +313,7 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
         if callback_data["fieldname"] != self.current_field.name:
             return _FormStateUpdateEffect(_FormAction.DO_NOTHING)
         result = await self.current_field.process_callback_query(
-            context=InlineFormCallbackQueryProcessingContext(
+            context=CallbackQueryProcessingContext(
                 callback_payload=callback_data["payload"],
                 current_value=self.result_so_far.get(self.current_field.name),
                 language=language,
