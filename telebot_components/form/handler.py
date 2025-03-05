@@ -438,9 +438,12 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
                         send_reply_markup=tg.ReplyKeyboardRemove(),
                     ),
                 )
+
             if state_update_effect.form_action is _FormAction.DO_NOTHING:
                 return
+
             await self.form_state_store.save(user_id, form_state)
+
             user_action = state_update_effect.user_action
             if user_action is not None:
                 if user_action.updated_inline_markup is not None:
@@ -454,7 +457,6 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
                             )
                         except Exception:
                             logging.debug("Error editing message reply markup", exc_info=True)
-
                 if user_action.send_message_html:
                     message = await bot.send_message(
                         user_id,
