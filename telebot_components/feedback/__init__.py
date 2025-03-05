@@ -15,6 +15,7 @@ from typing import (
     Coroutine,
     Optional,
     Protocol,
+    TypeAlias,
     TypedDict,
     TypeVar,
     cast,
@@ -64,6 +65,7 @@ from telebot_components.stores.language import (
     vaildate_singlelang_text,
 )
 from telebot_components.utils import (
+    TelegramReactionEmoji,
     emoji_hash,
     html_link,
     send_attachment,
@@ -85,6 +87,8 @@ class ServiceMessages:
     throttling_template: Optional[AnyText] = None
     # when failed to forward user's message
     something_went_wrong: Optional[AnyText] = None
+    # bot puts the reaction on user messages it forwarded
+    forwarded_to_admin_reaction: Optional[TelegramReactionEmoji] = None
 
     # messages in admin chat (not localised!)
     # e.g. "Скопировано в чат с пользователь_ницей!"
@@ -217,6 +221,10 @@ class MessageForwarderResult:
 
 
 DUMMY_EXPIRATION_TIME = timedelta(seconds=1312)  # for stores unused based on runtime settings
+
+
+# service type for a callback function passed around for various scenarios of message copying
+UserReplier: TypeAlias = Callable[[str | None, tg.ReplyMarkup | None, tg.ReactionType | None], Awaitable[Any]]
 
 
 class FeedbackHandler:
@@ -557,7 +565,7 @@ class FeedbackHandler:
         bot: AsyncTeleBot,
         user: tg.User,
         message_forwarder: Callable[[Optional[int]], Awaitable[MessageForwarderResult]],
-        user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
+        user_replier: UserReplier,
         send_user_identifier: bool,
         export_to_integrations: bool = True,
     ) -> Optional[int]:
@@ -589,7 +597,7 @@ class FeedbackHandler:
         bot: AsyncTeleBot,
         user: tg.User,
         message_forwarder: Callable[[Optional[int]], Awaitable[MessageForwarderResult]],
-        user_replier: Callable[[str, Optional[tg.ReplyMarkup]], Coroutine[None, None, Any]],
+        user_replier: UserReplier,
         send_user_identifier: bool,
         export_to_integrations: bool = True,
     ) -> Optional[int]:
@@ -602,7 +610,11 @@ class FeedbackHandler:
         language = await self.get_maybe_language(user)
         if anti_spam_status is AntiSpamStatus.THROTTLING:
             anti_spam = cast(AntiSpam, self.anti_spam)  # only real AntiSpam can return this status
-            await user_replier(self.service_messages.throttling(anti_spam.config, language), None)
+            await user_replier(
+                self.service_messages.throttling(anti_spam.config, language),
+                None,
+                None,
+            )
             return None
 
         category = await self.category_store.get_user_category(user) if self.category_store is not None else None
@@ -680,6 +692,7 @@ class FeedbackHandler:
                         await user_replier(
                             any_text_to_str(you_must_select_category, language),
                             await self.category_store.markup_for_user(user),
+                            None,
                         )
                         return None
                 else:
@@ -753,16 +766,21 @@ class FeedbackHandler:
                 message_forwarder_result.admin_chat_msg.id, hashtag_msg_data
             )
 
+        confirmation_msg: str | None = None
         if self.service_messages.forwarded_to_admin_ok is not None and (
             self.config.confirm_forwarded_to_admin_rarer_than is None
             or not await self.recently_sent_confirmation_flag_store.is_flag_set(user.id)
         ):
-            await user_replier(
-                any_text_to_str(self.service_messages.forwarded_to_admin_ok, language),
-                None,
-            )
+            confirmation_msg = any_text_to_str(self.service_messages.forwarded_to_admin_ok, language)
             if self.config.confirm_forwarded_to_admin_rarer_than is not None:
                 await self.recently_sent_confirmation_flag_store.set_flag(user.id)
+
+        reaction = (
+            tg.ReactionTypeEmoji(self.service_messages.forwarded_to_admin_reaction)
+            if self.service_messages.forwarded_to_admin_reaction is not None
+            else None
+        )
+        await user_replier(confirmation_msg, None, reaction)
 
         if export_to_integrations:
             # integrations have no concept of pre- and post-forwarded messages, so we just patch their texts
@@ -808,6 +826,8 @@ class FeedbackHandler:
         remove_exif_data: bool = True,
         send_user_id_hash_message: bool = False,  # DEPRECATED, USE send_user_identifier_message
         send_user_identifier_message: bool = False,
+        # if the bot uses reactions to signal sent message, users need to specify which message to react to (if any)
+        message_id_to_react_to: int | None = None,
         **send_message_kwargs,
     ) -> Optional[int]:
         """
@@ -842,11 +862,13 @@ class FeedbackHandler:
                 user_msg=None,
             )
 
-        async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]) -> Optional[tg.Message]:
+        async def user_replier(text: str | None, reply_markup: tg.ReplyMarkup | None, reaction: tg.ReactionType | None):
             if no_response:
-                return None
-            else:
-                return await bot.send_message(user.id, text=text, reply_markup=reply_markup)
+                return
+            if text:
+                await bot.send_message(user.id, text=text, reply_markup=reply_markup)
+            if reaction and message_id_to_react_to is not None:
+                await bot.set_message_reaction(user.id, message_id=message_id_to_react_to, reaction=[reaction])
 
         return await self._handle_user_message(
             bot=bot,
@@ -879,9 +901,16 @@ class FeedbackHandler:
                 fake_admin_chat_message.id = copied_message_id.message_id
                 return MessageForwarderResult(admin_chat_msg=fake_admin_chat_message, user_msg=message)
 
-        async def user_replier(text: str, reply_markup: Optional[tg.ReplyMarkup]):
+        async def user_replier(text: str | None, reply_markup: tg.ReplyMarkup | None, reaction: tg.ReactionType | None):
             if reply_to_user:
-                return await bot.reply_to(message, text, reply_markup=reply_markup)
+                if text:
+                    await bot.reply_to(message, text, reply_markup=reply_markup)
+                if reaction is not None:
+                    await bot.set_message_reaction(
+                        chat_id=message.chat.id,
+                        message_id=message.id,
+                        reaction=[reaction],
+                    )
 
         return await self._handle_user_message(
             bot=bot,
