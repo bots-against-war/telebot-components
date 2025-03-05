@@ -28,8 +28,9 @@ form = Form(
             next_page_button_caption="=>",
             prev_page_button_caption="<=",
             min_len=3,
-            max_len=20,
-            max_len_reached_error_msg="You can't add more than 20 foods!",
+            max_len=9,
+            items_per_page=5,
+            max_len_reached_error_msg="You can't add more than 9 foods!",
             result_formatting_opts=FormFieldResultFormattingOpts(
                 descr="Favorite food",
                 is_multiline=True,

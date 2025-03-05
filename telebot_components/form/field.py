@@ -4,6 +4,7 @@ import dataclasses
 import datetime
 import hashlib
 import logging
+import math
 import re
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
@@ -828,7 +829,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
 
     @property
     def total_pages(self) -> int:
-        return 1 + (len(self.EnumClass) // self.options_per_page)
+        return int(math.ceil(len(self.EnumClass) / self.options_per_page))
 
     async def process_callback_query(
         self, context: CallbackQueryProcessingContext[set[Enum]]
@@ -1161,7 +1162,7 @@ class ListInputField(InlineFormField[list[str]]):
         return self._get_reply_markup_for_page(language=language, current_value=current_value, page=0)
 
     def _total_pages(self, current_value: list[str]) -> int:
-        return 1 + (len(current_value) // self.items_per_page)
+        return int(math.ceil(len(current_value) / self.items_per_page))
 
     def _get_reply_markup_for_page(
         self,
@@ -1251,7 +1252,7 @@ class ListInputField(InlineFormField[list[str]]):
                 new_value = copy.deepcopy(current_value)
                 new_value.pop(idx_to_delete)
                 page = idx_to_delete // self.items_per_page
-                if page > self._total_pages(current_value):
+                if page >= self._total_pages(new_value):
                     page -= 1
                 return CallbackQueryProcessingResult(
                     response_to_user=None,
