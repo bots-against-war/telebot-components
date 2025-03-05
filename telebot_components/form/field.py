@@ -186,7 +186,7 @@ class MessageProcessingResult(Generic[FieldValueT]):
     complete_field: bool
     response_reply_markup: Optional[tg.ReplyMarkup] = None
     new_dynamic_data: Optional[Any] = None
-    update_inline_markup: tg.InlineKeyboardMarkup | None = None
+    updated_inline_markup: tg.InlineKeyboardMarkup | None = None
 
 
 @dataclass
@@ -1134,12 +1134,14 @@ class ListInputField(InlineFormField[list[str]]):
                 response_to_user=any_text_to_str(error.msg, context.language),
                 new_field_value=None,
                 complete_field=False,
+                updated_inline_markup=tg.InlineKeyboardMarkup([]),
             )
 
         new_value = (context.current_value or []) + new_items
         if self.max_len is not None and self.max_len_reached_error_msg is not None and len(new_value) > self.max_len:
             return MessageProcessingResult(
                 response_to_user=any_text_to_str(self.max_len_reached_error_msg, context.language),
+                response_reply_markup=tg.ReplyKeyboardRemove(),
                 new_field_value=context.current_value,
                 complete_field=False,
             )
@@ -1147,6 +1149,7 @@ class ListInputField(InlineFormField[list[str]]):
             response_to_user=any_text_to_str(self.query_message, context.language),
             new_field_value=new_value,
             complete_field=False,
+            updated_inline_markup=tg.InlineKeyboardMarkup([]),
         )
 
     def get_reply_markup(
