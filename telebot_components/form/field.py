@@ -182,12 +182,11 @@ class MessageProcessingContext(Generic[FieldValueT]):
 @dataclass
 class MessageProcessingResult(Generic[FieldValueT]):
     response_to_user: Optional[str]
-    parsed_value: Optional[FieldValueT]
-    # special flag to tell the form "we didn't produce any value but it's not an error! it's really ok,
-    # the form is continuing, we are awaiting some further input from the user or something like this"
-    no_form_state_mutation: bool = False
+    new_field_value: Optional[FieldValueT]
+    complete_field: bool
     response_reply_markup: Optional[tg.ReplyMarkup] = None
     new_dynamic_data: Optional[Any] = None
+    update_inline_markup: tg.InlineKeyboardMarkup | None = None
 
 
 @dataclass
@@ -258,12 +257,14 @@ class FormField(Generic[FieldValueT]):
             value = self.parse(context.message)
             return MessageProcessingResult(
                 response_to_user=self.get_result_message(value, context.language),
-                parsed_value=value,
+                new_field_value=value,
+                complete_field=True,
             )
         except BadFieldValueError as error:
             return MessageProcessingResult(
                 response_to_user=any_text_to_str(error.msg, context.language),
-                parsed_value=None,
+                new_field_value=None,
+                complete_field=True,
             )
 
     def parse(self, message: tg.Message) -> FieldValueT:
@@ -511,7 +512,8 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
         if attachment is None:
             return MessageProcessingResult(
                 response_to_user=any_text_to_str(self.attachments_expected_error_msg, language),
-                parsed_value=None,
+                new_field_value=None,
+                complete_field=False,
             )
         media_group_id = message.media_group_id
         self.logger.debug(f"{self.__class__.__name__} got a new media: {media_group_id = } ")
@@ -522,19 +524,21 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
                 # we're already waiting for messages in a media group
                 return MessageProcessingResult(
                     response_to_user=any_text_to_str(self.only_one_media_message_allowed_error_msg, language),
-                    parsed_value=None,
-                    no_form_state_mutation=True,
+                    new_field_value=None,
+                    complete_field=False,
                 )
             if media_group_id is None:  # single media message
                 if self.is_attachment_allowed(attachment):
                     return MessageProcessingResult(
                         response_to_user=self.get_result_message([attachment], language),
-                        parsed_value=[attachment],
+                        new_field_value=[attachment],
+                        complete_field=True,
                     )
                 else:
                     return MessageProcessingResult(
                         response_to_user=any_text_to_str(self.bad_attachment_type_error_msg, language),
-                        parsed_value=None,
+                        new_field_value=None,
+                        complete_field=False,
                     )
             else:
                 # first message in a media group — waiting for the rest of it
@@ -550,12 +554,14 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
                 if all(self.is_attachment_allowed(att) for att in final_attachments):
                     return MessageProcessingResult(
                         response_to_user=self.get_result_message(final_attachments, language),
-                        parsed_value=final_attachments,
+                        new_field_value=final_attachments,
+                        complete_field=True,
                     )
                 else:
                     return MessageProcessingResult(
                         response_to_user=any_text_to_str(self.bad_attachment_type_error_msg, language),
-                        parsed_value=None,
+                        new_field_value=None,
+                        complete_field=False,
                     )
         # second or later message in a media group
         else:
@@ -564,15 +570,16 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
                 self.logger.error(f"Corrupted data in stash: {_media_group_attachments_stash}")
                 return MessageProcessingResult(
                     response_to_user="Something went wrong...",
-                    parsed_value=None,
+                    new_field_value=None,
+                    complete_field=True,
                 )
             else:
                 self.logger.debug("Second-or-later attachment in a media group, adding it to stash")
                 current_value.append(attachment)
                 return MessageProcessingResult(
                     response_to_user=None,
-                    parsed_value=None,
-                    no_form_state_mutation=True,
+                    new_field_value=None,
+                    complete_field=False,
                 )
 
 
@@ -709,7 +716,8 @@ class SearchableSingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
                 logger.warning(f"Multiple exact matches found, will select first one: {exact_matches}")
             return MessageProcessingResult(
                 response_to_user=self.get_result_message(exact_matches[0], language),
-                parsed_value=exact_matches[0],
+                new_field_value=exact_matches[0],
+                complete_field=True,
             )
 
         fuzzy_matches = self.find_matches(message.text_content, exact=False)
@@ -725,13 +733,14 @@ class SearchableSingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
             return MessageProcessingResult(
                 response_to_user=any_text_to_str(self.choose_from_matches, language),
                 response_reply_markup=select_match_kbd,
-                parsed_value=None,
-                no_form_state_mutation=True,
+                new_field_value=None,
+                complete_field=False,
             )
         else:
             return MessageProcessingResult(
                 response_to_user=any_text_to_str(self.no_matches_found, language),
-                parsed_value=None,
+                new_field_value=None,
+                complete_field=False,
             )
 
     def value_to_str(self, value: Enum, lang: MaybeLanguage) -> str:
@@ -765,8 +774,9 @@ class StrictlyInlineFormField(InlineFormField[FieldValueT]):
 
     async def process_message(self, context: MessageProcessingContext) -> MessageProcessingResult[FieldValueT]:
         return MessageProcessingResult(
-            any_text_to_str(self.please_use_inline_menu, context.language),
-            None,
+            response_to_user=any_text_to_str(self.please_use_inline_menu, context.language),
+            new_field_value=None,
+            complete_field=False,
         )
 
 
@@ -1072,27 +1082,194 @@ class DynamicSingleSelectField(FormField[str]):
         if selected is None:
             return MessageProcessingResult(
                 response_to_user=any_text_to_str(self.invalid_enum_value_error_msg, context.language),
-                parsed_value=None,
+                new_field_value=None,
+                complete_field=False,
             )
         return MessageProcessingResult(
             response_to_user=self.get_result_message(selected.id, context.language),
-            parsed_value=selected.id,
+            new_field_value=selected.id,
+            complete_field=True,
         )
 
 
+@dataclass
 class ListInputField(InlineFormField[list[str]]):
     """
     Variable length list input with generic item type and list editing,
     akin to chip input (e.g. https://doc.wikimedia.org/codex/latest/components/demos/chip-input.html)
     """
 
+    finish_field_button_caption: AnyText
+    next_page_button_caption: AnyText
+    prev_page_button_caption: AnyText
+
+    min_len: int | None = None
+    max_len: int | None = None
+    max_len_reached_error_msg: AnyText | None = None
+    items_per_page: int = 10
+    inline_menu_row_width: int = 1
+
+    DELETE_ITEM_PAYLOAD_PREFIX: ClassVar[str] = "delete"
+    FINISH_FIELD_PAYLOAD: ClassVar[str] = "finish"
+    TO_PAGE_PAYLOAD_PREFIX: ClassVar[str] = "topage"
+    NOOP_PAYLOAD: ClassVar[str] = "noop"
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.max_len is not None and self.max_len_reached_error_msg is None:
+            raise ValueError("max_len_reached_error_msg must be specified, if max_len is")
+
     async def parse_items(self, message: tg.Message) -> list[str]:
         """Subclasses can override this for custom item parsing"""
-        return message.text_content.splitlines()
+        return message.text_content.split()
 
     async def process_message(
         self,
-        context: MessageProcessingContext,
+        context: MessageProcessingContext[list[str]],
     ) -> MessageProcessingResult[list[str]]:
-        _ = await self.parse_items(context.message)
-        raise ValueError()
+        try:
+            new_items = await self.parse_items(context.message)
+        except BadFieldValueError as error:
+            return MessageProcessingResult(
+                response_to_user=any_text_to_str(error.msg, context.language),
+                new_field_value=None,
+                complete_field=False,
+            )
+
+        new_value = (context.current_value or []) + new_items
+        if self.max_len is not None and self.max_len_reached_error_msg is not None and len(new_value) > self.max_len:
+            return MessageProcessingResult(
+                response_to_user=any_text_to_str(self.max_len_reached_error_msg, context.language),
+                new_field_value=context.current_value,
+                complete_field=False,
+            )
+        return MessageProcessingResult(
+            response_to_user=any_text_to_str(self.query_message, context.language),
+            new_field_value=new_value,
+            complete_field=False,
+        )
+
+    def get_reply_markup(
+        self,
+        language: MaybeLanguage,
+        current_value: list[str] | None,
+        dynamic_data: Any,
+    ) -> tg.InlineKeyboardMarkup:
+        return self._get_reply_markup_for_page(language=language, current_value=current_value, page=0)
+
+    def _total_pages(self, current_value: list[str]) -> int:
+        return 1 + (len(current_value) // self.items_per_page)
+
+    def _get_reply_markup_for_page(
+        self,
+        language: MaybeLanguage,
+        current_value: list[str] | None,
+        page: int,
+    ) -> tg.InlineKeyboardMarkup:
+        if current_value is None:
+            current_value = list()
+
+        page_start_idx = page * self.items_per_page
+        page_end_idx = (page + 1) * self.items_per_page
+        total_pages = self._total_pages(current_value)
+
+        buttons: list[tg.InlineKeyboardButton] = []
+        for idx_on_page, item in enumerate(current_value[page_start_idx:page_end_idx]):
+            idx = page_start_idx + idx_on_page
+            buttons.append(
+                tg.InlineKeyboardButton(
+                    text=f"❌ {item}",
+                    callback_data=self.new_callback_data(payload=self.DELETE_ITEM_PAYLOAD_PREFIX + str(idx)),
+                )
+            )
+        keyboard = tg.InlineKeyboardMarkup()
+        keyboard.add(*buttons, row_width=self.inline_menu_row_width)
+        if total_pages > 1:
+            noop_button = tg.InlineKeyboardButton(
+                text=" ", callback_data=self.new_callback_data(payload=self.NOOP_PAYLOAD)
+            )
+            prev_page_button = tg.InlineKeyboardButton(
+                text=any_text_to_str(self.prev_page_button_caption, language),
+                callback_data=self.new_callback_data(payload=self.TO_PAGE_PAYLOAD_PREFIX + str(page - 1)),
+            )
+            next_page_button = tg.InlineKeyboardButton(
+                text=any_text_to_str(self.next_page_button_caption, language),
+                callback_data=self.new_callback_data(payload=self.TO_PAGE_PAYLOAD_PREFIX + str(page + 1)),
+            )
+            keyboard.row(
+                prev_page_button if page > 0 else noop_button,
+                next_page_button if page < total_pages - 1 else noop_button,
+            )
+        current_len = len(current_value)
+        if (self.min_len is None or current_len >= self.min_len) and (
+            self.max_len is None or current_len <= self.max_len
+        ):
+            keyboard.row(
+                tg.InlineKeyboardButton(
+                    text=any_text_to_str(self.finish_field_button_caption, language),
+                    callback_data=self.new_callback_data(payload=self.FINISH_FIELD_PAYLOAD),
+                )
+            )
+        return keyboard
+
+    async def process_callback_query(
+        self, context: CallbackQueryProcessingContext[list[str]]
+    ) -> CallbackQueryProcessingResult[list[str]]:
+        current_value = context.current_value or []
+        try:
+            if context.callback_payload == self.NOOP_PAYLOAD:
+                return CallbackQueryProcessingResult(
+                    response_to_user=None,
+                    updated_inline_markup=None,
+                    complete_field=False,
+                    new_field_value=current_value,
+                )
+            if context.callback_payload == self.FINISH_FIELD_PAYLOAD:
+                return CallbackQueryProcessingResult(
+                    response_to_user=self.get_result_message(current_value, context.language),
+                    updated_inline_markup=None,
+                    complete_field=True,
+                    new_field_value=current_value,
+                )
+            elif context.callback_payload.startswith(self.TO_PAGE_PAYLOAD_PREFIX):
+                to_page = int(context.callback_payload.removeprefix(self.TO_PAGE_PAYLOAD_PREFIX))
+                return CallbackQueryProcessingResult(
+                    response_to_user=None,
+                    updated_inline_markup=self._get_reply_markup_for_page(
+                        language=context.language,
+                        current_value=current_value,
+                        page=to_page,
+                    ),
+                    complete_field=False,
+                    new_field_value=current_value,
+                )
+            elif context.callback_payload.startswith(self.DELETE_ITEM_PAYLOAD_PREFIX):
+                idx_to_delete = int(context.callback_payload.removeprefix(self.DELETE_ITEM_PAYLOAD_PREFIX))
+                new_value = copy.deepcopy(current_value)
+                new_value.pop(idx_to_delete)
+                page = idx_to_delete // self.items_per_page
+                if page > self._total_pages(current_value):
+                    page -= 1
+                return CallbackQueryProcessingResult(
+                    response_to_user=None,
+                    updated_inline_markup=self._get_reply_markup_for_page(
+                        language=context.language,
+                        current_value=new_value,
+                        page=page,
+                    ),
+                    complete_field=False,
+                    new_field_value=new_value,
+                )
+            else:
+                raise ValueError(f"Unknown callback payload prefix: {context.callback_payload!r}!")
+        except Exception as e:
+            context.logger.exception("Unexpected error processing callback query")
+            return CallbackQueryProcessingResult(
+                response_to_user=f"Something went wrong! Details: {e}",
+                updated_inline_markup=None,
+                complete_field=False,
+                new_field_value=current_value,
+            )
+
+    def value_to_str(self, value: list[str], language: MaybeLanguage) -> str:
+        return ", ".join(value)

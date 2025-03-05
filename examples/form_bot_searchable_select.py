@@ -256,7 +256,7 @@ form = Form(
 )
 
 
-async def create_branching_form_bot():
+async def create_form_demo_bot():
     bot_prefix = "form-bot-countries"
     redis = RedisEmulation()
     form_handler = FormHandler(
@@ -295,7 +295,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
     async def main() -> None:
-        br = await create_branching_form_bot()
+        br = await create_form_demo_bot()
         await br.run_polling()
 
     asyncio.run(main())

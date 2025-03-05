@@ -19,6 +19,7 @@ from telebot_components.form.field import (
     FormField,
     InlineFormField,
     MessageProcessingContext,
+    MessageProcessingResult,
 )
 from telebot_components.form.form import Form
 from telebot_components.form.types import FormDynamicDataT, FormResultT
@@ -121,7 +122,7 @@ class _FormAction(Enum):
 @dataclass
 class _UserAction:
     send_message_html: Optional[str]
-    send_reply_keyboard: tg.ReplyMarkup
+    send_reply_markup: tg.ReplyMarkup
     update_inline_markup: Optional[tg.ReplyMarkup] = None
 
 
@@ -198,37 +199,36 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
         language: MaybeLanguage,
         form_handler_config: FormHandlerConfig,
     ) -> _FormStateUpdateEffect:
-        reply_paragraphs: list[str] = []
-
-        save_field_value: bool = True
-        value: Optional[Any] = None
-        response_to_user: Optional[str] = None
+        result = MessageProcessingResult[Any](
+            response_to_user=None,
+            new_field_value=None,
+            complete_field=False,
+        )
 
         message_cmd = message.text_content.strip() if message.content_type == "text" else None
         if message_cmd is not None and message_cmd.startswith("/"):
             if message_cmd in form_handler_config.cancel_cmds:
                 return _FormStateUpdateEffect(_FormAction.CANCEL)
             elif message_cmd == form_handler_config.skip_cmd:
-                if not self.current_field.required:
-                    is_field_ok = True
+                result.complete_field = not self.current_field.required
+                if result.complete_field:
+                    self.result_so_far[self.current_field.name] = None  # type: ignore
                 else:
-                    response_to_user = any_text_to_str(form_handler_config.cant_skip_field_msg, language)
-                    is_field_ok = False
+                    result.response_to_user = any_text_to_str(form_handler_config.cant_skip_field_msg, language)
             elif message_cmd == form_handler_config.keep_cmd:
                 if (
                     form_handler_config.is_keeping_existing_field_value()
                     and self.current_field.name in self.result_so_far
                 ):
-                    is_field_ok = True
-                    save_field_value = False
-                else:
-                    is_field_ok = False
+                    result.complete_field = True
+                    result.new_field_value = self.result_so_far[self.current_field.name]
             else:
                 return _FormStateUpdateEffect(
                     _FormAction.KEEP_GOING,
                     user_action=_UserAction(
                         send_message_html=form_handler_config.unsupported_cmd_error_msg(language),
-                        send_reply_keyboard=self.get_current_field_reply_markup(language),
+                        send_reply_markup=self.get_current_field_reply_markup(language),
+                        update_inline_markup=result.update_inline_markup,
                     ),
                 )
         else:
@@ -241,42 +241,35 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
                     logger=self.logger,
                 )
             )
-            value = result.parsed_value
-            response_to_user = result.response_to_user
-            is_field_ok = result.parsed_value is not None
-            if result.new_dynamic_data is not None:
-                self.dynamic_data = result.new_dynamic_data
-            if result.no_form_state_mutation:
-                return _FormStateUpdateEffect(
-                    _FormAction.KEEP_GOING,
-                    user_action=_UserAction(
-                        send_message_html=response_to_user,
-                        send_reply_keyboard=result.response_reply_markup or tg.ReplyKeyboardRemove(),
-                    ),
-                )
 
-        if not is_field_ok:
-            if response_to_user:
-                reply_paragraphs.append(response_to_user)
-            reply_paragraphs.append(any_text_to_str(form_handler_config.retry_field_msg, language))
+        if result.new_dynamic_data is not None:
+            self.dynamic_data = result.new_dynamic_data
+
+        if result.new_field_value is not None:
+            # result_so_far is typed as immutable Mapping to allow TypedDict's, but here we actually construct it
+            self.result_so_far[self.current_field.name] = result.new_field_value  # type: ignore
+
+        reply_paragraphs: list[str] = []
+        if not result.complete_field:
+            if result.response_to_user is not None:
+                reply_paragraphs.append(result.response_to_user)
+            if result.new_field_value is None:
+                reply_paragraphs.append(any_text_to_str(form_handler_config.retry_field_msg, language))
             return _FormStateUpdateEffect(
                 _FormAction.KEEP_GOING,
                 user_action=_UserAction(
                     send_message_html=join_paragraphs(reply_paragraphs),
-                    send_reply_keyboard=self.get_current_field_reply_markup(language),
+                    send_reply_markup=result.response_reply_markup or self.get_current_field_reply_markup(language),
+                    update_inline_markup=result.update_inline_markup,
                 ),
             )
 
-        if save_field_value:
-            # result_so_far is typed as immutable Mapping to allow TypedDict's, but here we actually construct it
-            self.result_so_far[self.current_field.name] = value  # type: ignore
-
-        if form_handler_config.echo_filled_field and response_to_user is not None:
-            reply_paragraphs.append(response_to_user)
+        if form_handler_config.echo_filled_field and result.response_to_user is not None:
+            reply_paragraphs.append(result.response_to_user)
 
         next_field = await self.current_field.get_next_field_getter()(
             user=message.from_user,
-            value=value,
+            value=result.new_field_value,
             current_field_name=self.current_field.name,
         )
         if next_field is None:
@@ -285,21 +278,26 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
                 user_action=(
                     _UserAction(
                         send_message_html=join_paragraphs(reply_paragraphs),
-                        send_reply_keyboard=tg.ReplyKeyboardRemove(),
+                        send_reply_markup=tg.ReplyKeyboardRemove(),
+                        update_inline_markup=result.update_inline_markup,
                     )
                     if reply_paragraphs
                     else None
                 ),
             )
-        self.current_field = next_field
-        reply_paragraphs.append(await self.get_current_field_message(message.from_user, language, form_handler_config))
-        return _FormStateUpdateEffect(
-            _FormAction.KEEP_GOING,
-            user_action=_UserAction(
-                send_message_html=join_paragraphs(reply_paragraphs),
-                send_reply_keyboard=self.get_current_field_reply_markup(language),
-            ),
-        )
+        else:
+            self.current_field = next_field
+            reply_paragraphs.append(
+                await self.get_current_field_message(message.from_user, language, form_handler_config)
+            )
+            return _FormStateUpdateEffect(
+                _FormAction.KEEP_GOING,
+                user_action=_UserAction(
+                    send_message_html=join_paragraphs(reply_paragraphs),
+                    send_reply_markup=result.response_reply_markup or self.get_current_field_reply_markup(language),
+                    update_inline_markup=result.update_inline_markup,
+                ),
+            )
 
     async def update_with_callback_query(
         self,
@@ -330,7 +328,7 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
         if result.response_to_user:
             paragraphs.append(result.response_to_user)
 
-        send_reply_keyboard: tg.ReplyMarkup = tg.ReplyKeyboardRemove()
+        send_reply_markup: tg.ReplyMarkup = tg.ReplyKeyboardRemove()
         form_action = _FormAction.KEEP_GOING
         if result.complete_field:
             next_field = await self.current_field.get_next_field_getter()(
@@ -343,13 +341,13 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
             else:
                 self.current_field = next_field
                 paragraphs.append(await self.get_current_field_message(call.from_user, language, form_handler_config))
-                send_reply_keyboard = self.get_current_field_reply_markup(language)
+                send_reply_markup = self.get_current_field_reply_markup(language)
 
         return _FormStateUpdateEffect(
             form_action=form_action,
             user_action=_UserAction(
                 send_message_html=join_paragraphs(paragraphs),
-                send_reply_keyboard=send_reply_keyboard,
+                send_reply_markup=send_reply_markup,
                 update_inline_markup=result.updated_inline_markup,
             ),
         )
@@ -435,7 +433,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
                         send_message_html=any_text_to_str(
                             self.config.cancelling_because_of_error_template, language
                         ).format(telegram_html_escape(str(e))),
-                        send_reply_keyboard=tg.ReplyKeyboardRemove(),
+                        send_reply_markup=tg.ReplyKeyboardRemove(),
                     ),
                 )
             if state_update_effect.form_action is _FormAction.DO_NOTHING:
@@ -448,7 +446,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
                         user_id,
                         text=user_action.send_message_html,
                         parse_mode="HTML",
-                        reply_markup=user_action.send_reply_keyboard,
+                        reply_markup=user_action.send_reply_markup,
                     )
                 if user_action.update_inline_markup is not None:
                     try:
