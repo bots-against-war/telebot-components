@@ -1093,6 +1093,9 @@ class DynamicSingleSelectField(FormField[str]):
         )
 
 
+# FIXME: user custom object with .label() interface instead of strings!!!
+
+
 @dataclass
 class ListInputField(InlineFormField[list[str]]):
     """
