@@ -58,6 +58,9 @@ class BadFieldValueError(Exception):
         self.msg = msg
 
 
+# region: config part classes
+
+
 @dataclass
 class NextFieldGetter(Generic[FieldValueT]):
     """Service class to forward-reference the next field in a form"""
@@ -162,6 +165,20 @@ class FormFieldResultExportOpts(Generic[FieldValueT]):
             raise ValueError("Value mapping and value processor are mutually exclusive")
 
 
+# endregion
+
+# region: data transfer classes
+
+
+@dataclass
+class MessageProcessingContext(Generic[FieldValueT]):
+    message: tg.Message
+    current_value: FieldValueT | None
+    language: MaybeLanguage
+    dynamic_data: Any
+    logger: logging.Logger
+
+
 @dataclass
 class MessageProcessingResult(Generic[FieldValueT]):
     response_to_user: Optional[str]
@@ -174,13 +191,26 @@ class MessageProcessingResult(Generic[FieldValueT]):
 
 
 @dataclass
-class CallbackProcessingResult(Generic[FieldValueT]):
+class CallbackQueryProcessingContext(Generic[FieldValueT]):
+    callback_payload: str
+    current_value: Optional[FieldValueT]
+    language: MaybeLanguage
+    dynamic_data: Any
+    logger: logging.Logger
+
+
+@dataclass
+class CallbackQueryProcessingResult(Generic[FieldValueT]):
     response_to_user: Optional[str]
     updated_inline_markup: Optional[tg.InlineKeyboardMarkup]
     complete_field: bool
     new_field_value: Optional[FieldValueT]
     new_dynamic_data: Optional[Any] = None
 
+
+# endregion
+
+# region: form field base
 
 FormFieldT = TypeVar("FormFieldT", bound="FormField")
 
@@ -223,21 +253,16 @@ class FormField(Generic[FieldValueT]):
         """
         return None
 
-    async def process_message(
-        self,
-        message: tg.Message,
-        language: MaybeLanguage,
-        dynamic_data: Any,
-    ) -> MessageProcessingResult[FieldValueT]:
+    async def process_message(self, context: MessageProcessingContext) -> MessageProcessingResult[FieldValueT]:
         try:
-            value = self.parse(message)
+            value = self.parse(context.message)
             return MessageProcessingResult(
-                response_to_user=self.get_result_message(value, language),
+                response_to_user=self.get_result_message(value, context.language),
                 parsed_value=value,
             )
         except BadFieldValueError as error:
             return MessageProcessingResult(
-                response_to_user=any_text_to_str(error.msg, language),
+                response_to_user=any_text_to_str(error.msg, context.language),
                 parsed_value=None,
             )
 
@@ -305,6 +330,10 @@ class FormField(Generic[FieldValueT]):
             result_formatting_opts=formatting,
             export_opts=export,
         )
+
+
+# endregion
+# region: specific fields
 
 
 @dataclass
@@ -466,7 +495,8 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
         return hash_.hexdigest()
 
     async def process_message(
-        self, message: tg.Message, language: MaybeLanguage, dynamic_data: Any
+        self,
+        context: MessageProcessingContext,
     ) -> MessageProcessingResult[list[TelegramAttachment]]:
         """HACK: we want to process media group, but telegram passes them as separate messages,
         linked only with ID with no info on the total number of items, order or whatever.
@@ -475,7 +505,9 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
         first message, sleep asynchronously for some time and hope that by the time we wake up,
         all other messages in the media group have arrived and are already added to the cache
         """
-        attachment = self.get_attachment(message)
+        message = context.message
+        language = context.language
+        attachment = self.get_attachment(context.message)
         if attachment is None:
             return MessageProcessingResult(
                 response_to_user=any_text_to_str(self.attachments_expected_error_msg, language),
@@ -668,12 +700,9 @@ class SearchableSingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
     def find_matches(self, text: str, exact: bool) -> list[Enum]:
         return [e for e in self.EnumClass if self._as_item(e).matches(text, exact=exact)]
 
-    async def process_message(
-        self,
-        message: tg.Message,
-        language: MaybeLanguage,
-        dynamic_data: Any,
-    ) -> MessageProcessingResult[Enum]:
+    async def process_message(self, context: MessageProcessingContext) -> MessageProcessingResult[Enum]:
+        message = context.message
+        language = context.language
         exact_matches = self.find_matches(message.text_content, exact=True)
         if exact_matches:
             if len(exact_matches) > 1:
@@ -720,22 +749,13 @@ INLINE_FIELD_CALLBACK_DATA = CallbackData("fieldname", "payload", prefix="inline
 
 
 @dataclass
-class InlineFormCallbackQueryProcessingContext(Generic[FieldValueT]):
-    callback_payload: str
-    current_value: Optional[FieldValueT]
-    language: MaybeLanguage
-    dynamic_data: Any
-    logger: logging.Logger
-
-
-@dataclass
 class InlineFormField(FormField[FieldValueT]):
     def new_callback_data(self, payload: str) -> str:
         return INLINE_FIELD_CALLBACK_DATA.new(fieldname=self.name, payload=payload)
 
     async def process_callback_query(
-        self, context: InlineFormCallbackQueryProcessingContext[FieldValueT]
-    ) -> CallbackProcessingResult[FieldValueT]:
+        self, context: CallbackQueryProcessingContext[FieldValueT]
+    ) -> CallbackQueryProcessingResult[FieldValueT]:
         raise NotImplementedError("InlineFormField cannot be used directly, please use concrete subclasses")
 
 
@@ -743,14 +763,9 @@ class InlineFormField(FormField[FieldValueT]):
 class StrictlyInlineFormField(InlineFormField[FieldValueT]):
     please_use_inline_menu: AnyText
 
-    async def process_message(
-        self,
-        message: tg.Message,
-        language: MaybeLanguage,
-        dynamic_data: Any,
-    ) -> MessageProcessingResult[FieldValueT]:
+    async def process_message(self, context: MessageProcessingContext) -> MessageProcessingResult[FieldValueT]:
         return MessageProcessingResult(
-            any_text_to_str(self.please_use_inline_menu, language),
+            any_text_to_str(self.please_use_inline_menu, context.language),
             None,
         )
 
@@ -806,19 +821,19 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
         return 1 + (len(self.EnumClass) // self.options_per_page)
 
     async def process_callback_query(
-        self, context: InlineFormCallbackQueryProcessingContext[set[Enum]]
-    ) -> CallbackProcessingResult[set[Enum]]:
+        self, context: CallbackQueryProcessingContext[set[Enum]]
+    ) -> CallbackQueryProcessingResult[set[Enum]]:
         current_value = context.current_value or set()
         try:
             if context.callback_payload == self.NOOP_PAYLOAD:
-                return CallbackProcessingResult(
+                return CallbackQueryProcessingResult(
                     response_to_user=None,
                     updated_inline_markup=None,
                     complete_field=False,
                     new_field_value=current_value,
                 )
             if context.callback_payload == self.FINISH_FIELD_PAYLOAD:
-                return CallbackProcessingResult(
+                return CallbackQueryProcessingResult(
                     response_to_user=self.get_result_message(current_value, context.language),
                     updated_inline_markup=None,
                     complete_field=True,
@@ -826,7 +841,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                 )
             elif context.callback_payload.startswith(self.TO_PAGE_PAYLOAD_PREFIX):
                 to_page = int(context.callback_payload.removeprefix(self.TO_PAGE_PAYLOAD_PREFIX))
-                return CallbackProcessingResult(
+                return CallbackQueryProcessingResult(
                     response_to_user=None,
                     updated_inline_markup=self._get_reply_markup_for_page(
                         language=context.language,
@@ -850,7 +865,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                 else:
                     new_value.add(selected_option)
                 page = list(self.EnumClass).index(selected_option) // self.options_per_page  # type: ignore
-                return CallbackProcessingResult(
+                return CallbackQueryProcessingResult(
                     response_to_user=None,
                     updated_inline_markup=self._get_reply_markup_for_page(
                         language=context.language,
@@ -864,7 +879,7 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                 raise ValueError(f"Unknown callback payload prefix: {context.callback_payload!r}!")
         except Exception as e:
             context.logger.exception("Unexpected error processing callback query")
-            return CallbackProcessingResult(
+            return CallbackQueryProcessingResult(
                 response_to_user=f"Something went wrong! Details: {e}",
                 updated_inline_markup=None,
                 complete_field=False,
@@ -939,20 +954,20 @@ class DateMenuField(StrictlyInlineFormField[date]):
     calendar_keyboard_config: CalendarKeyboardConfig = CalendarKeyboardConfig(selectable_dates=SelectableDates.all())
 
     async def process_callback_query(
-        self, context: InlineFormCallbackQueryProcessingContext[date]
-    ) -> CallbackProcessingResult[date]:
+        self, context: CallbackQueryProcessingContext[date]
+    ) -> CallbackQueryProcessingResult[date]:
         payload = CalendarCallbackPayload.load(context.callback_payload)
         if payload is None:
             raise RuntimeError(f"Failed to parse CalendarCallbackPayload from {context.callback_payload!r}")
         if payload.action is CalendarAction.NOOP:
-            return CallbackProcessingResult(
+            return CallbackQueryProcessingResult(
                 response_to_user=None,
                 updated_inline_markup=None,
                 complete_field=False,
                 new_field_value=None,
             )
         elif payload.action is CalendarAction.UPDATE:
-            return CallbackProcessingResult(
+            return CallbackQueryProcessingResult(
                 response_to_user=None,
                 updated_inline_markup=self._calendar_keyboard(
                     year=payload.year,
@@ -965,7 +980,7 @@ class DateMenuField(StrictlyInlineFormField[date]):
         elif payload.action is CalendarAction.SELECT:
             # casts are for type system, runtime validation is performed in CalendarCallbackPayload
             selected_date = date(cast(int, payload.year), cast(int, payload.month), cast(int, payload.day))
-            return CallbackProcessingResult(
+            return CallbackQueryProcessingResult(
                 response_to_user=(
                     any_text_to_str(self.echo_result_template, context.language).format(selected_date)
                     if self.echo_result_template
@@ -1051,20 +1066,33 @@ class DynamicSingleSelectField(FormField[str]):
                         return option
         return None
 
-    async def process_message(
-        self,
-        message: tg.Message,
-        language: MaybeLanguage,
-        dynamic_data: Any,
-    ) -> MessageProcessingResult[str]:
-        options = self.parse_dynamic_data(dynamic_data)
-        selected = self.match_option(options=options, text=message.text_content)
+    async def process_message(self, context: MessageProcessingContext) -> MessageProcessingResult[str]:
+        options = self.parse_dynamic_data(context.dynamic_data)
+        selected = self.match_option(options=options, text=context.message.text_content)
         if selected is None:
             return MessageProcessingResult(
-                response_to_user=any_text_to_str(self.invalid_enum_value_error_msg, language),
+                response_to_user=any_text_to_str(self.invalid_enum_value_error_msg, context.language),
                 parsed_value=None,
             )
         return MessageProcessingResult(
-            response_to_user=self.get_result_message(selected.id, language),
+            response_to_user=self.get_result_message(selected.id, context.language),
             parsed_value=selected.id,
         )
+
+
+class ListInputField(InlineFormField[list[str]]):
+    """
+    Variable length list input with generic item type and list editing,
+    akin to chip input (e.g. https://doc.wikimedia.org/codex/latest/components/demos/chip-input.html)
+    """
+
+    async def parse_items(self, message: tg.Message) -> list[str]:
+        """Subclasses can override this for custom item parsing"""
+        return message.text_content.splitlines()
+
+    async def process_message(
+        self,
+        context: MessageProcessingContext,
+    ) -> MessageProcessingResult[list[str]]:
+        _ = await self.parse_items(context.message)
+        raise ValueError()
