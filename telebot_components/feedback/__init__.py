@@ -866,9 +866,18 @@ class FeedbackHandler:
             if no_response:
                 return
             if text:
-                await bot.send_message(user.id, text=text, reply_markup=reply_markup)
+                await bot.send_message(
+                    user.id,
+                    text=text,
+                    reply_markup=reply_markup,
+                    reply_to_message_id=message_id_to_react_to,
+                )
             if reaction and message_id_to_react_to is not None:
-                await bot.set_message_reaction(user.id, message_id=message_id_to_react_to, reaction=[reaction])
+                await bot.set_message_reaction(
+                    user.id,
+                    message_id=message_id_to_react_to,
+                    reaction=[reaction],
+                )
 
         return await self._handle_user_message(
             bot=bot,
@@ -902,15 +911,17 @@ class FeedbackHandler:
                 return MessageForwarderResult(admin_chat_msg=fake_admin_chat_message, user_msg=message)
 
         async def user_replier(text: str | None, reply_markup: tg.ReplyMarkup | None, reaction: tg.ReactionType | None):
-            if reply_to_user:
-                if text:
-                    await bot.reply_to(message, text, reply_markup=reply_markup)
-                if reaction is not None:
-                    await bot.set_message_reaction(
-                        chat_id=message.chat.id,
-                        message_id=message.id,
-                        reaction=[reaction],
-                    )
+            if not reply_to_user:
+                return
+
+            if text:
+                await bot.reply_to(message, text, reply_markup=reply_markup)
+            if reaction is not None:
+                await bot.set_message_reaction(
+                    chat_id=message.chat.id,
+                    message_id=message.id,
+                    reaction=[reaction],
+                )
 
         return await self._handle_user_message(
             bot=bot,
