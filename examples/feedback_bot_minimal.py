@@ -62,7 +62,7 @@ async def create_feedback_bot(redis: RedisInterface, token: str, admin_chat_id: 
             ),
         ),
         service_messages=ServiceMessages(
-            forwarded_to_admin_ok="thanks",
+            forwarded_to_admin_reaction="👀",
             you_must_select_category=None,
             throttling_template="please don't send more than {} messages in {}.",
             copied_to_user_ok="sent to user",

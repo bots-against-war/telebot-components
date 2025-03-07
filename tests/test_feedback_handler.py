@@ -4,6 +4,7 @@ import uuid
 from datetime import timedelta
 from typing import Optional
 
+import pytest
 from telebot import types as tg
 from telebot.test_util import MockedAsyncTeleBot
 
@@ -26,6 +27,7 @@ from tests.utils import (
     TelegramServerMock,
     TimeSupplier,
     assert_list_of_required_subdicts,
+    reactions_to_dicts,
 )
 
 ADMIN_CHAT_ID = 111
@@ -39,6 +41,8 @@ def create_mock_feedback_handler(
     has_categories: bool,
     has_forum_topics: bool,
     user_anonymization: UserAnonymization = UserAnonymization.LEGACY,
+    forward_confirmation_msg: bool = True,
+    forward_confirmation_reaction: bool = False,
 ) -> FeedbackHandler:
     bot_prefix = uuid.uuid4().hex[:8]
 
@@ -95,7 +99,8 @@ def create_mock_feedback_handler(
             user_anonymization=user_anonymization,
         ),
         service_messages=ServiceMessages(
-            forwarded_to_admin_ok="thanks",
+            forwarded_to_admin_ok="thanks" if forward_confirmation_msg else None,
+            forwarded_to_admin_reaction="🤝" if forward_confirmation_reaction else None,
             throttling_template="nope",
             copied_to_user_ok="nice",
         ),
@@ -111,6 +116,106 @@ def create_mock_feedback_handler(
         ),
         category_store=category_store,
         forum_topic_store=forum_topic_store,
+    )
+
+
+@pytest.mark.parametrize(
+    "forward_confirmation_message, forward_confirmation_reaction",
+    [
+        (False, False),
+        (False, True),
+        (True, False),
+        (True, True),
+    ],
+)
+async def test_feedback_basic(
+    redis: RedisInterface,
+    forward_confirmation_message: bool,
+    forward_confirmation_reaction: bool,
+):
+    bot = MockedAsyncTeleBot("token")
+    feedback_handler = create_mock_feedback_handler(
+        redis,
+        is_throttling=False,
+        has_categories=False,
+        has_forum_topics=False,
+        forward_confirmation_msg=forward_confirmation_message,
+        forward_confirmation_reaction=forward_confirmation_reaction,
+    )
+
+    await feedback_handler.setup(bot)
+    assert not bot.method_calls
+
+    telegram = TelegramServerMock(admin_chats={ADMIN_CHAT_ID})
+
+    await telegram.send_message_to_bot(bot, user_id=USER_ID, text="Hi I want to buy drugs")
+
+    assert_list_of_required_subdicts(
+        actual_dicts=[mc.full_kwargs for mc in bot.method_calls["forward_message"]],
+        required_subdicts=[
+            {"chat_id": ADMIN_CHAT_ID, "from_chat_id": USER_ID, "message_id": 1},
+        ],
+    )
+    if forward_confirmation_message:
+        assert_list_of_required_subdicts(
+            actual_dicts=[mc.full_kwargs for mc in bot.method_calls["send_message"]],
+            required_subdicts=[
+                # unread hashtag message in admin chat
+                {"chat_id": ADMIN_CHAT_ID, "text": "#hey_there"},
+                # confirmations
+                {"chat_id": USER_ID, "text": "thanks", "reply_to_message_id": 1},
+            ],
+        )
+    else:
+        assert_list_of_required_subdicts(
+            actual_dicts=[mc.full_kwargs for mc in bot.method_calls["send_message"]],
+            required_subdicts=[
+                {"chat_id": ADMIN_CHAT_ID, "text": "#hey_there"},
+            ],
+        )
+
+    if forward_confirmation_reaction:
+        assert_list_of_required_subdicts(
+            actual_dicts=reactions_to_dicts([mc.full_kwargs for mc in bot.method_calls["set_message_reaction"]]),
+            required_subdicts=[
+                {
+                    "chat_id": USER_ID,
+                    "message_id": 1,
+                    "reaction": [{"type": "emoji", "emoji": "🤝"}],
+                },
+            ],
+        )
+    else:
+        assert "set_message_reaction" not in bot.method_calls
+
+    bot.method_calls.clear()
+
+    await telegram.send_message_to_bot(
+        bot,
+        user_id=ADMIN_USER_ID,
+        chat_id=ADMIN_CHAT_ID,
+        text="response to user",
+        reply_to_message_id=4,
+    )
+
+    assert set(bot.method_calls.keys()) == {"copy_message", "send_message", "delete_message", "get_chat"}
+    assert_list_of_required_subdicts(
+        actual_dicts=[mc.full_kwargs for mc in bot.method_calls["copy_message"]],
+        required_subdicts=[
+            {"chat_id": USER_ID, "from_chat_id": ADMIN_CHAT_ID, "message_id": 2},
+        ],
+    )
+    assert_list_of_required_subdicts(
+        actual_dicts=[mc.full_kwargs for mc in bot.method_calls["send_message"]],
+        required_subdicts=[
+            {"chat_id": ADMIN_CHAT_ID, "text": "nice", "reply_to_message_id": 2},
+        ],
+    )
+    assert_list_of_required_subdicts(
+        actual_dicts=[mc.full_kwargs for mc in bot.method_calls["delete_message"]],
+        required_subdicts=[
+            {"chat_id": ADMIN_CHAT_ID, "message_id": 2},
+        ],
     )
 
 
