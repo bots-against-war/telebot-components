@@ -8,7 +8,7 @@ from telebot.runner import BotRunner
 
 from telebot_components.form.field import (
     FormFieldResultFormattingOpts,
-    ListInputField,
+    StringListInputField,
 )
 from telebot_components.form.form import Form
 from telebot_components.form.handler import (
@@ -20,7 +20,7 @@ from telebot_components.redis_utils.emulation import RedisEmulation
 
 form = Form(
     [
-        ListInputField(
+        StringListInputField(
             name="food",
             required=True,
             query_message="Enter your favorite foods.",

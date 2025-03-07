@@ -6,6 +6,7 @@ import hashlib
 import logging
 import math
 import re
+from abc import abstractmethod
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from dataclasses import fields as dataclass_fields
@@ -20,6 +21,7 @@ from typing import (
     Generic,
     Iterable,
     Optional,
+    Protocol,
     Type,
     TypeVar,
     Union,
@@ -28,7 +30,6 @@ from typing import (
 
 from telebot import types as tg
 from telebot.callback_data import CallbackData
-from telebot.types import ReplyMarkup
 from telebot.types import constants as tgconst
 
 from telebot_components.form.helpers.calendar_keyboard import (
@@ -188,11 +189,13 @@ class MessageProcessingResult(Generic[FieldValueT]):
     response_reply_markup: Optional[tg.ReplyMarkup] = None
     new_dynamic_data: Optional[Any] = None
     updated_inline_markup: tg.InlineKeyboardMarkup | None = None
+    delete_last_message: bool = False
 
 
 @dataclass
 class CallbackQueryProcessingContext(Generic[FieldValueT]):
     callback_payload: str
+    user: tg.User
     current_value: Optional[FieldValueT]
     language: MaybeLanguage
     dynamic_data: Any
@@ -293,10 +296,11 @@ class FormField(Generic[FieldValueT]):
         else:
             return any_text_to_str(self.echo_result_template, language).format(self.value_to_str(value, language))
 
-    def get_reply_markup(
+    async def get_reply_markup(
         self,
         language: MaybeLanguage,
         current_value: FieldValueT | None,
+        user: tg.User,
         dynamic_data: Any,
     ) -> tg.ReplyMarkup:
         return tg.ReplyKeyboardRemove()
@@ -611,10 +615,11 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
                         return enum
         return None
 
-    def get_reply_markup(
+    async def get_reply_markup(
         self,
         language: MaybeLanguage,
-        current_value: FieldValueT | None,
+        current_value: Enum | None,
+        user: tg.User,
         dynamic_data: Any,
     ) -> tg.ReplyKeyboardMarkup:
         kbd = tg.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=self.menu_row_width)
@@ -696,12 +701,13 @@ class SearchableSingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
     def custom_texts(self) -> list[AnyText]:
         return [self._as_item(e).button_label for e in self.EnumClass]
 
-    def get_reply_markup(
+    async def get_reply_markup(
         self,
         language: MaybeLanguage,
         current_value: Enum | None,
+        user: tg.User,
         dynamic_data: Any,
-    ) -> ReplyMarkup:
+    ) -> tg.ReplyMarkup:
         # NOTE: no markup at the start, as in text field; later we set to "search results"
         return tg.ReplyKeyboardRemove()
 
@@ -897,10 +903,11 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                 new_field_value=current_value,
             )
 
-    def get_reply_markup(
+    async def get_reply_markup(
         self,
         language: MaybeLanguage,
         current_value: set[Enum] | None,
+        user: tg.User,
         dynamic_data: Any,
     ) -> tg.InlineKeyboardMarkup:
         return self._get_reply_markup_for_page(language=language, current_value=current_value, page=0)
@@ -1017,8 +1024,12 @@ class DateMenuField(StrictlyInlineFormField[date]):
             selected_date=selected_value,
         )
 
-    def get_reply_markup(
-        self, language: MaybeLanguage, current_value: date | None, dynamic_data: Any
+    async def get_reply_markup(
+        self,
+        language: MaybeLanguage,
+        current_value: date | None,
+        user: tg.User,
+        dynamic_data: Any,
     ) -> tg.ReplyMarkup:
         return self._calendar_keyboard(
             year=current_value.year if current_value else None,
@@ -1055,10 +1066,11 @@ class DynamicSingleSelectField(FormField[str]):
                 + '{"dynamic_options": {<field_name>: [DynamicOption(...), ...], ...}, ...}'
             )
 
-    def get_reply_markup(
+    async def get_reply_markup(
         self,
         language: MaybeLanguage,
-        current_value: FieldValueT | None,
+        current_value: str | None,
+        user: tg.User,
         dynamic_data: Any,
     ) -> tg.ReplyKeyboardMarkup:
         options = self.parse_dynamic_data(dynamic_data)
@@ -1093,14 +1105,25 @@ class DynamicSingleSelectField(FormField[str]):
         )
 
 
-# FIXME: user custom object with .label() interface instead of strings!!!
+class HasLabel(Protocol):
+    def label(self) -> str:
+        pass
+
+
+ListInputItem = TypeVar("ListInputItem", bound=HasLabel)
 
 
 @dataclass
-class ListInputField(InlineFormField[list[str]]):
+class ListInputField(InlineFormField[list[ListInputItem]], Generic[ListInputItem]):
     """
     Variable length list input with generic item type and list editing,
     akin to chip input (e.g. https://doc.wikimedia.org/codex/latest/components/demos/chip-input.html)
+
+    Subclasses must implement parse_items method that converts a message to a list of items. Item
+    can be represented by any class that has a label() method; the output of this method will be
+    used on buttons.
+
+    See StringListInputField subclass for a trivial implementation
     """
 
     finish_field_button_caption: AnyText
@@ -1112,6 +1135,7 @@ class ListInputField(InlineFormField[list[str]]):
     max_len_reached_error_msg: AnyText | None = None
     items_per_page: int = 10
     inline_menu_row_width: int = 1
+    item_button_caption_prefix = "❌ "
 
     DELETE_ITEM_PAYLOAD_PREFIX: ClassVar[str] = "delete"
     FINISH_FIELD_PAYLOAD: ClassVar[str] = "finish"
@@ -1123,14 +1147,19 @@ class ListInputField(InlineFormField[list[str]]):
         if self.max_len is not None and self.max_len_reached_error_msg is None:
             raise ValueError("max_len_reached_error_msg must be specified, if max_len is")
 
-    async def parse_items(self, message: tg.Message) -> list[str]:
-        """Subclasses can override this for custom item parsing"""
-        return message.text_content.split()
+    @abstractmethod
+    async def parse_items(self, message: tg.Message) -> list[ListInputItem]:
+        """Subclasses must override custom item parsing"""
+        ...
+
+    async def min_max_items(self, user: tg.User) -> tuple[int | None, int | None]:
+        """Subclasses can override this for custom per-user limits"""
+        return self.min_len, self.max_len
 
     async def process_message(
         self,
-        context: MessageProcessingContext[list[str]],
-    ) -> MessageProcessingResult[list[str]]:
+        context: MessageProcessingContext[list[ListInputItem]],
+    ) -> MessageProcessingResult[list[ListInputItem]]:
         try:
             new_items = await self.parse_items(context.message)
         except BadFieldValueError as error:
@@ -1142,7 +1171,8 @@ class ListInputField(InlineFormField[list[str]]):
             )
 
         new_value = (context.current_value or []) + new_items
-        if self.max_len is not None and self.max_len_reached_error_msg is not None and len(new_value) > self.max_len:
+        _, max_ = await self.min_max_items(user=context.message.from_user)
+        if max_ is not None and self.max_len_reached_error_msg is not None and len(new_value) > max_:
             return MessageProcessingResult(
                 response_to_user=any_text_to_str(self.max_len_reached_error_msg, context.language),
                 response_reply_markup=tg.ReplyKeyboardRemove(),
@@ -1153,24 +1183,31 @@ class ListInputField(InlineFormField[list[str]]):
             response_to_user=any_text_to_str(self.query_message, context.language),
             new_field_value=new_value,
             complete_field=False,
-            updated_inline_markup=tg.InlineKeyboardMarkup([]),
+            delete_last_message=True,
         )
 
-    def get_reply_markup(
+    async def get_reply_markup(
         self,
         language: MaybeLanguage,
-        current_value: list[str] | None,
+        current_value: list[ListInputItem] | None,
+        user: tg.User,
         dynamic_data: Any,
     ) -> tg.InlineKeyboardMarkup:
-        return self._get_reply_markup_for_page(language=language, current_value=current_value, page=0)
+        return await self._get_reply_markup_for_page(
+            language=language,
+            current_value=current_value,
+            user=user,
+            page=0,
+        )
 
-    def _total_pages(self, current_value: list[str]) -> int:
+    def _total_pages(self, current_value: list[ListInputItem]) -> int:
         return int(math.ceil(len(current_value) / self.items_per_page))
 
-    def _get_reply_markup_for_page(
+    async def _get_reply_markup_for_page(
         self,
         language: MaybeLanguage,
-        current_value: list[str] | None,
+        current_value: list[ListInputItem] | None,
+        user: tg.User,
         page: int,
     ) -> tg.InlineKeyboardMarkup:
         if current_value is None:
@@ -1185,7 +1222,7 @@ class ListInputField(InlineFormField[list[str]]):
             idx = page_start_idx + idx_on_page
             buttons.append(
                 tg.InlineKeyboardButton(
-                    text=f"❌ {item}",
+                    text=self.item_button_caption_prefix + item.label(),
                     callback_data=self.new_callback_data(payload=self.DELETE_ITEM_PAYLOAD_PREFIX + str(idx)),
                 )
             )
@@ -1208,9 +1245,8 @@ class ListInputField(InlineFormField[list[str]]):
                 next_page_button if page < total_pages - 1 else noop_button,
             )
         current_len = len(current_value)
-        if (self.min_len is None or current_len >= self.min_len) and (
-            self.max_len is None or current_len <= self.max_len
-        ):
+        min_, max_ = await self.min_max_items(user)
+        if (min_ is None or current_len >= min_) and (max_ is None or current_len <= max_):
             keyboard.row(
                 tg.InlineKeyboardButton(
                     text=any_text_to_str(self.finish_field_button_caption, language),
@@ -1220,8 +1256,8 @@ class ListInputField(InlineFormField[list[str]]):
         return keyboard
 
     async def process_callback_query(
-        self, context: CallbackQueryProcessingContext[list[str]]
-    ) -> CallbackQueryProcessingResult[list[str]]:
+        self, context: CallbackQueryProcessingContext[list[ListInputItem]]
+    ) -> CallbackQueryProcessingResult[list[ListInputItem]]:
         current_value = context.current_value or []
         try:
             if context.callback_payload == self.NOOP_PAYLOAD:
@@ -1242,9 +1278,10 @@ class ListInputField(InlineFormField[list[str]]):
                 to_page = int(context.callback_payload.removeprefix(self.TO_PAGE_PAYLOAD_PREFIX))
                 return CallbackQueryProcessingResult(
                     response_to_user=None,
-                    updated_inline_markup=self._get_reply_markup_for_page(
+                    updated_inline_markup=await self._get_reply_markup_for_page(
                         language=context.language,
                         current_value=current_value,
+                        user=context.user,
                         page=to_page,
                     ),
                     complete_field=False,
@@ -1259,9 +1296,10 @@ class ListInputField(InlineFormField[list[str]]):
                     page -= 1
                 return CallbackQueryProcessingResult(
                     response_to_user=None,
-                    updated_inline_markup=self._get_reply_markup_for_page(
+                    updated_inline_markup=await self._get_reply_markup_for_page(
                         language=context.language,
                         current_value=new_value,
+                        user=context.user,
                         page=page,
                     ),
                     complete_field=False,
@@ -1278,5 +1316,15 @@ class ListInputField(InlineFormField[list[str]]):
                 new_field_value=current_value,
             )
 
-    def value_to_str(self, value: list[str], language: MaybeLanguage) -> str:
-        return ", ".join(value)
+    def value_to_str(self, value: list[ListInputItem], language: MaybeLanguage) -> str:
+        return ", ".join(v.label() for v in value)
+
+
+class str_with_label(str):
+    def label(self) -> str:
+        return self
+
+
+class StringListInputField(ListInputField[str_with_label]):
+    async def parse_items(self, message: tg.Message) -> list[str_with_label]:
+        return [str_with_label(s) for s in message.text_content.split()]

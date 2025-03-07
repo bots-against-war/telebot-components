@@ -123,7 +123,8 @@ class _FormAction(Enum):
 class _UserAction:
     send_message_html: Optional[str]
     send_reply_markup: tg.ReplyMarkup
-    updated_inline_markup: Optional[tg.ReplyMarkup] = None
+    update_last_message_markup: tg.ReplyMarkup | None = None
+    delete_last_message: bool = False
 
 
 @dataclass
@@ -186,10 +187,11 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
 
         return " ".join(sentences)
 
-    def get_current_field_reply_markup(self, language: MaybeLanguage) -> tg.ReplyMarkup:
-        return self.current_field.get_reply_markup(
-            language,
+    async def get_current_field_reply_markup(self, language: MaybeLanguage, user: tg.User) -> tg.ReplyMarkup:
+        return await self.current_field.get_reply_markup(
+            language=language,
             current_value=self.result_so_far.get(self.current_field.name),
+            user=user,
             dynamic_data=self.dynamic_data,
         )
 
@@ -227,8 +229,8 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
                     _FormAction.KEEP_GOING,
                     user_action=_UserAction(
                         send_message_html=form_handler_config.unsupported_cmd_error_msg(language),
-                        send_reply_markup=self.get_current_field_reply_markup(language),
-                        updated_inline_markup=result.updated_inline_markup,
+                        send_reply_markup=await self.get_current_field_reply_markup(language, message.from_user),
+                        update_last_message_markup=result.updated_inline_markup,
                     ),
                 )
         else:
@@ -259,8 +261,12 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
                 _FormAction.KEEP_GOING,
                 user_action=_UserAction(
                     send_message_html=join_paragraphs(reply_paragraphs),
-                    send_reply_markup=result.response_reply_markup or self.get_current_field_reply_markup(language),
-                    updated_inline_markup=result.updated_inline_markup,
+                    send_reply_markup=(
+                        result.response_reply_markup
+                        or (await self.get_current_field_reply_markup(language, user=message.from_user))
+                    ),
+                    update_last_message_markup=result.updated_inline_markup,
+                    delete_last_message=result.delete_last_message,
                 ),
             )
 
@@ -278,7 +284,7 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
                 user_action=_UserAction(
                     send_message_html=join_paragraphs(reply_paragraphs) if reply_paragraphs else None,
                     send_reply_markup=tg.ReplyKeyboardRemove(),
-                    updated_inline_markup=result.updated_inline_markup,
+                    update_last_message_markup=result.updated_inline_markup,
                 ),
             )
         else:
@@ -290,8 +296,11 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
                 _FormAction.KEEP_GOING,
                 user_action=_UserAction(
                     send_message_html=join_paragraphs(reply_paragraphs),
-                    send_reply_markup=result.response_reply_markup or self.get_current_field_reply_markup(language),
-                    updated_inline_markup=result.updated_inline_markup,
+                    send_reply_markup=(
+                        result.response_reply_markup
+                        or await self.get_current_field_reply_markup(language, user=message.from_user)
+                    ),
+                    update_last_message_markup=result.updated_inline_markup,
                 ),
             )
 
@@ -311,6 +320,7 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
                 callback_payload=callback_data["payload"],
                 current_value=self.result_so_far.get(self.current_field.name),
                 language=language,
+                user=call.from_user,
                 dynamic_data=self.dynamic_data,
                 logger=self.logger,
             )
@@ -337,14 +347,14 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
             else:
                 self.current_field = next_field
                 paragraphs.append(await self.get_current_field_message(call.from_user, language, form_handler_config))
-                send_reply_markup = self.get_current_field_reply_markup(language)
+                send_reply_markup = await self.get_current_field_reply_markup(language, user=call.from_user)
 
         return _FormStateUpdateEffect(
             form_action=form_action,
             user_action=_UserAction(
                 send_message_html=join_paragraphs(paragraphs),
                 send_reply_markup=send_reply_markup,
-                updated_inline_markup=result.updated_inline_markup,
+                update_last_message_markup=result.updated_inline_markup,
             ),
         )
 
@@ -414,7 +424,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
 
         async def form_action_handler(
             user: tg.User,
-            editable_message_id: int | None,
+            last_message_id: int | None,
             form_state_updater: Callable[[_FormState, MaybeLanguage], Coroutine[None, None, _FormStateUpdateEffect]],
             form_exit_context_constructor: Callable[[AsyncTeleBot, FormResultT], FormExitContext],
         ):
@@ -446,17 +456,21 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
 
             user_action = state_update_effect.user_action
             if user_action is not None:
-                if user_action.updated_inline_markup is not None:
-                    edited_message_id = editable_message_id or (await self.last_sent_msg_id_store.load(user_id))
-                    if edited_message_id is not None:
-                        try:
-                            await bot.edit_message_reply_markup(
-                                chat_id=user.id,
-                                message_id=edited_message_id,
-                                reply_markup=user_action.updated_inline_markup,
-                            )
-                        except Exception:
-                            logging.debug("Error editing message reply markup", exc_info=True)
+                last_message_id_ = last_message_id or (await self.last_sent_msg_id_store.load(user_id))
+                if user_action.update_last_message_markup is not None and last_message_id_ is not None:
+                    try:
+                        await bot.edit_message_reply_markup(
+                            chat_id=user.id,
+                            message_id=last_message_id_,
+                            reply_markup=user_action.update_last_message_markup,
+                        )
+                    except Exception:
+                        logging.debug("Error editing message reply markup", exc_info=True)
+                if user_action.delete_last_message and last_message_id_ is not None:
+                    try:
+                        await bot.delete_message(chat_id=user.id, message_id=last_message_id_)
+                    except Exception:
+                        logging.debug("Error deleting message", exc_info=True)
                 if user_action.send_message_html:
                     message = await bot.send_message(
                         user_id,
@@ -487,7 +501,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
 
             await form_action_handler(
                 user=message.from_user,
-                editable_message_id=None,
+                last_message_id=None,
                 form_state_updater=form_state_updater,
                 form_exit_context_constructor=form_exit_context_constructor,
             )
@@ -507,7 +521,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
             try:
                 await form_action_handler(
                     user=call.from_user,
-                    editable_message_id=call.message.id,
+                    last_message_id=call.message.id,
                     form_state_updater=form_state_updater,
                     form_exit_context_constructor=form_exit_context_constructor,
                 )
@@ -540,7 +554,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
                         await initial_form_state.get_current_field_message(user, language, self.config),
                     ]
                 ),
-                reply_markup=initial_form_state.get_current_field_reply_markup(language),
+                reply_markup=await initial_form_state.get_current_field_reply_markup(language, user=user),
                 parse_mode="HTML",
             )
         else:
@@ -552,7 +566,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
             message = await bot.send_message(
                 user.id,
                 text=await initial_form_state.get_current_field_message(user, language, self.config),
-                reply_markup=initial_form_state.get_current_field_reply_markup(language),
+                reply_markup=await initial_form_state.get_current_field_reply_markup(language, user=user),
                 parse_mode="HTML",
             )
         await self.last_sent_msg_id_store.save(user.id, message.id)
