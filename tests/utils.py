@@ -115,6 +115,20 @@ def reply_markups_to_dict(method_call_kwargs: list[dict[str, Any]]) -> list[dict
     ]
 
 
+def reactions_to_dicts(method_call_kwargs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            k: (
+                [item.to_dict() if isinstance(item, tg.ReactionType) else item for item in v]
+                if isinstance(v, list)
+                else v
+            )
+            for k, v in kw.items()
+        }
+        for kw in method_call_kwargs
+    ]
+
+
 class TelegramServerMock:
     def __init__(self, admin_chats: set[int] | None = None) -> None:
         self._message_id_counter = 0
