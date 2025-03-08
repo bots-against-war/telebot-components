@@ -186,6 +186,7 @@ class MessageProcessingResult(Generic[FieldValueT]):
     response_to_user: Optional[str]
     new_field_value: Optional[FieldValueT]
     complete_field: bool
+    ask_for_retry: bool = False
     response_reply_markup: Optional[tg.ReplyMarkup] = None
     new_dynamic_data: Optional[Any] = None
     updated_inline_markup: tg.InlineKeyboardMarkup | None = None
@@ -268,7 +269,8 @@ class FormField(Generic[FieldValueT]):
             return MessageProcessingResult(
                 response_to_user=any_text_to_str(error.msg, context.language),
                 new_field_value=None,
-                complete_field=True,
+                complete_field=False,
+                ask_for_retry=True,
             )
 
     def parse(self, message: tg.Message) -> FieldValueT:
@@ -519,6 +521,7 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
                 response_to_user=any_text_to_str(self.attachments_expected_error_msg, language),
                 new_field_value=None,
                 complete_field=False,
+                ask_for_retry=True,
             )
         media_group_id = message.media_group_id
         self.logger.debug(f"{self.__class__.__name__} got a new media: {media_group_id = } ")
@@ -531,6 +534,7 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
                     response_to_user=any_text_to_str(self.only_one_media_message_allowed_error_msg, language),
                     new_field_value=None,
                     complete_field=False,
+                    ask_for_retry=True,
                 )
             if media_group_id is None:  # single media message
                 if self.is_attachment_allowed(attachment):
@@ -544,6 +548,7 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
                         response_to_user=any_text_to_str(self.bad_attachment_type_error_msg, language),
                         new_field_value=None,
                         complete_field=False,
+                        ask_for_retry=True,
                     )
             else:
                 # first message in a media group — waiting for the rest of it
@@ -567,6 +572,7 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
                         response_to_user=any_text_to_str(self.bad_attachment_type_error_msg, language),
                         new_field_value=None,
                         complete_field=False,
+                        ask_for_retry=True,
                     )
         # second or later message in a media group
         else:
@@ -576,7 +582,8 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
                 return MessageProcessingResult(
                     response_to_user="Something went wrong...",
                     new_field_value=None,
-                    complete_field=True,
+                    complete_field=False,
+                    ask_for_retry=True,
                 )
             else:
                 self.logger.debug("Second-or-later attachment in a media group, adding it to stash")
@@ -784,6 +791,7 @@ class StrictlyInlineFormField(InlineFormField[FieldValueT]):
             response_to_user=any_text_to_str(self.please_use_inline_menu, context.language),
             new_field_value=None,
             complete_field=False,
+            ask_for_retry=True,
         )
 
 
@@ -1097,6 +1105,7 @@ class DynamicSingleSelectField(FormField[str]):
                 response_to_user=any_text_to_str(self.invalid_enum_value_error_msg, context.language),
                 new_field_value=None,
                 complete_field=False,
+                ask_for_retry=True,
             )
         return MessageProcessingResult(
             response_to_user=self.get_result_message(selected.id, context.language),
@@ -1167,7 +1176,7 @@ class ListInputField(InlineFormField[list[ListInputItem]], Generic[ListInputItem
                 response_to_user=any_text_to_str(error.msg, context.language),
                 new_field_value=None,
                 complete_field=False,
-                updated_inline_markup=tg.InlineKeyboardMarkup([]),
+                ask_for_retry=True,
             )
 
         new_value = (context.current_value or []) + new_items
@@ -1179,12 +1188,13 @@ class ListInputField(InlineFormField[list[ListInputItem]], Generic[ListInputItem
                 new_field_value=context.current_value,
                 complete_field=False,
             )
-        return MessageProcessingResult(
-            response_to_user=any_text_to_str(self.query_message, context.language),
-            new_field_value=new_value,
-            complete_field=False,
-            delete_last_message=True,
-        )
+        else:
+            return MessageProcessingResult(
+                response_to_user=any_text_to_str(self.query_message, context.language),
+                new_field_value=new_value,
+                complete_field=False,
+                delete_last_message=True,
+            )
 
     async def get_reply_markup(
         self,

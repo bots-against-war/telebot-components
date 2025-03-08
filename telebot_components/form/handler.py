@@ -255,7 +255,7 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
         if not result.complete_field:
             if result.response_to_user is not None:
                 reply_paragraphs.append(result.response_to_user)
-            if result.new_field_value is None:
+            if result.ask_for_retry and result.new_field_value is None:
                 reply_paragraphs.append(any_text_to_str(form_handler_config.retry_field_msg, language))
             return _FormStateUpdateEffect(
                 _FormAction.KEEP_GOING,
