@@ -15,6 +15,7 @@ from telebot_components.form.field import (
     NextFieldGetter,
     PlainTextField,
     SingleSelectField,
+    StringListInputField,
 )
 from telebot_components.form.form import Form, FormBranch
 from telebot_components.form.handler import (
@@ -513,3 +514,183 @@ async def test_dynamic_select_form(redis: RedisInterface) -> None:
     }
 
     assert form.result_to_html(ctx.result, lang=None) == "<b>Name</b>: Alice\n<b>Number</b>: 1564\n<b>Letter</b>: C"
+
+
+async def test_list_input(redis: RedisInterface) -> None:
+    bot_prefix = generate_str()
+
+    form = Form(
+        [
+            StringListInputField(
+                name="things",
+                required=True,
+                query_message="Choose some things",
+                finish_field_button_caption="OK",
+                next_page_button_caption=">",
+                prev_page_button_caption="<",
+                min_len=3,
+                max_len=12,
+                max_len_reached_error_msg="Max len reached!",
+                items_per_page=5,
+                result_formatting_opts=FormFieldResultFormattingOpts(descr="Things", is_multiline=True),
+            ),
+        ]
+    )
+
+    handler = FormHandler[Any, Any](
+        redis=redis,
+        bot_prefix=bot_prefix,
+        name="testing-form",
+        form=form,
+        config=FormHandlerConfig(
+            echo_filled_field=False,
+            retry_field_msg="retry",
+            unsupported_cmd_error_template="unsupported ({})",
+            cancelling_because_of_error_template="error: {}",
+            form_starting_template="Starting form",
+            can_skip_field_template="({} to skip)",
+            cant_skip_field_msg="cant skip this",
+        ),
+    )
+
+    bot = MockedAsyncTeleBot(token="foobar")
+
+    completed_ctxs: list[FormExitContext] = []
+
+    async def on_form_completed(ctx: FormExitContext):
+        completed_ctxs.append(ctx)
+
+    handler.setup(bot, on_form_completed=on_form_completed)
+
+    @bot.message_handler(commands=["form"])
+    async def form_start(message: tg.Message) -> None:
+        await handler.start(bot, user=message.from_user)
+
+    telegram = TelegramServerMock()
+
+    await telegram.send_message_to_bot(bot, user_id=1, text="/form")
+    assert len(bot.method_calls) == 1
+    assert_list_of_required_subdicts(
+        extract_full_kwargs(bot.method_calls["send_message"]),
+        [{"chat_id": 1, "text": "Starting form\n\nChoose some things"}],
+    )
+    bot.method_calls.clear()
+
+    await telegram.send_message_to_bot(bot, user_id=1, text="ball glass")
+    assert len(bot.method_calls) == 2
+    assert_list_of_required_subdicts(
+        extract_full_kwargs(bot.method_calls["delete_message"]), [{"chat_id": 1, "message_id": 2}]
+    )
+    assert_list_of_required_subdicts(
+        reply_markups_to_dict(extract_full_kwargs(bot.method_calls["send_message"])),
+        [
+            {
+                "chat_id": 1,
+                "text": "Choose some things",
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": "❌ ball", "callback_data": "inline_field:things:delete0"}],
+                        [{"text": "❌ glass", "callback_data": "inline_field:things:delete1"}],
+                    ]
+                },
+            }
+        ],
+    )
+    bot.method_calls.clear()
+
+    await telegram.press_button(bot, user_id=1, callback_data="inline_field:things:delete1")
+    assert_list_of_required_subdicts(
+        reply_markups_to_dict(extract_full_kwargs(bot.method_calls["edit_message_reply_markup"])),
+        [
+            {
+                "chat_id": 1,
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": "❌ ball", "callback_data": "inline_field:things:delete0"}],
+                    ]
+                },
+            }
+        ],
+    )
+    bot.method_calls.clear()
+
+    await telegram.send_message_to_bot(bot, user_id=1, text="car chair table flower window")
+    assert len(bot.method_calls) == 2
+    assert_list_of_required_subdicts(
+        extract_full_kwargs(bot.method_calls["delete_message"]), [{"chat_id": 1, "message_id": 4}]
+    )
+    assert_list_of_required_subdicts(
+        reply_markups_to_dict(extract_full_kwargs(bot.method_calls["send_message"])),
+        [
+            {
+                "chat_id": 1,
+                "text": "Choose some things",
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": "❌ ball", "callback_data": "inline_field:things:delete0"}],
+                        [{"text": "❌ car", "callback_data": "inline_field:things:delete1"}],
+                        [{"text": "❌ chair", "callback_data": "inline_field:things:delete2"}],
+                        [{"text": "❌ table", "callback_data": "inline_field:things:delete3"}],
+                        [{"text": "❌ flower", "callback_data": "inline_field:things:delete4"}],
+                        [
+                            {"text": " ", "callback_data": "inline_field:things:noop"},
+                            {"text": ">", "callback_data": "inline_field:things:topage1"},
+                        ],
+                        [{"text": "OK", "callback_data": "inline_field:things:finish"}],
+                    ]
+                },
+            }
+        ],
+    )
+    bot.method_calls.clear()
+
+    await telegram.press_button(bot, user_id=1, callback_data="inline_field:things:topage1")
+    assert_list_of_required_subdicts(
+        reply_markups_to_dict(extract_full_kwargs(bot.method_calls["edit_message_reply_markup"])),
+        [
+            {
+                "chat_id": 1,
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": "❌ window", "callback_data": "inline_field:things:delete5"}],
+                        [
+                            {"text": "<", "callback_data": "inline_field:things:topage0"},
+                            {"text": " ", "callback_data": "inline_field:things:noop"},
+                        ],
+                        [{"text": "OK", "callback_data": "inline_field:things:finish"}],
+                    ]
+                },
+            }
+        ],
+    )
+    bot.method_calls.clear()
+
+    await telegram.press_button(bot, user_id=1, callback_data="inline_field:things:delete5")
+    assert_list_of_required_subdicts(
+        reply_markups_to_dict(extract_full_kwargs(bot.method_calls["edit_message_reply_markup"])),
+        [
+            {
+                "chat_id": 1,
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": "❌ ball", "callback_data": "inline_field:things:delete0"}],
+                        [{"text": "❌ car", "callback_data": "inline_field:things:delete1"}],
+                        [{"text": "❌ chair", "callback_data": "inline_field:things:delete2"}],
+                        [{"text": "❌ table", "callback_data": "inline_field:things:delete3"}],
+                        [{"text": "❌ flower", "callback_data": "inline_field:things:delete4"}],
+                        [{"text": "OK", "callback_data": "inline_field:things:finish"}],
+                    ]
+                },
+            }
+        ],
+    )
+    bot.method_calls.clear()
+
+    await telegram.press_button(bot, user_id=1, callback_data="inline_field:things:finish")
+
+    assert len(completed_ctxs) == 1
+    ctx = completed_ctxs[0]
+    assert ctx.bot is bot
+    assert ctx.result == {"things": ["ball", "car", "chair", "table", "flower"]}
+
+    assert form.result_to_html(ctx.result, lang=None) == "<b>Things</b>\nball, car, chair, table, flower\n"
