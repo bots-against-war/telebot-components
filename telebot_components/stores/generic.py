@@ -618,9 +618,6 @@ class PubSub(PrefixedStore, Generic[ValueT]):
             if "BUSYGROUP" not in str(e):
                 raise
 
-    def _log_marker(self, group: str, name: str) -> str:
-        return f"{self._stream} -> {group}/{name}"
-
     async def consume(
         self,
         group: str,
@@ -630,11 +627,12 @@ class PubSub(PrefixedStore, Generic[ValueT]):
         block_period: datetime.timedelta = datetime.timedelta(seconds=1),
         retry: Literal["never", "sometimes", "only"] = "sometimes",
         retry_after: datetime.timedelta = datetime.timedelta(seconds=300),
+        error_backoff: datetime.timedelta = datetime.timedelta(seconds=3),
     ) -> AsyncGenerator[ValueT, None]:
         if auto_create:
             await self.ensure_group_exists(group)
 
-        log_marker = self._log_marker(group, consumer_name)
+        log_marker = f"{self._stream} -> {group}/{consumer_name}"
         self.logger.debug(f"{log_marker}: starting ({consume_at_once=})")
 
         while not is_shutting_down():
@@ -657,7 +655,7 @@ class PubSub(PrefixedStore, Generic[ValueT]):
                 self.logger.exception(
                     f"{log_marker}: error consuming, will try again; some messages might be still pending"
                 )
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(error_backoff.total_seconds())
 
             # reclaiming and retrying pending messages
             try:
@@ -665,9 +663,6 @@ class PubSub(PrefixedStore, Generic[ValueT]):
                     retry == "sometimes" and (self._last_retry_timestamp + retry_after.total_seconds() < time.time())
                 )
                 if do_retry:
-                    self.logger.info(
-                        f"{log_marker}: retrying messages that have been idle for longer than {retry_after}"
-                    )
                     self._last_retry_timestamp = time.time()
                     cursor = "0-0"
                     processing_pending_messages = True
@@ -691,4 +686,4 @@ class PubSub(PrefixedStore, Generic[ValueT]):
                             await self.redis.xack(self._stream, group, message_id)
             except Exception:
                 self.logger.exception(f"{log_marker}: error consuming retried messages, will try again")
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(error_backoff.total_seconds())
