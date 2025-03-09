@@ -37,7 +37,7 @@ async def test_redis_stream(redis: RedisInterface) -> None:
                     group=group,
                     consumer_name=f"consumer-{idx}",
                     consume_at_once=1,
-                    auto_retry_after=datetime.timedelta(seconds=2),
+                    retry_after=datetime.timedelta(seconds=2),
                     block_period=datetime.timedelta(seconds=0.1),
                 ):
                     await asyncio.sleep(0.01 * random.random())
