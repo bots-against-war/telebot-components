@@ -396,6 +396,19 @@ async def test_dynamic_select_form(redis: RedisInterface) -> None:
                 menu_row_width=1,
                 result_formatting_opts=FormFieldResultFormattingOpts(descr="Letter", is_multiline=False),
             ),
+            DynamicSingleSelectField(
+                name="color",
+                required=True,
+                query_message="Select a color.",
+                invalid_enum_value_error_msg="nope",
+                menu_row_width=3,
+                result_formatting_opts=FormFieldResultFormattingOpts(descr="Color", is_multiline=False),
+                default_options=[
+                    DynamicOption(id="red", label="Red"),
+                    DynamicOption(id="green", label="Green"),
+                    DynamicOption(id="blue", label="Blue"),
+                ],
+            ),
         ]
     )
 
@@ -502,6 +515,25 @@ async def test_dynamic_select_form(redis: RedisInterface) -> None:
     bot.method_calls.clear()
 
     await telegram.send_message_to_bot(bot, user_id=1, text="C")
+    assert len(bot.method_calls) == 1
+    assert_list_of_required_subdicts(
+        reply_markups_to_dict(extract_full_kwargs(bot.method_calls["send_message"])),
+        [
+            {
+                "chat_id": 1,
+                "text": "Select a color.",
+                "parse_mode": "HTML",
+                "reply_markup": {
+                    "keyboard": [[{"text": "Red"}, {"text": "Green"}, {"text": "Blue"}]],
+                    "one_time_keyboard": True,
+                    "resize_keyboard": True,
+                },
+            }
+        ],
+    )
+    bot.method_calls.clear()
+
+    await telegram.send_message_to_bot(bot, user_id=1, text="Green")
     assert len(bot.method_calls) == 0
 
     assert len(completed_ctxs) == 1
@@ -511,9 +543,13 @@ async def test_dynamic_select_form(redis: RedisInterface) -> None:
         "name": "Alice",
         "number": "1564",
         "letter": "C",
+        "color": "green",
     }
 
-    assert form.result_to_html(ctx.result, lang=None) == "<b>Name</b>: Alice\n<b>Number</b>: 1564\n<b>Letter</b>: C"
+    assert (
+        form.result_to_html(ctx.result, lang=None)
+        == "<b>Name</b>: Alice\n<b>Number</b>: 1564\n<b>Letter</b>: C\n<b>Color</b>: green"
+    )
 
 
 async def test_list_input(redis: RedisInterface) -> None:
