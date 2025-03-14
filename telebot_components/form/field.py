@@ -97,7 +97,9 @@ class NextFieldGetter(Generic[FieldValueT]):
 
     @classmethod
     def by_mapping(
-        cls, value_to_next_field_name: Dict[Optional[FieldValueT], Optional[str]], default: Optional[str]
+        cls,
+        value_to_next_field_name: Dict[Optional[FieldValueT], Optional[str]],
+        default: Optional[str],
     ) -> "NextFieldGetter":
         possible_next_field_names = [next_field_name for v, next_field_name in value_to_next_field_name.items()]
         possible_next_field_names.append(default)
@@ -948,7 +950,8 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
         keyboard.add(*option_buttons, row_width=self.inline_menu_row_width)
         if self.total_pages > 1:
             noop_button = tg.InlineKeyboardButton(
-                text=" ", callback_data=self.new_callback_data(payload=self.NOOP_PAYLOAD)
+                text=" ",
+                callback_data=self.new_callback_data(payload=self.NOOP_PAYLOAD),
             )
             prev_page_button = tg.InlineKeyboardButton(
                 text=any_text_to_str(self.prev_page_button_caption, language),
@@ -1005,7 +1008,11 @@ class DateMenuField(StrictlyInlineFormField[date]):
             )
         elif payload.action is CalendarAction.SELECT:
             # casts are for type system, runtime validation is performed in CalendarCallbackPayload
-            selected_date = date(cast(int, payload.year), cast(int, payload.month), cast(int, payload.day))
+            selected_date = date(
+                cast(int, payload.year),
+                cast(int, payload.month),
+                cast(int, payload.day),
+            )
             return CallbackQueryProcessingResult(
                 response_to_user=(
                     any_text_to_str(self.echo_result_template, context.language).format(selected_date)
@@ -1060,19 +1067,33 @@ class DynamicOption:
 
 @dataclass
 class DynamicSingleSelectField(FormField[str]):
+    """
+    Like SingleSelectField, but instead of defining options as Enum allows dynamic reply
+    options. The options must be passed through form's dynamic_data in the format:
+
+    dynamic_data={
+        "dynamic_options": {
+            "field-name-1": [DynamicOption(...), ...],
+            "field-name-2": [DynamicOption(...), ...],
+            ...
+        }
+    }
+    """
+
     invalid_enum_value_error_msg: AnyText
     menu_row_width: int = 2
+    default_options: list[DynamicOption] | None = None
 
     def parse_dynamic_data(self, dynamic_data: Any) -> list[DynamicOption]:
         try:
             options: list[DynamicOption] = dynamic_data["dynamic_options"][self.name]
             assert isinstance(options, list) and len(options) > 0 and all(isinstance(o, DynamicOption) for o in options)
-            return options
+            res: list[DynamicOption] | None = options
         except Exception:
-            raise ValueError(
-                "Invalid dynamic data format, expected "
-                + '{"dynamic_options": {<field_name>: [DynamicOption(...), ...], ...}, ...}'
-            )
+            res = self.default_options
+        if res is None:
+            raise RuntimeError("Failed to parse dynamic options, and default options are not set")
+        return res
 
     async def get_reply_markup(
         self,
@@ -1240,7 +1261,8 @@ class ListInputField(InlineFormField[list[ListInputItem]], Generic[ListInputItem
         keyboard.add(*buttons, row_width=self.inline_menu_row_width)
         if total_pages > 1:
             noop_button = tg.InlineKeyboardButton(
-                text=" ", callback_data=self.new_callback_data(payload=self.NOOP_PAYLOAD)
+                text=" ",
+                callback_data=self.new_callback_data(payload=self.NOOP_PAYLOAD),
             )
             prev_page_button = tg.InlineKeyboardButton(
                 text=any_text_to_str(self.prev_page_button_caption, language),
