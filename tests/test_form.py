@@ -9,6 +9,7 @@ from telebot.test_util import MockedAsyncTeleBot
 from telebot_components.form.field import (
     DynamicOption,
     DynamicSingleSelectField,
+    DynamicSingleSelectFieldFull,
     FormField,
     FormFieldResultExportOpts,
     FormFieldResultFormattingOpts,
@@ -380,7 +381,7 @@ async def test_dynamic_select_form(redis: RedisInterface) -> None:
                 empty_text_error_msg="empty test error",
                 result_formatting_opts=FormFieldResultFormattingOpts(descr="Name", is_multiline=False),
             ),
-            DynamicSingleSelectField(
+            DynamicSingleSelectFieldFull(
                 name="number",
                 required=True,
                 query_message="Select a number.",
@@ -445,9 +446,9 @@ async def test_dynamic_select_form(redis: RedisInterface) -> None:
             dynamic_data={
                 "dynamic_options": {
                     "number": [
-                        DynamicOption(id="1", label="1"),
-                        DynamicOption(id="3", label="3"),
-                        DynamicOption(id="1564", label="1564"),
+                        DynamicOption(id="one", label="1"),
+                        DynamicOption(id="three", label="3"),
+                        DynamicOption(id="a lot", label="1564"),
                     ],
                     "letter": [
                         DynamicOption(id="A", label="A"),
@@ -541,7 +542,7 @@ async def test_dynamic_select_form(redis: RedisInterface) -> None:
     assert ctx.bot is bot
     assert ctx.result == {
         "name": "Alice",
-        "number": "1564",
+        "number": DynamicOption(id="a lot", label="1564"),
         "letter": "C",
         "color": "green",
     }

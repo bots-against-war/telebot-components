@@ -1065,8 +1065,11 @@ class DynamicOption:
     label: AnyText
 
 
+DynamicSingleSelectFieldValueT = TypeVar("DynamicSingleSelectFieldValueT", bound="DynamicOption | str")
+
+
 @dataclass
-class DynamicSingleSelectField(FormField[str]):
+class _DynamicSingleSelectFieldBase(FormField[DynamicSingleSelectFieldValueT], Generic[DynamicSingleSelectFieldValueT]):
     """
     Like SingleSelectField, but instead of defining options as Enum allows dynamic reply
     options. The options must be passed through form's dynamic_data in the format:
@@ -1098,7 +1101,7 @@ class DynamicSingleSelectField(FormField[str]):
     async def get_reply_markup(
         self,
         language: MaybeLanguage,
-        current_value: str | None,
+        current_value: DynamicSingleSelectFieldValueT | None,
         user: tg.User,
         dynamic_data: Any,
     ) -> tg.ReplyKeyboardMarkup:
@@ -1118,21 +1121,48 @@ class DynamicSingleSelectField(FormField[str]):
                         return option
         return None
 
-    async def process_message(self, context: MessageProcessingContext) -> MessageProcessingResult[str]:
+    def custom_texts(self) -> list[AnyText]:
+        return [opt.label for opt in self.default_options or []]
+
+    def value_from_option(self, opt: DynamicOption) -> DynamicSingleSelectFieldValueT:
+        raise NotImplementedError()
+
+    async def process_message(
+        self, context: MessageProcessingContext
+    ) -> MessageProcessingResult[DynamicSingleSelectFieldValueT]:
         options = self.parse_dynamic_data(context.dynamic_data)
-        selected = self.match_option(options=options, text=context.message.text_content)
-        if selected is None:
+        selected_opt = self.match_option(options=options, text=context.message.text_content)
+        if selected_opt is None:
             return MessageProcessingResult(
                 response_to_user=any_text_to_str(self.invalid_enum_value_error_msg, context.language),
                 new_field_value=None,
                 complete_field=False,
                 ask_for_retry=True,
             )
+        value = self.value_from_option(selected_opt)
         return MessageProcessingResult(
-            response_to_user=self.get_result_message(selected.id, context.language),
-            new_field_value=selected.id,
+            response_to_user=self.get_result_message(value, context.language),
+            new_field_value=value,
             complete_field=True,
         )
+
+
+# this is a legacy backwards-compatible class storing only option ids
+# newer code should use DynamicSingleSelectFieldFull
+class DynamicSingleSelectField(_DynamicSingleSelectFieldBase[str]):
+    def value_from_option(self, opt: DynamicOption) -> str:
+        return opt.id
+
+
+class DynamicSingleSelectFieldFull(_DynamicSingleSelectFieldBase[DynamicOption]):
+    def value_from_option(self, opt: DynamicOption) -> DynamicOption:
+        return opt
+
+    def value_id(self, value: DynamicOption) -> str:
+        return value.id
+
+    def value_to_str(self, value: DynamicOption, language: MaybeLanguage) -> str:
+        return any_text_to_str(value.label, language)
 
 
 class HasLabel(Protocol):
