@@ -1,3 +1,4 @@
+import pydantic
 import pytest
 from telebot import types as tg
 from telebot.test_util import MockedAsyncTeleBot
@@ -49,7 +50,7 @@ def example_menu() -> Menu:
                             submenu=Menu(
                                 text="pick color",
                                 menu_items=[
-                                    MenuItem(label="red", terminator="red"),
+                                    MenuItem(label="red", terminator="red", metadata=["example", "metadata"]),
                                     MenuItem(label="green", terminator="green"),
                                     MenuItem(label="blue", terminator="blue"),
                                 ],
@@ -833,3 +834,13 @@ async def test_text_markups(
         }
     ]
     bot.method_calls.clear()
+
+
+def test_menu_serialization(example_menu: Menu) -> None:
+    class Container(pydantic.BaseModel):
+        menu: Menu
+
+    dump = Container(menu=example_menu).model_dump_json(indent=2)
+    print(dump)
+    recovered = Container.model_validate_json(dump)
+    assert recovered.menu == example_menu

@@ -4,7 +4,7 @@ import hashlib
 import itertools
 import logging
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional, Union
+from typing import Any, Awaitable, Callable, Optional, Union
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
@@ -29,27 +29,21 @@ TERMINATE_MENU_CALLBACK_DATA = CallbackData("id", prefix="terminator")
 INACTIVE_BUTTON_CALLBACK_DATA = CallbackData(prefix="inactive_button")
 
 
+@dataclass
 class MenuItem:
-    def __init__(
-        self,
-        label: AnyText,
-        submenu: Optional["Menu"] = None,
-        terminator: Optional[str] = None,
-        link_url: Optional[str] = None,
-        bound_category: Optional[Category] = None,
-    ):
-        self.label = label
-        self.bound_category = bound_category
+    label: AnyText
+    submenu: Optional["Menu"] = None
+    terminator: Optional[str] = None
+    link_url: Optional[str] = None
+    bound_category: Optional[Category] = None
+    metadata: Any | None = None
 
-        self.submenu = submenu
-        self.terminator = terminator
-        self.link_url = link_url
-
+    def __post_init__(self) -> None:
         specified_options_count = sum([int(opt is not None) for opt in [self.submenu, self.terminator, self.link_url]])
         if specified_options_count != 1:
             raise ValueError(
                 "Exactly one of the arguments must be set to non-None value: submenu, terminator, or link_url, "
-                + f"but {submenu = }, {terminator = }, {link_url = }"
+                + f"but {self.submenu = }, {self.terminator = }, {self.link_url = }"
             )
 
         if self.bound_category is not None and self.terminator is None:
@@ -58,21 +52,6 @@ class MenuItem:
         self._id: Optional[str] = None
         self._legacy_id: Optional[str] = None
         self._containing_menu: Optional["Menu"] = None
-
-    def __str__(self) -> str:
-        res = f"MenuItem({self.label!r}"
-        if self.terminator:
-            res += f", terminator={self.terminator!r}"
-            if self.bound_category:
-                res += f", bound_category={self.bound_category}"
-        elif self.submenu:
-            res += f", submenu={self.submenu}"
-        elif self.link_url:
-            res += f", link_url={self.link_url!r}"
-        res += ")"
-        return res
-
-    __repr__ = __str__
 
     @property
     def id(self) -> str:
@@ -159,39 +138,40 @@ class MenuConfig:
     mechanism: MenuMechanism = MenuMechanism.INLINE_BUTTONS
 
     def __post_init__(self) -> None:
-        if self.is_text_html:
-            if self.text_markup is not TextMarkup.NONE:
-                raise ValueError("is_text_html and text_markup properties are mutually exclusive")
+        if self.is_text_html and self.text_markup is TextMarkup.NONE:
             self.text_markup = TextMarkup.HTML
 
 
+@dataclass
 class Menu:
-    def __init__(
-        self,
-        text: AnyText,
-        menu_items: list[MenuItem],
-        config: Optional[MenuConfig] = None,
-    ):
+    text: AnyText
+    menu_items: list[MenuItem]
+    config: Optional[MenuConfig] = None
+
+    def __post_init__(self) -> None:
         self.parent_menu_item: Optional["MenuItem"] = None
-        self.text = text
-        self.menu_items = menu_items
-        self._explicit_config = config
         self._id: Optional[str] = None
         self._legacy_id: Optional[str] = None
+        for item in self.menu_items:
+            item.containing_menu = self
+            if item.submenu is not None:
+                item.submenu.parent_menu_item = item
 
     @property
     def displayed_items(self) -> list[MenuItem]:
         items = self.menu_items.copy()
-        if self.config.back_label is not None and self.parent_menu_item is not None:
-            items.append(MenuItem(label=self.config.back_label, submenu=self.parent_menu_item.containing_menu))
+        if self.effective_config.back_label is not None and self.parent_menu_item is not None:
+            items.append(
+                MenuItem(label=self.effective_config.back_label, submenu=self.parent_menu_item.containing_menu)
+            )
         return items
 
     @property
-    def config(self) -> MenuConfig:
-        if self._explicit_config is not None:
-            return self._explicit_config
+    def effective_config(self) -> MenuConfig:
+        if self.config is not None:
+            return self.config
         elif self.parent_menu_item is not None:
-            return self.parent_menu_item.containing_menu.config
+            return self.parent_menu_item.containing_menu.effective_config
         else:
             return MenuConfig(
                 back_label="back",
@@ -226,7 +206,7 @@ class Menu:
         return children + grandchildren
 
     def get_keyboard_markup(self, language: MaybeLanguage) -> Union[tg.InlineKeyboardMarkup, tg.ReplyKeyboardMarkup]:
-        if self.config.mechanism.is_inline_kbd():
+        if self.effective_config.mechanism.is_inline_kbd():
             return tg.InlineKeyboardMarkup(
                 keyboard=[[menu_item.get_inline_button(language)] for menu_item in self.displayed_items]
             )
@@ -240,7 +220,7 @@ class Menu:
     def get_inactive_keyboard_markup(
         self, selected_item_id: str, language: MaybeLanguage
     ) -> tg.InlineKeyboardMarkup | None:
-        if self.config.mechanism.is_inline_kbd():
+        if self.effective_config.mechanism.is_inline_kbd():
             return tg.InlineKeyboardMarkup(
                 keyboard=[
                     [menu_item.get_inactive_inline_button(selected_item_id, language)] for menu_item in self.menu_items
@@ -305,7 +285,7 @@ class MenuHandler:
         # validating keyboard button types against menu types
         self.has_reply_keyboard_menus = False
         for menu in self.menus_list:
-            if menu.config.mechanism.is_reply_kbd():
+            if menu.effective_config.mechanism.is_reply_kbd():
                 self.has_reply_keyboard_menus = True
                 for item in menu.menu_items:
                     if item.link_url is not None:
@@ -367,7 +347,11 @@ class MenuHandler:
         for any_text in itertools.chain(
             [menu.text for menu in self.menus_list],
             [menu_item.label for menu_item in all_menu_items],
-            [menu.config.back_label for menu in self.menus_list if menu.config.back_label is not None],
+            [
+                menu.effective_config.back_label
+                for menu in self.menus_list
+                if menu.effective_config.back_label is not None
+            ],
         ):
             if self.language_store is not None:
                 self.language_store.validate_multilang(any_text)
@@ -438,14 +422,14 @@ class MenuHandler:
         if (
             current_menu_message_id is not None
             and current_menu is not None
-            and current_menu.config.mechanism.is_updateable()
-            and new_menu.config.mechanism.is_updateable()
+            and current_menu.effective_config.mechanism.is_updateable()
+            and new_menu.effective_config.mechanism.is_updateable()
         ):
             try:
                 await bot.edit_message_text(
                     chat_id=user.id,
                     text=any_text_to_str(new_menu.text, language),
-                    parse_mode=new_menu.config.text_markup.parse_mode(),
+                    parse_mode=new_menu.effective_config.text_markup.parse_mode(),
                     message_id=current_menu_message_id,
                     reply_markup=new_menu.get_keyboard_markup(language),
                 )
@@ -456,7 +440,7 @@ class MenuHandler:
         new_menu_message = await bot.send_message(
             chat_id=user.id,
             text=any_text_to_str(new_menu.text, language),
-            parse_mode=new_menu.config.text_markup.parse_mode(),
+            parse_mode=new_menu.effective_config.text_markup.parse_mode(),
             reply_markup=new_menu.get_keyboard_markup(language),
         )
         await self.last_menu_message_id_store.save(user.id, new_menu_message.id)
@@ -511,7 +495,7 @@ class MenuHandler:
             terminator_handler_result = None
 
         terminal_menu = self.menu_by_id[selected_item.containing_menu.id]
-        lock_menu = terminal_menu.config.lock_after_termination
+        lock_menu = terminal_menu.effective_config.lock_after_termination
         if terminator_handler_result is not None:
             if terminator_handler_result.lock_menu is not None:
                 lock_menu = terminator_handler_result.lock_menu
@@ -520,8 +504,8 @@ class MenuHandler:
                 reason: Optional[str] = None
                 if menu_message_id is None:
                     reason = "message id is not passed to _teminate_menu"
-                elif not terminal_menu.config.mechanism.is_updateable():
-                    reason = f"last menu has non-updateable mechanism {terminal_menu.config.mechanism}"
+                elif not terminal_menu.effective_config.mechanism.is_updateable():
+                    reason = f"last menu has non-updateable mechanism {terminal_menu.effective_config.mechanism}"
 
                 if reason is not None:
                     self.logger.error(

@@ -33,6 +33,7 @@ toml = "^0.10.2"
 urllib3 = "^1.26.18"
 diff-match-patch = "^20230430"
 aiohttp = "^3.11.6"
+pydantic = "^2.10.6"
 
 [tool.poetry.group.dev.dependencies]
 coverage = "^7.2.3"
