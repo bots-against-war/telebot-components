@@ -57,7 +57,7 @@ class MenuItem:
 
         self._id: Optional[str] = None
         self._legacy_id: Optional[str] = None
-        self._parent_menu: Optional["Menu"] = None
+        self._containing_menu: Optional["Menu"] = None
 
     def __str__(self) -> str:
         res = f"MenuItem({self.label!r}"
@@ -66,7 +66,7 @@ class MenuItem:
             if self.bound_category:
                 res += f", bound_category={self.bound_category}"
         elif self.submenu:
-            res += f", submeny={self.submenu}"
+            res += f", submenu={self.submenu}"
         elif self.link_url:
             res += f", link_url={self.link_url!r}"
         res += ")"
@@ -95,14 +95,14 @@ class MenuItem:
         self._legacy_id = legacy_id
 
     @property
-    def parent_menu(self) -> "Menu":
-        if self._parent_menu is None:
+    def containing_menu(self) -> "Menu":
+        if self._containing_menu is None:
             raise RuntimeError("MenuItem object was not properly initialized.")
-        return self._parent_menu
+        return self._containing_menu
 
-    @parent_menu.setter
-    def parent_menu(self, parent_menu: "Menu"):
-        self._parent_menu = parent_menu
+    @containing_menu.setter
+    def containing_menu(self, parent_menu: "Menu"):
+        self._containing_menu = parent_menu
 
     def get_inline_button(self, language: MaybeLanguage):
         if self.submenu is not None:
@@ -172,7 +172,7 @@ class Menu:
         menu_items: list[MenuItem],
         config: Optional[MenuConfig] = None,
     ):
-        self.parent_menu: Optional["Menu"] = None
+        self.parent_menu_item: Optional["MenuItem"] = None
         self.text = text
         self.menu_items = menu_items
         self._explicit_config = config
@@ -182,16 +182,16 @@ class Menu:
     @property
     def displayed_items(self) -> list[MenuItem]:
         items = self.menu_items.copy()
-        if self.config.back_label is not None and self.parent_menu is not None:
-            items.append(MenuItem(label=self.config.back_label, submenu=self.parent_menu))
+        if self.config.back_label is not None and self.parent_menu_item is not None:
+            items.append(MenuItem(label=self.config.back_label, submenu=self.parent_menu_item.containing_menu))
         return items
 
     @property
     def config(self) -> MenuConfig:
         if self._explicit_config is not None:
             return self._explicit_config
-        elif self.parent_menu is not None:
-            return self.parent_menu.config
+        elif self.parent_menu_item is not None:
+            return self.parent_menu_item.containing_menu.config
         else:
             return MenuConfig(
                 back_label="back",
@@ -258,6 +258,10 @@ class TerminatorContext:
     menu_message_id: Optional[int]
     terminator: str
 
+    # chronological sequence of menu items clicked by the user to arrive at the terminator
+    # top level menu item, submenu item, ..., terminator item
+    path: list[MenuItem]
+
 
 @dataclass
 class TerminatorResult:
@@ -292,12 +296,12 @@ class MenuHandler:
         for i, menu in enumerate(self.menus_list):
             menu.id = self.generate_id(i, is_legacy=False)
             menu.legacy_id = self.generate_id(i, is_legacy=True)
-        # initializing links to parent menus for children
+        # initializing links from child menus to their parents
         for menu in self.menus_list:
             for menu_item in menu.menu_items:
-                menu_item.parent_menu = menu
+                menu_item.containing_menu = menu
                 if menu_item.submenu is not None:
-                    menu_item.submenu.parent_menu = menu
+                    menu_item.submenu.parent_menu_item = menu_item
         # validating keyboard button types against menu types
         self.has_reply_keyboard_menus = False
         for menu in self.menus_list:
@@ -474,15 +478,22 @@ class MenuHandler:
         menu_message_id = menu_message_id or (menu_message.id if menu_message is not None else None)
 
         language = await self.get_maybe_language(user)
-        selected_menu_item = self.menu_item_by_id[terminal_menu_item_id]
-        terminator = selected_menu_item.terminator
+        selected_item = self.menu_item_by_id[terminal_menu_item_id]
+        terminator = selected_item.terminator
         if terminator is None:
-            self.logger.error(f"handle_terminator got non-terminating menu item: {selected_menu_item}")
+            self.logger.error(f"handle_terminator got non-terminating menu item: {selected_item}")
             return None
 
         await self.current_menu_store.drop(user.id)
-        if selected_menu_item.bound_category is not None and self.category_store is not None:
-            await self.category_store.save_user_category(user, selected_menu_item.bound_category)
+        if selected_item.bound_category is not None and self.category_store is not None:
+            await self.category_store.save_user_category(user, selected_item.bound_category)
+
+        curr_item = selected_item
+        path: list[MenuItem] = [curr_item]
+        while curr_item.containing_menu.parent_menu_item is not None:
+            curr_item = curr_item.containing_menu.parent_menu_item
+            path.append(curr_item)
+        path.reverse()
 
         try:
             terminator_handler_result = await handler(
@@ -492,13 +503,14 @@ class MenuHandler:
                     terminator=terminator,
                     menu_message=menu_message,
                     menu_message_id=menu_message_id,
+                    path=path,
                 )
             )
         except Exception:
             self.logger.exception("Unexpected error handling terminal menu option, ignoring")
             terminator_handler_result = None
 
-        terminal_menu = self.menu_by_id[selected_menu_item.parent_menu.id]
+        terminal_menu = self.menu_by_id[selected_item.containing_menu.id]
         lock_menu = terminal_menu.config.lock_after_termination
         if terminator_handler_result is not None:
             if terminator_handler_result.lock_menu is not None:

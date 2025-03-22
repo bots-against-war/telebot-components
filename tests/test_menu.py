@@ -1,5 +1,3 @@
-from typing import List
-
 import pytest
 from telebot import types as tg
 from telebot.test_util import MockedAsyncTeleBot
@@ -99,11 +97,11 @@ async def test_menu_handler_basic(example_menu: Menu, legacy_id_in_buttons: bool
     telegram = TelegramServerMock()
 
     user = tg.User(id=1312, is_bot=False, first_name="Max", last_name="Slater")
-    seen_terminators: List[str] = []
+    seen_terminator_contexts: list[TerminatorContext] = []
     terminator_context_check_failed = False
 
     async def on_menu_termination(context: TerminatorContext) -> None:
-        seen_terminators.append(context.terminator)
+        seen_terminator_contexts.append(context)
         nonlocal terminator_context_check_failed
         if not (context.bot is bot and context.user.id == user.id):
             terminator_context_check_failed = True
@@ -140,7 +138,8 @@ async def test_menu_handler_basic(example_menu: Menu, legacy_id_in_buttons: bool
     await telegram.press_button(
         bot, user.id, "terminator:1" if legacy_id_in_buttons else "terminator:55a8b659b3cd3593-1"
     )
-    assert seen_terminators == ["send_feedback"]
+    assert [tc.terminator for tc in seen_terminator_contexts] == ["send_feedback"]
+    assert [[item.label for item in tc.path] for tc in seen_terminator_contexts] == [["feedback"]]
     assert not terminator_context_check_failed
     assert set(bot.method_calls.keys()) == {"answer_callback_query"}
     bot.method_calls.clear()
@@ -212,7 +211,11 @@ async def test_menu_handler_basic(example_menu: Menu, legacy_id_in_buttons: bool
         bot, user.id, "terminator:3" if legacy_id_in_buttons else "terminator:55a8b659b3cd3593-3"
     )
     assert set(bot.method_calls.keys()) == {"answer_callback_query"}
-    assert seen_terminators == ["send_feedback", "pick_animal"]
+    assert [tc.terminator for tc in seen_terminator_contexts] == ["send_feedback", "pick_animal"]
+    assert [[item.label for item in tc.path] for tc in seen_terminator_contexts] == [
+        ["feedback"],
+        ["picking game", "animal"],
+    ]
     assert not terminator_context_check_failed
     bot.method_calls.clear()
 
@@ -246,7 +249,12 @@ async def test_menu_handler_basic(example_menu: Menu, legacy_id_in_buttons: bool
         bot, user.id, "terminator:6" if legacy_id_in_buttons else "terminator:55a8b659b3cd3593-6"
     )
     assert set(bot.method_calls.keys()) == {"answer_callback_query", "edit_message_reply_markup"}
-    assert seen_terminators == ["send_feedback", "pick_animal", "green"]
+    assert [tc.terminator for tc in seen_terminator_contexts] == ["send_feedback", "pick_animal", "green"]
+    assert [[item.label for item in tc.path] for tc in seen_terminator_contexts] == [
+        ["feedback"],
+        ["picking game", "animal"],
+        ["picking game", "color", "green"],
+    ]
     assert reply_markups_to_dict(extract_full_kwargs(bot.method_calls["edit_message_reply_markup"])) == [
         {
             "chat_id": 1312,
@@ -297,11 +305,11 @@ async def test_several_menus_per_bot(redis: RedisInterface) -> None:
     )
 
     user = tg.User(id=1337, is_bot=False, first_name="Jane", last_name="Doe")
-    seen_terminators: List[str] = []
+    seen_terminators: list[TerminatorContext] = []
     terminator_context_check_failed = False
 
     async def on_menu_termination(context: TerminatorContext) -> None:
-        seen_terminators.append(context.terminator)
+        seen_terminators.append(context)
         nonlocal terminator_context_check_failed
         if not (context.bot is bot and context.user.id == user.id):
             terminator_context_check_failed = True
@@ -352,12 +360,19 @@ async def test_several_menus_per_bot(redis: RedisInterface) -> None:
     await telegram.press_button(bot, user_id=user.id, callback_data="terminator:84c76de37c5679e0-1")
     await telegram.press_button(bot, user_id=user.id, callback_data="terminator:84c76de37c5679e0-2")
 
-    assert seen_terminators == [
+    assert [tc.terminator for tc in seen_terminators] == [
         "menu 1 opt 1",
         "menu 1 opt 2",
         "menu 2 opt 1",
         "menu 2 opt 2",
         "menu 2 opt 3",
+    ]
+    assert [[item.label for item in tc.path] for tc in seen_terminators] == [
+        ["option 1"],
+        ["option 2"],
+        ["option 1"],
+        ["option 2"],
+        ["option 3"],
     ]
     assert not terminator_context_check_failed
 
@@ -671,10 +686,10 @@ async def test_menu_with_different_mechanisms(redis: RedisInterface):
         redis=redis,
     )
 
-    terminators_reached: list[str] = []
+    terminators_reached: list[TerminatorContext] = []
 
     async def on_menu_termination(context: TerminatorContext) -> None:
-        terminators_reached.append(context.terminator)
+        terminators_reached.append(context)
 
     menu_handler.setup(bot, on_terminal_menu_option_selected=on_menu_termination)
 
@@ -728,6 +743,13 @@ async def test_menu_with_different_mechanisms(redis: RedisInterface):
         }
     ]
     bot.method_calls.clear()
+
+    await telegram.send_message_to_bot(bot, user_id=user.id, text="one")
+    await telegram.press_button(bot, user.id, "terminator:6b36666a13608c19-2")
+    assert len(terminators_reached) == 1
+    term = terminators_reached[0]
+    assert term.terminator == "1.2"
+    assert [mi.label for mi in term.path] == ["one", "1 sub 2"]
 
 
 @pytest.mark.parametrize(
