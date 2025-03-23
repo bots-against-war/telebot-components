@@ -363,7 +363,7 @@ class MenuHandler:
             name=f"{self.name}-current-menu-id",
             prefix=bot_prefix,
             redis=self.redis,
-            expiration_time=datetime.timedelta(hours=12),
+            expiration_time=datetime.timedelta(days=30),
             dumper=str,
             loader=str,
         )
@@ -372,7 +372,7 @@ class MenuHandler:
             name=f"{self.name}-menu-message",
             prefix=bot_prefix,
             redis=self.redis,
-            expiration_time=datetime.timedelta(hours=12),
+            expiration_time=datetime.timedelta(days=30),
             dumper=str,
             loader=int,
         )
@@ -454,10 +454,9 @@ class MenuHandler:
         # these duplicate each other but are used in different contexts
         menu_message: Optional[tg.Message],
         menu_message_id: Optional[int],
-    ) -> Optional[tg_service_types.HandlerResult]:
+    ) -> bool:
         if terminal_menu_item_id not in self.menu_item_by_id:
-            # probably an item from another menu, let them catch it
-            return tg_service_types.HandlerResult(continue_to_other_handlers=True)
+            return False
 
         menu_message_id = menu_message_id or (menu_message.id if menu_message is not None else None)
 
@@ -466,7 +465,7 @@ class MenuHandler:
         terminator = selected_item.terminator
         if terminator is None:
             self.logger.error(f"handle_terminator got non-terminating menu item: {selected_item}")
-            return None
+            return True
 
         await self.current_menu_store.drop(user.id)
         if selected_item.bound_category is not None and self.category_store is not None:
@@ -537,76 +536,104 @@ class MenuHandler:
                 except ApiHTTPException:
                     self.logger.info("Error locking menu", exc_info=True)
 
-        return None
+        return True
+
+    async def process_route_menu_callback_query(self, bot: AsyncTeleBot, call: tg.CallbackQuery) -> bool:
+        data = ROUTE_MENU_CALLBACK_DATA.parse(call.data)
+        new_menu_id = data["route_to"]
+        if new_menu_id not in self.menu_by_id:
+            return False
+        await self._route_to_menu(
+            bot=bot,
+            user=call.from_user,
+            new_menu=self.menu_by_id[new_menu_id],
+            current_menu_message_id=call.message.id,
+        )
+        return True
+
+    async def process_terminal_callback_query(
+        self,
+        bot: AsyncTeleBot,
+        call: tg.CallbackQuery,
+        terminal_option_handler: TerminalMenuOptionHandler,
+    ) -> bool:
+        data = TERMINATE_MENU_CALLBACK_DATA.parse(call.data)
+        return await self._terminate_menu(
+            bot=bot,
+            user=call.from_user,
+            terminal_menu_item_id=data["id"],
+            handler=terminal_option_handler,
+            menu_message=call.message,
+            menu_message_id=call.message.id,
+        )
+
+    async def process_message(
+        self,
+        bot: AsyncTeleBot,
+        message: tg.Message,
+        terminal_option_handler: TerminalMenuOptionHandler,
+    ) -> bool:
+        if not self.has_reply_keyboard_menus:
+            return False
+        current_menu = await self.get_current_menu(message.chat.id)
+        if current_menu is None:
+            return False
+
+        for item in current_menu.displayed_items:
+            item_texts = [item.label] if isinstance(item.label, str) else list(item.label.values())
+            for text in item_texts:
+                if message.text == text:
+                    if item.submenu is not None:
+                        await self._route_to_menu(
+                            bot=bot,
+                            user=message.from_user,
+                            new_menu=item.submenu,
+                            current_menu_message_id=await self.last_menu_message_id_store.load(message.chat.id),
+                        )
+                        return True
+                    elif item.terminator is not None:
+                        return await self._terminate_menu(
+                            bot=bot,
+                            user=message.from_user,
+                            terminal_menu_item_id=item.id,
+                            handler=terminal_option_handler,
+                            menu_message=None,
+                            menu_message_id=await self.last_menu_message_id_store.load(message.chat.id),
+                        )
+
+        return False
 
     def setup(
         self,
         bot: AsyncTeleBot,
         on_terminal_menu_option_selected: TerminalMenuOptionHandler,
     ):
-        # handlers for inline menu stuff
-
-        @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA, auto_answer=True)
-        async def handle_menu(call: tg.CallbackQuery) -> Optional[tg_service_types.HandlerResult]:
-            data = ROUTE_MENU_CALLBACK_DATA.parse(call.data)
-            new_menu_id = data["route_to"]
-            if new_menu_id not in self.menu_by_id:
-                return tg_service_types.HandlerResult(continue_to_other_handlers=True)
-            await self._route_to_menu(
-                bot=bot,
-                user=call.from_user,
-                new_menu=self.menu_by_id[new_menu_id],
-                current_menu_message_id=call.message.id,
-            )
-            return None
+        # NOTE: positive priority is set to first check static menus before going to dynamic ones
+        @bot.callback_query_handler(callback_data=ROUTE_MENU_CALLBACK_DATA, auto_answer=True, priority=10)
+        async def handle_menu(call: tg.CallbackQuery) -> tg_service_types.HandlerResult:
+            is_processed = await self.process_route_menu_callback_query(bot=bot, call=call)
+            return tg_service_types.HandlerResult(continue_to_other_handlers=not is_processed)
 
         @bot.callback_query_handler(callback_data=INACTIVE_BUTTON_CALLBACK_DATA, auto_answer=True)
         async def handle_inactive_menu(call: tg.CallbackQuery):
             pass
 
-        @bot.callback_query_handler(callback_data=TERMINATE_MENU_CALLBACK_DATA, auto_answer=True)
+        @bot.callback_query_handler(callback_data=TERMINATE_MENU_CALLBACK_DATA, auto_answer=True, priority=10)
         async def handle_terminator(call: tg.CallbackQuery) -> Optional[tg_service_types.HandlerResult]:
-            data = TERMINATE_MENU_CALLBACK_DATA.parse(call.data)
-            return await self._terminate_menu(
+            is_processed = await self.process_terminal_callback_query(
                 bot=bot,
-                user=call.from_user,
-                terminal_menu_item_id=data["id"],
-                handler=on_terminal_menu_option_selected,
-                menu_message=call.message,
-                menu_message_id=call.message.id,
+                call=call,
+                terminal_option_handler=on_terminal_menu_option_selected,
             )
+            return tg_service_types.HandlerResult(continue_to_other_handlers=not is_processed)
 
-        # handler for reply keyboard stuff
+        if self.has_reply_keyboard_menus:
 
-        @bot.message_handler(priority=1000)  # high priority to process these first
-        async def try_handle_reply_to_menu(message: tg.Message) -> Optional[tg_service_types.HandlerResult]:
-            continue_result = tg_service_types.HandlerResult(continue_to_other_handlers=True)
-            if not self.has_reply_keyboard_menus:
-                return continue_result
-            current_menu = await self.get_current_menu(message.chat.id)
-            if current_menu is None:
-                return continue_result
-
-            for item in current_menu.displayed_items:
-                item_texts = [item.label] if isinstance(item.label, str) else list(item.label.values())
-                for text in item_texts:
-                    if message.text == text:
-                        if item.submenu is not None:
-                            await self._route_to_menu(
-                                bot=bot,
-                                user=message.from_user,
-                                new_menu=item.submenu,
-                                current_menu_message_id=await self.last_menu_message_id_store.load(message.chat.id),
-                            )
-                            return None
-                        elif item.terminator is not None:
-                            return await self._terminate_menu(
-                                bot=bot,
-                                user=message.from_user,
-                                terminal_menu_item_id=item.id,
-                                handler=on_terminal_menu_option_selected,
-                                menu_message=None,
-                                menu_message_id=await self.last_menu_message_id_store.load(message.chat.id),
-                            )
-            else:
-                return continue_result
+            @bot.message_handler(priority=1000)  # high priority to process these first
+            async def try_handle_reply_to_menu(message: tg.Message) -> tg_service_types.HandlerResult:
+                is_processed = await self.process_message(
+                    bot,
+                    message=message,
+                    terminal_option_handler=on_terminal_menu_option_selected,
+                )
+                return tg_service_types.HandlerResult(continue_to_other_handlers=not is_processed)
