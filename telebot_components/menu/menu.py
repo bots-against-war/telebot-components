@@ -245,9 +245,10 @@ class TerminatorContext:
 
 @dataclass
 class TerminatorResult:
-    menu_message_text_update: Optional[AnyText]
-    parse_mode: Optional[str] = None
-    lock_menu: Optional[bool] = None  # if set, overrides the default lock_after_termination value in Menu config
+    menu_message_text_update: AnyText | None
+    parse_mode: str | None = None
+    menu_message_reply_markup_update: tg.ReplyMarkup | None = None
+    lock_menu: bool | None = None  # if set, overrides the default lock_after_termination value in Menu config
 
 
 TerminalMenuOptionHandler = Callable[[TerminatorContext], Awaitable[Optional[TerminatorResult]]]
@@ -518,6 +519,7 @@ class MenuHandler:
                             chat_id=user.id,
                             message_id=menu_message_id,
                             parse_mode=terminator_handler_result.parse_mode,
+                            reply_markup=terminator_handler_result.menu_message_reply_markup_update,
                         )
                     except Exception:
                         self.logger.info(
