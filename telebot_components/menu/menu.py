@@ -416,11 +416,12 @@ class MenuHandler:
         user: tg.User,
         new_menu: Menu,
         current_menu_message_id: Optional[int],
+        force_update: bool = False,
     ) -> None:
         language = await self.get_maybe_language(user)
         current_menu = await self.get_current_menu(user.id)
         await self.current_menu_store.save(user.id, new_menu.id)
-        if (
+        if force_update or (
             current_menu_message_id is not None
             and current_menu is not None
             and current_menu.effective_config.mechanism.is_updateable()
