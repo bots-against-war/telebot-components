@@ -3,6 +3,7 @@ import copy
 import dataclasses
 import datetime
 import hashlib
+import inspect
 import logging
 import math
 import re
@@ -15,16 +16,15 @@ from enum import Enum
 from hashlib import md5
 from typing import (
     Any,
+    Awaitable,
     Callable,
     ClassVar,
-    Dict,
+    Collection,
     Generic,
     Iterable,
-    Optional,
     Protocol,
     Type,
     TypeVar,
-    Union,
     cast,
 )
 
@@ -64,48 +64,49 @@ class BadFieldValueError(Exception):
 
 
 @dataclass
+class NextFieldGetterContext(Generic[FieldValueT]):
+    current_field: "FormField"
+    current_value: FieldValueT | None
+    user: tg.User
+    dynamic_data: Any | None
+    language: MaybeLanguage
+
+    @property
+    def current_value_id(self) -> str | None:
+        return self.current_field.value_id(self.current_value) if self.current_value is not None else None
+
+
+@dataclass
 class NextFieldGetter(Generic[FieldValueT]):
-    """Service class to forward-reference the next field in a form"""
+    """Wrapper class for next field getter function, used to link form fields together"""
 
-    #                                    user, value/None-if-skipped, value string id (see value_id on field)
-    next_field_name_getter: Callable[[tg.User, Optional[FieldValueT], Optional[str]], Optional[str]]
+    next_field_name_getter: Callable[[NextFieldGetterContext], str | None | Awaitable[str | None]]
     # used for startup form connectedness validation
-    possible_next_field_names: list[Optional[str]]
-    # filled on Form object initialization
-    fields_by_name: Optional[Dict[str, "FormField"]] = None
+    possible_next_field_names: Collection[str | None]
 
-    async def __call__(
-        self, current_field_name: str, user: tg.User, value: Optional[FieldValueT]
-    ) -> Optional["FormField"]:
-        if self.fields_by_name is None:
-            raise RuntimeError(
-                "Next field getter hasn't been properly initialized, "
-                + "did you forget to pass your fields in a Form object?"
-            )
-        current_field = self.fields_by_name[current_field_name]
-        next_field_name = self.next_field_name_getter(
-            user, value, current_field.value_id(value) if value is not None else None
-        )
-        if next_field_name is None:
-            return None
+    async def __call__(self, context: NextFieldGetterContext) -> "str | None":
+        next_field_name_res = self.next_field_name_getter(context)
+
+        if inspect.isawaitable(next_field_name_res):
+            return await next_field_name_res
         else:
-            return self.fields_by_name[next_field_name]
+            return next_field_name_res  # type: ignore
 
     @classmethod
-    def by_name(cls, name: Optional[str]) -> "NextFieldGetter":
-        return NextFieldGetter(lambda u, v, v_id: name, possible_next_field_names=[name])
+    def by_name(cls, name: str | None) -> "NextFieldGetter":
+        return NextFieldGetter(lambda _: name, possible_next_field_names=[name])
 
     @classmethod
     def by_mapping(
         cls,
-        value_to_next_field_name: Dict[Optional[FieldValueT], Optional[str]],
-        default: Optional[str],
-    ) -> "NextFieldGetter":
-        possible_next_field_names = [next_field_name for v, next_field_name in value_to_next_field_name.items()]
-        possible_next_field_names.append(default)
+        value_to_next_field_name: dict[FieldValueT | None, str | None],
+        default: str | None,
+    ) -> "NextFieldGetter[FieldValueT]":
         return NextFieldGetter(
-            lambda u, v, v_id: value_to_next_field_name.get(v, default),
-            possible_next_field_names=possible_next_field_names,
+            lambda context: value_to_next_field_name.get(context.current_value, default),
+            possible_next_field_names=(
+                [next_field_name for _, next_field_name in value_to_next_field_name.items()] + [default]
+            ),
         )
 
     @classmethod
@@ -114,31 +115,27 @@ class NextFieldGetter(Generic[FieldValueT]):
 
     @classmethod
     def from_condition_list(
-        cls, conditions: list[tuple[str, FormBranchCondition]], fallback: Optional[str]
+        cls, conditions: list[tuple[str, FormBranchCondition]], fallback: str | None
     ) -> "NextFieldGetter":
         if not conditions:
-            return cls.by_name(fallback) if fallback is not None else cls.form_end()
+            return cls.by_name(fallback)
 
-        def next_field_name_getter(_: tg.User, __: Optional[FieldValueT], value_id: Optional[str]) -> Optional[str]:
-            for possible_next_field_name, condition in conditions:
-                if (isinstance(condition, str) and value_id == condition) or (
+        def next_field_name_getter(context: NextFieldGetterContext) -> str | None:
+            for next_field_name, condition in conditions:
+                if (isinstance(condition, str) and context.current_value_id == condition) or (
                     callable(condition)
                     and log_errors(
                         logger,
-                        errmsg=f"Error testing condition for possible next field {possible_next_field_name!r}",
+                        errmsg=f"Error testing condition for possible next field {next_field_name!r}",
                         return_on_error=False,
-                    )(condition)(value_id)
+                    )(condition)(context.current_value_id)
                 ):
-                    return possible_next_field_name
+                    return next_field_name
             return fallback
 
-        possible_next_field_names: list[Union[str, None]] = [
-            possible_next_field_name for possible_next_field_name, _ in conditions
-        ]
-        possible_next_field_names.append(fallback)
         return NextFieldGetter(
             next_field_name_getter=next_field_name_getter,
-            possible_next_field_names=possible_next_field_names,
+            possible_next_field_names=([next_field_name for next_field_name, _ in conditions] + [fallback]),
         )
 
 
@@ -148,7 +145,7 @@ class FormFieldResultFormattingOpts(Generic[FieldValueT]):
 
     descr: AnyText  # used for telegram message formatting
     is_multiline: bool = False
-    value_formatter: Optional[Callable[[FieldValueT, MaybeLanguage], str]] = (
+    value_formatter: Callable[[FieldValueT, MaybeLanguage], str] | None = (
         None  # if not specified, field's default formatter is used
     )
 
@@ -159,10 +156,10 @@ class FormFieldResultExportOpts(Generic[FieldValueT]):
 
     column: Any  # usually an enum specifying airtable or Google Sheets column
 
-    value_mapping: Optional[dict[FieldValueT, Any]] = None
-    unmapped_value_default: Optional[Any] = None
+    value_mapping: dict[FieldValueT, Any] | None = None
+    unmapped_value_default: Any | None = None
 
-    value_processor: Optional[Callable[[FieldValueT], Any]] = None
+    value_processor: Callable[[FieldValueT], Any] | None = None
 
     def __post_init__(self) -> None:
         if (self.value_mapping is not None) and (self.value_processor is not None):
@@ -185,12 +182,12 @@ class MessageProcessingContext(Generic[FieldValueT]):
 
 @dataclass
 class MessageProcessingResult(Generic[FieldValueT]):
-    response_to_user: Optional[str]
-    new_field_value: Optional[FieldValueT]
+    response_to_user: str | None
+    new_field_value: FieldValueT | None
     complete_field: bool
     ask_for_retry: bool = False
-    response_reply_markup: Optional[tg.ReplyMarkup] = None
-    new_dynamic_data: Optional[Any] = None
+    response_reply_markup: tg.ReplyMarkup | None = None
+    new_dynamic_data: Any | None = None
     updated_inline_markup: tg.InlineKeyboardMarkup | None = None
     delete_last_message: bool = False
 
@@ -199,7 +196,7 @@ class MessageProcessingResult(Generic[FieldValueT]):
 class CallbackQueryProcessingContext(Generic[FieldValueT]):
     callback_payload: str
     user: tg.User
-    current_value: Optional[FieldValueT]
+    current_value: FieldValueT | None
     language: MaybeLanguage
     dynamic_data: Any
     logger: logging.Logger
@@ -207,11 +204,11 @@ class CallbackQueryProcessingContext(Generic[FieldValueT]):
 
 @dataclass
 class CallbackQueryProcessingResult(Generic[FieldValueT]):
-    response_to_user: Optional[str]
-    updated_inline_markup: Optional[tg.InlineKeyboardMarkup]
+    response_to_user: str | None
+    updated_inline_markup: tg.InlineKeyboardMarkup | None
     complete_field: bool
-    new_field_value: Optional[FieldValueT]
-    new_dynamic_data: Optional[Any] = None
+    new_field_value: FieldValueT | None
+    new_dynamic_data: Any | None = None
 
 
 # endregion
@@ -227,15 +224,13 @@ class FormField(Generic[FieldValueT]):
     required: bool
     query_message: AnyText
 
-    # should contain 1 '{}' for field value
-    echo_result_template: Optional[AnyText] = dataclass_field(default=None, kw_only=True)
+    # may contain 1 '{}' for field value
+    echo_result_template: AnyText | None = dataclass_field(default=None, kw_only=True)
 
-    next_field_getter: Optional[NextFieldGetter[FieldValueT]] = dataclass_field(default=None, kw_only=True)
+    next_field_getter: NextFieldGetter[FieldValueT] | None = dataclass_field(default=None, kw_only=True)
 
-    result_formatting_opts: Optional[Union[FormFieldResultFormattingOpts, bool]] = dataclass_field(
-        default=None, kw_only=True
-    )
-    export_opts: Optional[FormFieldResultExportOpts] = dataclass_field(default=None, kw_only=True)
+    result_formatting_opts: FormFieldResultFormattingOpts | bool | None = dataclass_field(default=None, kw_only=True)
+    export_opts: FormFieldResultExportOpts | None = dataclass_field(default=None, kw_only=True)
 
     def __post_init__(self):
         pass  # future-proof
@@ -248,7 +243,7 @@ class FormField(Generic[FieldValueT]):
             )
         return self.next_field_getter
 
-    def custom_value_type(self) -> Optional[Type]:
+    def custom_value_type(self) -> Type | None:
         """
         Used for validation of a form's result type (see Form.validate_result_type). In trivial cases
         like PlainTextField field value type is obtained from introspection, but sometimes this is
@@ -294,7 +289,7 @@ class FormField(Generic[FieldValueT]):
         """Machine-readable string identitier for the value"""
         return str(value)
 
-    def get_result_message(self, value: FieldValueT, language: MaybeLanguage) -> Optional[str]:
+    def get_result_message(self, value: FieldValueT, language: MaybeLanguage) -> str | None:
         if self.echo_result_template is None:
             return None
         else:
@@ -331,8 +326,8 @@ class FormField(Generic[FieldValueT]):
 
     def with_output_opts(
         self: FormFieldT,
-        formatting: Optional[FormFieldResultFormattingOpts] = None,
-        export: Optional[FormFieldResultExportOpts] = None,
+        formatting: FormFieldResultFormattingOpts | None = None,
+        export: FormFieldResultExportOpts | None = None,
     ) -> FormFieldT:
         """Typed version of dataclasses.replace"""
         return dataclasses.replace(
@@ -389,8 +384,8 @@ class IntegerListField(FormField[list[int]]):
 class DateField(FormField[date]):
     timezone: tzinfo
     bad_date_format_error_msg: AnyText
-    # if specified, the date is checked to be in the future
-    cant_be_in_the_past_error_msg: Optional[AnyText] = None
+    # if specified, the date is validated to be in the future
+    cant_be_in_the_past_error_msg: AnyText | None = None
 
     def parse(self, message: tg.Message) -> date:
         date_parts = message.text_content.strip().split(".")
@@ -464,7 +459,7 @@ class AttachmentsField(FormField[list[TelegramAttachment]]):
         super().__post_init__()
         self.logger = logging.getLogger(f"{__file__}[{self.__class__.__name__}(name={self.name!r})]")
 
-    def get_attachment(self, message: tg.Message) -> Optional[TelegramAttachment]:
+    def get_attachment(self, message: tg.Message) -> TelegramAttachment | None:
         if message.photo is not None:
             return message.photo
         elif message.document is not None:
@@ -613,7 +608,7 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
     def custom_value_type(self) -> Type:
         return self.EnumClass
 
-    def match_enum(self, text: str) -> Optional[Enum]:
+    def match_enum(self, text: str) -> Enum | None:
         for enum in self.EnumClass:
             if isinstance(enum.value, str):
                 if text == enum.value:
@@ -804,8 +799,8 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
     finish_field_button_caption: AnyText
     next_page_button_caption: AnyText
     prev_page_button_caption: AnyText
-    min_selected_to_finish: Optional[int] = None
-    max_selected_to_finish: Optional[int] = None
+    min_selected_to_finish: int | None = None
+    max_selected_to_finish: int | None = None
 
     OPTION_PAYLOAD_PREFIX: ClassVar[str] = "opt"
     FINISH_FIELD_PAYLOAD: ClassVar[str] = "finish"
@@ -1029,7 +1024,7 @@ class DateMenuField(StrictlyInlineFormField[date]):
             )
 
     def _calendar_keyboard(
-        self, year: Optional[int], month: Optional[int], selected_value: Optional[date]
+        self, year: int | None, month: int | None, selected_value: date | None
     ) -> tg.InlineKeyboardMarkup:
         return calendar_keyboard(
             year=year,
@@ -1110,7 +1105,7 @@ class _DynamicSingleSelectFieldBase(FormField[DynamicSingleSelectFieldValueT], G
         kbd.add(*[tg.KeyboardButton(any_text_to_str(option.label, language)) for option in options])
         return kbd
 
-    def match_option(self, options: list[DynamicOption], text: str) -> Optional[DynamicOption]:
+    def match_option(self, options: list[DynamicOption], text: str) -> DynamicOption | None:
         for option in options:
             if isinstance(option.label, str):
                 if text == option.label:

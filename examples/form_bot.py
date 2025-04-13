@@ -17,6 +17,7 @@ from telebot_components.form.field import (
     IntegerField,
     MultipleSelectField,
     NextFieldGetter,
+    NextFieldGetterContext,
     PlainTextField,
     SelectableDates,
     SingleSelectField,
@@ -77,11 +78,11 @@ date_field = DateMenuField(
 )
 
 
-def after_age_field(u: tg.User, v: Optional[int], v_id: Optional[str]) -> str:
-    if isinstance(v, int):
-        if v < 16:
+def after_age_field(context: NextFieldGetterContext[int]) -> str:
+    if isinstance(context.current_value, int):
+        if context.current_value < 16:
             return "favorite_subject"
-        elif v < 18:
+        elif context.current_value < 18:
             return "has_finished_school"
         else:
             return "university_program"
@@ -104,7 +105,7 @@ age_field = IntegerField(
         Language.RU: "Возраст должен быть указан одним числом.",
         Language.EN: "Age must be specified as a single number.",
     },
-    next_field_getter=NextFieldGetter(
+    next_field_getter=NextFieldGetter[int](
         next_field_name_getter=after_age_field,
         possible_next_field_names=["favorite_subject", "has_finished_school", "university_program"],
     ),

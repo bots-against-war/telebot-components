@@ -42,7 +42,7 @@ class FormBranch:
 
 
 class Form:
-    """Container for collection of fields linked together via get_next_field_getter() attribute. Does not modify passed
+    """Container for collection of fields linked together via 'next field getters' attribute. Does not modify passed
     objects, creates private copies.
 
     If allow_cyclic param is False (default), performs topological sort to validate form acyclicity and can print
@@ -79,8 +79,6 @@ class Form:
 
         # bind next field getters so that they can look up next form field by its name
         self.fields_by_name = {f.name: f for f in self.fields}
-        for f in self.fields:
-            f.get_next_field_getter().fields_by_name = self.fields_by_name
 
         # validate that field graph is connected and that the start field has no incoming edges
         reachable_field_names = set(
