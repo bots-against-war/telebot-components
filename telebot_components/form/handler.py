@@ -20,6 +20,7 @@ from telebot_components.form.field import (
     InlineFormField,
     MessageProcessingContext,
     MessageProcessingResult,
+    NextFieldGetterContext,
 )
 from telebot_components.form.form import Form
 from telebot_components.form.types import FormDynamicDataT, FormResultT
@@ -195,11 +196,27 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
             dynamic_data=self.dynamic_data,
         )
 
+    async def _get_next_field(self, user: tg.User, language: MaybeLanguage, form: Form) -> FormField | None:
+        next_field_name = await self.current_field.get_next_field_getter()(
+            NextFieldGetterContext(
+                current_field=self.current_field,
+                current_value=self.result_so_far.get(self.current_field.name),
+                user=user,
+                language=language,
+                dynamic_data=self.dynamic_data,
+            )
+        )
+        if next_field_name is None:
+            return None
+        else:
+            return form.fields_by_name[next_field_name]
+
     async def update_with_message(
         self,
         message: tg.Message,
         language: MaybeLanguage,
         form_handler_config: FormHandlerConfig,
+        form: Form,
     ) -> _FormStateUpdateEffect:
         result = MessageProcessingResult[Any](
             response_to_user=None,
@@ -273,11 +290,7 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
         if form_handler_config.echo_filled_field and result.response_to_user is not None:
             reply_paragraphs.append(result.response_to_user)
 
-        next_field = await self.current_field.get_next_field_getter()(
-            user=message.from_user,
-            value=result.new_field_value,
-            current_field_name=self.current_field.name,
-        )
+        next_field = await self._get_next_field(user=message.from_user, language=language, form=form)
         if next_field is None:
             return _FormStateUpdateEffect(
                 _FormAction.COMPLETE,
@@ -309,6 +322,7 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
         call: tg.CallbackQuery,
         language: MaybeLanguage,
         form_handler_config: FormHandlerConfig,
+        form: Form,
     ) -> _FormStateUpdateEffect:
         if not isinstance(self.current_field, InlineFormField):
             return _FormStateUpdateEffect(_FormAction.DO_NOTHING)
@@ -337,11 +351,7 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
         send_reply_markup: tg.ReplyMarkup = tg.ReplyKeyboardRemove()
         form_action = _FormAction.KEEP_GOING
         if result.complete_field:
-            next_field = await self.current_field.get_next_field_getter()(
-                user=call.from_user,
-                value=result.new_field_value,
-                current_field_name=self.current_field.name,
-            )
+            next_field = await self._get_next_field(user=call.from_user, language=language, form=form)
             if next_field is None:
                 form_action = _FormAction.COMPLETE
             else:
@@ -494,7 +504,12 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
         @bot.message_handler(func=currently_filling_form, chat_types=[constants.ChatType.private], priority=100)
         async def form_message_action_handler(message: tg.Message):
             async def form_state_updater(form_state: _FormState, language: MaybeLanguage):
-                return await form_state.update_with_message(message, language, self.config)
+                return await form_state.update_with_message(
+                    message=message,
+                    language=language,
+                    form_handler_config=self.config,
+                    form=self.form,
+                )
 
             def form_exit_context_constructor(bot: AsyncTeleBot, result: FormResultT):
                 return FormExitContext(bot, message, result)
@@ -513,7 +528,12 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
         )
         async def form_inline_action_handler(call: tg.CallbackQuery):
             async def form_state_updater(form_state: _FormState, language: MaybeLanguage):
-                return await form_state.update_with_callback_query(call, language, self.config)
+                return await form_state.update_with_callback_query(
+                    call=call,
+                    language=language,
+                    form_handler_config=self.config,
+                    form=self.form,
+                )
 
             def form_exit_context_constructor(bot: AsyncTeleBot, result: FormResultT):
                 return FormExitContext(bot, call, result)

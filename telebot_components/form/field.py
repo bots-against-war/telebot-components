@@ -22,6 +22,7 @@ from typing import (
     Generic,
     Iterable,
     Protocol,
+    Sequence,
     Type,
     TypeVar,
     cast,
@@ -63,52 +64,49 @@ class BadFieldValueError(Exception):
 
 
 @dataclass
+class NextFieldGetterContext(Generic[FieldValueT]):
+    current_field: "FormField"
+    current_value: FieldValueT | None
+    user: tg.User
+    dynamic_data: Any | None
+    language: MaybeLanguage
+
+    @property
+    def current_value_id(self) -> str | None:
+        return self.current_field.value_id(self.current_value) if self.current_value is not None else None
+
+
+@dataclass
 class NextFieldGetter(Generic[FieldValueT]):
-    """Service class to forward-reference the next field in a form"""
+    """Wrapper class for next field getter function, used to link form fields together"""
 
-    #                                    user, value/None-if-skipped, value string id (see value_id on field)
-    next_field_name_getter: Callable[[tg.User, FieldValueT | None, str | None], str | None | Awaitable[str | None]]
+    next_field_name_getter: Callable[[NextFieldGetterContext], str | None | Awaitable[str | None]]
     # used for startup form connectedness validation
-    possible_next_field_names: list[str | None]
+    possible_next_field_names: Sequence[str | None]
 
-    # filled on Form object initialization
-    fields_by_name: dict[str, "FormField"] | None = None
+    async def __call__(self, context: NextFieldGetterContext) -> "str | None":
+        next_field_name_res = self.next_field_name_getter(context)
 
-    async def __call__(self, current_field_name: str, user: tg.User, value: FieldValueT | None) -> "FormField | None":
-        if self.fields_by_name is None:
-            raise RuntimeError(
-                "Next field getter hasn't been properly initialized, "
-                + "did you forget to pass your fields in a Form object?"
-            )
-        current_field = self.fields_by_name[current_field_name]
-        next_field_name_res = self.next_field_name_getter(
-            user, value, current_field.value_id(value) if value is not None else None
-        )
         if inspect.isawaitable(next_field_name_res):
-            next_field_name = await next_field_name_res
+            return await next_field_name_res
         else:
-            next_field_name = next_field_name_res
-
-        if next_field_name is None:
-            return None
-        else:
-            return self.fields_by_name[next_field_name]
+            return next_field_name_res  # type: ignore
 
     @classmethod
     def by_name(cls, name: str | None) -> "NextFieldGetter":
-        return NextFieldGetter(lambda u, v, v_id: name, possible_next_field_names=[name])
+        return NextFieldGetter(lambda _: name, possible_next_field_names=[name])
 
     @classmethod
     def by_mapping(
         cls,
         value_to_next_field_name: dict[FieldValueT | None, str | None],
         default: str | None,
-    ) -> "NextFieldGetter":
-        possible_next_field_names = [next_field_name for v, next_field_name in value_to_next_field_name.items()]
-        possible_next_field_names.append(default)
+    ) -> "NextFieldGetter[FieldValueT]":
         return NextFieldGetter(
-            lambda u, v, v_id: value_to_next_field_name.get(v, default),
-            possible_next_field_names=possible_next_field_names,
+            lambda context: value_to_next_field_name.get(context.current_value, default),
+            possible_next_field_names=(
+                [next_field_name for _, next_field_name in value_to_next_field_name.items()] + [default]
+            ),
         )
 
     @classmethod
@@ -120,28 +118,24 @@ class NextFieldGetter(Generic[FieldValueT]):
         cls, conditions: list[tuple[str, FormBranchCondition]], fallback: str | None
     ) -> "NextFieldGetter":
         if not conditions:
-            return cls.by_name(fallback) if fallback is not None else cls.form_end()
+            return cls.by_name(fallback)
 
-        def next_field_name_getter(_: tg.User, __: FieldValueT | None, value_id: str | None) -> str | None:
-            for possible_next_field_name, condition in conditions:
-                if (isinstance(condition, str) and value_id == condition) or (
+        def next_field_name_getter(context: NextFieldGetterContext) -> str | None:
+            for next_field_name, condition in conditions:
+                if (isinstance(condition, str) and context.current_value_id == condition) or (
                     callable(condition)
                     and log_errors(
                         logger,
-                        errmsg=f"Error testing condition for possible next field {possible_next_field_name!r}",
+                        errmsg=f"Error testing condition for possible next field {next_field_name!r}",
                         return_on_error=False,
-                    )(condition)(value_id)
+                    )(condition)(context.current_value_id)
                 ):
-                    return possible_next_field_name
+                    return next_field_name
             return fallback
 
-        possible_next_field_names: list[str | None] = [
-            possible_next_field_name for possible_next_field_name, _ in conditions
-        ]
-        possible_next_field_names.append(fallback)
         return NextFieldGetter(
             next_field_name_getter=next_field_name_getter,
-            possible_next_field_names=possible_next_field_names,
+            possible_next_field_names=([next_field_name for next_field_name, _ in conditions] + [fallback]),
         )
 
 
@@ -230,7 +224,7 @@ class FormField(Generic[FieldValueT]):
     required: bool
     query_message: AnyText
 
-    # should contain 1 '{}' for field value
+    # may contain 1 '{}' for field value
     echo_result_template: AnyText | None = dataclass_field(default=None, kw_only=True)
 
     next_field_getter: NextFieldGetter[FieldValueT] | None = dataclass_field(default=None, kw_only=True)
