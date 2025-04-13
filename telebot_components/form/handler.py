@@ -209,6 +209,11 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
         if next_field_name is None:
             return None
         else:
+            if next_field_name not in form.fields_by_name:
+                raise RuntimeError(
+                    f"Next field getter for field {self.current_field.name} "
+                    + f"has returned invalid field name {next_field_name}!"
+                )
             return form.fields_by_name[next_field_name]
 
     async def update_with_message(
