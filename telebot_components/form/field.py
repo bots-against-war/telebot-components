@@ -19,10 +19,10 @@ from typing import (
     Awaitable,
     Callable,
     ClassVar,
+    Collection,
     Generic,
     Iterable,
     Protocol,
-    Sequence,
     Type,
     TypeVar,
     cast,
@@ -82,7 +82,7 @@ class NextFieldGetter(Generic[FieldValueT]):
 
     next_field_name_getter: Callable[[NextFieldGetterContext], str | None | Awaitable[str | None]]
     # used for startup form connectedness validation
-    possible_next_field_names: Sequence[str | None]
+    possible_next_field_names: Collection[str | None]
 
     async def __call__(self, context: NextFieldGetterContext) -> "str | None":
         next_field_name_res = self.next_field_name_getter(context)
