@@ -3,6 +3,7 @@ import copy
 import dataclasses
 import datetime
 import hashlib
+import inspect
 import logging
 import math
 import re
@@ -15,6 +16,7 @@ from enum import Enum
 from hashlib import md5
 from typing import (
     Any,
+    Awaitable,
     Callable,
     ClassVar,
     Dict,
@@ -68,9 +70,10 @@ class NextFieldGetter(Generic[FieldValueT]):
     """Service class to forward-reference the next field in a form"""
 
     #                                    user, value/None-if-skipped, value string id (see value_id on field)
-    next_field_name_getter: Callable[[tg.User, Optional[FieldValueT], Optional[str]], Optional[str]]
+    next_field_name_getter: Callable[[tg.User, FieldValueT | None, str | None], str | None | Awaitable[str | None]]
     # used for startup form connectedness validation
     possible_next_field_names: list[Optional[str]]
+
     # filled on Form object initialization
     fields_by_name: Optional[Dict[str, "FormField"]] = None
 
@@ -83,9 +86,14 @@ class NextFieldGetter(Generic[FieldValueT]):
                 + "did you forget to pass your fields in a Form object?"
             )
         current_field = self.fields_by_name[current_field_name]
-        next_field_name = self.next_field_name_getter(
+        next_field_name_res = self.next_field_name_getter(
             user, value, current_field.value_id(value) if value is not None else None
         )
+        if inspect.isawaitable(next_field_name_res):
+            next_field_name = await next_field_name_res
+        else:
+            next_field_name = next_field_name_res
+
         if next_field_name is None:
             return None
         else:
@@ -98,8 +106,8 @@ class NextFieldGetter(Generic[FieldValueT]):
     @classmethod
     def by_mapping(
         cls,
-        value_to_next_field_name: Dict[Optional[FieldValueT], Optional[str]],
-        default: Optional[str],
+        value_to_next_field_name: dict[Optional[FieldValueT], Optional[str]],
+        default: str | None,
     ) -> "NextFieldGetter":
         possible_next_field_names = [next_field_name for v, next_field_name in value_to_next_field_name.items()]
         possible_next_field_names.append(default)
