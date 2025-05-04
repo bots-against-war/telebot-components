@@ -14,6 +14,7 @@ from telebot_components.redis_utils.interface import (
     RedisCmdReturn,
     RedisInterface,
     RedisPipelineInterface,
+    XPendingRangeResultItem,
 )
 
 
@@ -363,6 +364,33 @@ class RedisEmulation(RedisInterface):
         block: Union[int, None] = None,
         noack: bool = False,
     ) -> list[tuple[bytes, list[tuple[bytes, dict[bytes, bytes]]]]]:
+        raise NotImplementedError("Streams are not emulated")
+
+    async def xpending_range(
+        self,
+        name: str,
+        groupname: str,
+        min: int | str,
+        max: int | str,
+        count: int,
+        consumername: str | None = None,
+        idle: int | None = None,
+    ) -> list[XPendingRangeResultItem]:
+        raise NotImplementedError("Streams are not emulated")
+
+    async def xclaim(
+        self,
+        name: str,
+        groupname: str,
+        consumername: str,
+        min_idle_time: int,
+        message_ids: Union[list[int | str | bytes], tuple[int | str | bytes]],
+        idle: Union[int, None] = None,
+        time: Union[int, None] = None,
+        retrycount: Union[int, None] = None,
+        force: bool = False,
+        justid: bool = False,
+    ) -> list[tuple[bytes, dict[bytes, bytes]]]:
         raise NotImplementedError("Streams are not emulated")
 
 

@@ -61,3 +61,49 @@ async def test_redis_stream(redis: RedisInterface) -> None:
 
     key = lambda data: data["timestamp"]  # noqa: E731
     assert sorted(consumed_data, key=key) == sorted(produced_data, key=key)
+
+
+async def test_redis_stream_max_retry_limit(redis: RedisInterface) -> None:
+    if isinstance(redis, (RedisEmulation, PersistentRedisEmulation)):
+        pytest.skip("Streams are not emulated")
+
+    # print(await redis.client_info())
+    # assert False
+
+    pubsub = PubSub[dict[str, Any]](name="example", prefix="bot-prefix", redis=redis)
+
+    group = "group-" + str(uuid4())
+
+    async def producer() -> None:
+        await asyncio.sleep(1)
+        await pubsub.publish({"hello": "world"})
+
+    attempts_to_consume = 0
+
+    async def consumer() -> None:
+        nonlocal attempts_to_consume
+        while True:
+            try:
+                async for data in pubsub.consume(
+                    group=group,
+                    consumer_name="very-bad-consumer",
+                    consume_at_once=1,
+                    retry_after=datetime.timedelta(seconds=1),
+                    block_period=datetime.timedelta(seconds=0.1),
+                    fail_after_retries=3,
+                ):
+                    print(data)
+                    attempts_to_consume += 1
+                    raise RuntimeError("I am a very stupid consumer and I always fail")
+            except RuntimeError:
+                pass
+
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(producer(), consumer()),
+            timeout=10,
+        )
+    except TimeoutError:
+        pass
+
+    assert attempts_to_consume == 4  # 1 initial attempt and 4 retries

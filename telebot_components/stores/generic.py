@@ -628,6 +628,8 @@ class PubSub(PrefixedStore, Generic[ValueT]):
         retry: Literal["never", "sometimes", "only"] = "sometimes",
         retry_after: datetime.timedelta = datetime.timedelta(seconds=300),
         error_backoff: datetime.timedelta = datetime.timedelta(seconds=3),
+        log_error_after_retries: int = 30,
+        fail_after_retries: int = 50,
     ) -> AsyncGenerator[ValueT, None]:
         if auto_create:
             await self.ensure_group_exists(group)
@@ -639,7 +641,7 @@ class PubSub(PrefixedStore, Generic[ValueT]):
             # standard message consumption
             try:
                 if retry != "only":
-                    for stream_name, stream_messages in await self.redis.xreadgroup(
+                    for _, stream_messages in await self.redis.xreadgroup(
                         groupname=group,
                         consumername=consumer_name,
                         streams={self._stream: ">"},
@@ -664,25 +666,55 @@ class PubSub(PrefixedStore, Generic[ValueT]):
                 )
                 if do_retry:
                     self._last_retry_timestamp = time.time()
-                    cursor = "0-0"
-                    processing_pending_messages = True
-                    while processing_pending_messages and not is_shutting_down():
-                        new_cursor, entries, deleted = await self.redis.xautoclaim(
+                    min_id = "-"  # special value meaning "minimal possible id in the stream"
+                    min_idle_time = int(retry_after.total_seconds() * 1000)
+                    while not is_shutting_down():
+                        page = await self.redis.xpending_range(
                             name=self._stream,
                             groupname=group,
-                            consumername=consumer_name,
-                            min_idle_time=int(retry_after.total_seconds() * 1000),
+                            min=min_id,
+                            max="+",
                             count=consume_at_once,
-                            start_id=cursor,
+                            idle=min_idle_time,
                         )
-                        cursor = new_cursor.decode("utf-8")
-                        processing_pending_messages = cursor != "0-0"
-                        if deleted:
-                            self.logger.info(f"{log_marker}: can't retry consuming {len(deleted)} deleted messages")
-                        for message_id, fields in entries:
-                            self.logger.debug("%s: got message to retry %s: %s", log_marker, message_id, fields)
-                            yield self.loader(fields[self._field_name_encoded].decode("utf-8"))
-                            self.logger.debug("%s: acknowledging retried message %s", log_marker, message_id)
+                        if not page:
+                            break
+                        # for iteration we pass last message id as min, prepending "(" to
+                        # make the interval exclusive
+                        # see docs for https://redis.io/docs/latest/commands/xrange/
+                        min_id = "(" + page[-1]["message_id"].decode("utf-8")
+
+                        # now we go through the pending messages one by one, claim and try to process them
+                        for pending in page:
+                            retry_message = True
+                            if pending["times_delivered"] > fail_after_retries:
+                                self.logger.error(
+                                    f"Too many retries ({pending['times_delivered']}), failing the job: {pending}"
+                                )
+                                retry_message = False
+                            elif pending["times_delivered"] > log_error_after_retries:
+                                self.logger.error(
+                                    f"Dangerously many retries ({pending['times_delivered']}), "
+                                    + f"will fail after {fail_after_retries}: {pending}"
+                                )
+
+                            message_id = pending["message_id"]
+                            resp = await self.redis.xclaim(
+                                name=self._stream,
+                                groupname=group,
+                                consumername=consumer_name,
+                                min_idle_time=min_idle_time,
+                                message_ids=[message_id],
+                            )
+                            if not resp:
+                                continue
+                            _, fields = resp[0]
+                            if retry_message:
+                                self.logger.debug("%s: got message to retry %s: %s", log_marker, message_id, fields)
+                                yield self.loader(fields[self._field_name_encoded].decode("utf-8"))
+                            else:
+                                self.logger.debug("%s: not trying again %s", log_marker, message_id)
+                            self.logger.debug("%s: acknowledging %s", log_marker, message_id)
                             await self.redis.xack(self._stream, group, message_id)
             except Exception:
                 self.logger.exception(f"{log_marker}: error consuming retried messages, will try again")
