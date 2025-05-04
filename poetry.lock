@@ -720,13 +720,13 @@ testing = ["coverage", "pyyaml"]
 
 [[package]]
 name = "markdownify"
-version = "0.11.6"
+version = "0.14.1"
 description = "Convert HTML to markdown."
 optional = false
 python-versions = "*"
 files = [
-    {file = "markdownify-0.11.6-py3-none-any.whl", hash = "sha256:ba35fe289d5e9073bcd7d2cad629278fe25f1a93741fcdc0bfb4f009076d8324"},
-    {file = "markdownify-0.11.6.tar.gz", hash = "sha256:009b240e0c9f4c8eaf1d085625dcd4011e12f0f8cec55dedf9ea6f7655e49bfe"},
+    {file = "markdownify-0.14.1-py3-none-any.whl", hash = "sha256:4c46a6c0c12c6005ddcd49b45a5a890398b002ef51380cd319db62df5e09bc2a"},
+    {file = "markdownify-0.14.1.tar.gz", hash = "sha256:a62a7a216947ed0b8dafb95b99b2ef4a0edd1e18d5653c656f68f03db2bfb2f1"},
 ]
 
 [package.dependencies]
@@ -1999,4 +1999,4 @@ propcache = ">=0.2.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "87a3caf0a61270a269428352e380b6bc284183b54feb98fc06ab3ca1ab715286"
+content-hash = "58e26539fc24723ccd2910374989670c5745620619683c166e68e38fb72d1cdc"
