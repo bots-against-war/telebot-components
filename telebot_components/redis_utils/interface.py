@@ -1,8 +1,13 @@
 import datetime
 from abc import ABC, abstractmethod
-from typing import Mapping, Optional, Union
+from typing import Mapping, Optional, TypedDict, Union
 
-# type defs copied from redis
+
+class XPendingRangeResultItem(TypedDict):
+    message_id: bytes
+    consumer: bytes
+    time_since_delivered: int
+    times_delivered: int
 
 
 class RedisInterface(ABC):
@@ -323,6 +328,81 @@ class RedisInterface(ABC):
         failures via SCAN-like semantics.
 
         For more information see https://redis.io/commands/xautoclaim
+        """
+        ...
+
+    @abstractmethod
+    async def xpending_range(
+        self,
+        name: str,
+        groupname: str,
+        min: int | str,
+        max: int | str,
+        count: int,
+        consumername: str | None = None,
+        idle: int | None = None,
+    ) -> list[XPendingRangeResultItem]:
+        """
+        Returns information about pending messages, in a range.
+
+        name: name of the stream.
+        groupname: name of the consumer group.
+        idle: available from  version 6.2. filter entries by their
+        idle-time, given in milliseconds (optional).
+        min: minimum stream ID.
+        max: maximum stream ID.
+        count: number of messages to return
+        consumername: name of a consumer to filter by (optional).
+        """
+        ...
+
+    @abstractmethod
+    async def xclaim(
+        self,
+        name: str,
+        groupname: str,
+        consumername: str,
+        min_idle_time: int,
+        message_ids: Union[list[int | str | bytes], tuple[int | str | bytes]],
+        idle: Union[int, None] = None,
+        time: Union[int, None] = None,
+        retrycount: Union[int, None] = None,
+        force: bool = False,
+        justid: bool = False,
+    ) -> list[tuple[bytes, dict[bytes, bytes]]]:
+        """
+        Changes the ownership of a pending message.
+
+        name: name of the stream.
+
+        groupname: name of the consumer group.
+
+        consumername: name of a consumer that claims the message.
+
+        min_idle_time: filter messages that were idle less than this amount of
+        milliseconds
+
+        message_ids: non-empty list or tuple of message IDs to claim
+
+        idle: optional. Set the idle time (last time it was delivered) of the
+        message in ms
+
+        time: optional integer. This is the same as idle but instead of a
+        relative amount of milliseconds, it sets the idle time to a specific
+        Unix time (in milliseconds).
+
+        retrycount: optional integer. set the retry counter to the specified
+        value. This counter is incremented every time a message is delivered
+        again.
+
+        force: optional boolean, false by default. Creates the pending message
+        entry in the PEL even if certain specified IDs are not already in the
+        PEL assigned to a different client.
+
+        justid: optional boolean, false by default. Return just an array of IDs
+        of messages successfully claimed, without returning the actual message
+
+        For more information see https://redis.io/commands/xclaim
         """
         ...
 

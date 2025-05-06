@@ -211,7 +211,7 @@ cython_debug/
 
 env.sh
 .redis-emulation
-temp.py
+temp*.py
 scripts/*.json
 scripts/*.tsv
 scripts/data
