@@ -38,9 +38,9 @@ pydantic = "^2.10.6"
 [tool.poetry.group.dev.dependencies]
 coverage = "^7.2.3"
 mypy = "^1.9.0"
-pytest = "^7.1.2"
+pytest = "^8.3.5"
 pytest-aiohttp = "1.0.4"
-pytest-asyncio = "^0.18.3"
+pytest-asyncio = "^0.26.0"
 python-dotenv = "^0.20.0"
 aioresponses = "0.7.6"
 pre-commit = "^2.19.0"
@@ -61,6 +61,7 @@ extend-select = ["I"]  # check and fix imports
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 markers = ['integration: requires a real bot to run']
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
 incremental = false
