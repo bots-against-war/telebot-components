@@ -667,10 +667,9 @@ class PubSub(PrefixedStore, Generic[ValueT]):
 
             # reclaiming and retrying pending messages
             try:
-                fail_job = retry == "only" or (
-                    retry == "sometimes" and (self._last_retry_timestamp + retry_after.total_seconds() < time.time())
-                )
-                if fail_job:
+                if retry == "only" or (
+                    retry == "sometimes" and (time.time() > self._last_retry_timestamp + retry_after.total_seconds())
+                ):
                     self._last_retry_timestamp = time.time()
                     min_id = "-"  # special value meaning "minimal possible id in the stream"
                     min_idle_time = int(retry_after.total_seconds() * 1000)
