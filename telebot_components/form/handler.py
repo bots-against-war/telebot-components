@@ -379,6 +379,7 @@ class FormExitContext(Generic[FormResultT]):
     bot: AsyncTeleBot
     last_update: Union[tg.Message, tg.CallbackQuery]
     result: FormResultT
+    dynamic_data: Any
 
 
 FormExitCallback = Callable[[FormExitContext], Coroutine[None, None, None]]
@@ -437,12 +438,8 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
         async def currently_filling_form(update_content: Union[tg.Message, tg.CallbackQuery]) -> bool:
             return await self.form_state_store.exists(update_content.from_user.id)
 
-        async def form_action_handler(
-            user: tg.User,
-            last_message_id: int | None,
-            form_state_updater: Callable[[_FormState, MaybeLanguage], Coroutine[None, None, _FormStateUpdateEffect]],
-            form_exit_context_constructor: Callable[[AsyncTeleBot, FormResultT], FormExitContext],
-        ):
+        async def form_related_update_handler(update: Union[tg.Message, tg.CallbackQuery]):
+            user = update.from_user
             user_id = user.id
             language = await self.get_maybe_language(user)
             form_state = await self.form_state_store.load(user_id)
@@ -450,10 +447,25 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
                 self.logger.error("Error loading form state from the store, dropping it")
                 await self.form_state_store.drop(user_id)
                 return
+
             try:
-                state_update_effect = await form_state_updater(form_state, language)
+                if isinstance(update, tg.Message):
+                    state_update_effect = await form_state.update_with_message(
+                        message=update,
+                        language=language,
+                        form_handler_config=self.config,
+                        form=self.form,
+                    )
+                elif isinstance(update, tg.CallbackQuery):
+                    state_update_effect = await form_state.update_with_callback_query(
+                        call=update,
+                        language=language,
+                        form_handler_config=self.config,
+                        form=self.form,
+                    )
+                else:
+                    raise TypeError(f"Unexpected form-related update type: {update}")
             except Exception as e:
-                self.logger.exception(f"Unexpected error updating form state with {form_state_updater!r}")
                 state_update_effect = _FormStateUpdateEffect(
                     _FormAction.CANCEL,
                     user_action=_UserAction(
@@ -471,19 +483,23 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
 
             user_action = state_update_effect.user_action
             if user_action is not None:
-                last_message_id_ = last_message_id or (await self.last_sent_msg_id_store.load(user_id))
-                if user_action.update_last_message_markup is not None and last_message_id_ is not None:
+                last_message_id = (
+                    update.message.id  # callback queries know what message they are related to
+                    if isinstance(update, tg.CallbackQuery)
+                    else (await self.last_sent_msg_id_store.load(user_id))
+                )
+                if user_action.update_last_message_markup is not None and last_message_id is not None:
                     try:
                         await bot.edit_message_reply_markup(
                             chat_id=user.id,
-                            message_id=last_message_id_,
+                            message_id=last_message_id,
                             reply_markup=user_action.update_last_message_markup,
                         )
                     except Exception:
                         logging.debug("Error editing message reply markup", exc_info=True)
-                if user_action.delete_last_message and last_message_id_ is not None:
+                if user_action.delete_last_message and last_message_id is not None:
                     try:
-                        await bot.delete_message(chat_id=user.id, message_id=last_message_id_)
+                        await bot.delete_message(chat_id=user.id, message_id=last_message_id)
                     except Exception:
                         logging.debug("Error deleting message", exc_info=True)
                 if user_action.send_message_html:
@@ -499,32 +515,20 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
                 return
             else:
                 await self.form_state_store.drop(user_id)
-                form_exit_context = form_exit_context_constructor(bot, form_state.result_so_far)
-                if state_update_effect.form_action is _FormAction.CANCEL:
-                    if on_form_cancelled is not None:
-                        await on_form_cancelled(form_exit_context)
+                form_exit_context = FormExitContext(
+                    bot=bot,
+                    last_update=update,
+                    result=form_state.result_so_far,
+                    dynamic_data=form_state.dynamic_data,
+                )
+                if state_update_effect.form_action is _FormAction.CANCEL and on_form_cancelled is not None:
+                    await on_form_cancelled(form_exit_context)
                 elif state_update_effect.form_action is _FormAction.COMPLETE:
                     await on_form_completed(form_exit_context)
 
         @bot.message_handler(func=currently_filling_form, chat_types=[constants.ChatType.private], priority=100)
         async def form_message_action_handler(message: tg.Message):
-            async def form_state_updater(form_state: _FormState, language: MaybeLanguage):
-                return await form_state.update_with_message(
-                    message=message,
-                    language=language,
-                    form_handler_config=self.config,
-                    form=self.form,
-                )
-
-            def form_exit_context_constructor(bot: AsyncTeleBot, result: FormResultT):
-                return FormExitContext(bot, message, result)
-
-            await form_action_handler(
-                user=message.from_user,
-                last_message_id=None,
-                form_state_updater=form_state_updater,
-                form_exit_context_constructor=form_exit_context_constructor,
-            )
+            await form_related_update_handler(message)
 
         @bot.callback_query_handler(
             func=currently_filling_form,
@@ -532,26 +536,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
             auto_answer=True,
         )
         async def form_inline_action_handler(call: tg.CallbackQuery):
-            async def form_state_updater(form_state: _FormState, language: MaybeLanguage):
-                return await form_state.update_with_callback_query(
-                    call=call,
-                    language=language,
-                    form_handler_config=self.config,
-                    form=self.form,
-                )
-
-            def form_exit_context_constructor(bot: AsyncTeleBot, result: FormResultT):
-                return FormExitContext(bot, call, result)
-
-            try:
-                await form_action_handler(
-                    user=call.from_user,
-                    last_message_id=call.message.id,
-                    form_state_updater=form_state_updater,
-                    form_exit_context_constructor=form_exit_context_constructor,
-                )
-            except Exception:
-                self.logger.exception("Unexpected error processing form action")
+            await form_related_update_handler(call)
 
     async def start(
         self,
