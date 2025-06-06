@@ -8,9 +8,9 @@ from enum import Enum, auto
 from itertools import chain
 from typing import Any, Callable, Coroutine, Generic, Optional, Union, cast
 
-from telebot import AsyncTeleBot
+from telebot import AsyncTeleBot, util
 from telebot import types as tg
-from telebot.types import constants
+from telebot.types import constants, service
 
 from telebot_components.constants import times
 from telebot_components.form.field import (
@@ -68,6 +68,9 @@ class FormHandlerConfig:
     keep_existing_field_value_template: Optional[AnyText] = None
     keep_cmd: str = "/keep"
 
+    # if specified, this commands continue to work during form filling
+    passthrough_commands: list[str] | None = None
+
     def texts(self) -> list[AnyText]:
         res = [
             self.retry_field_msg,
@@ -87,7 +90,11 @@ class FormHandlerConfig:
 
     @property
     def available_cmds(self) -> list[str]:
-        cmds = [self.skip_cmd] + self.cancel_cmds
+        cmds: list[str] = []
+        if self.passthrough_commands is not None:
+            cmds.extend(self.passthrough_commands)
+        cmds.append(self.skip_cmd)
+        cmds.extend(self.cancel_cmds)
         if self.is_keeping_existing_field_value():
             cmds.append(self.keep_cmd)
         return cmds
@@ -435,10 +442,10 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
         on_form_completed: FormExitCallback,
         on_form_cancelled: Optional[FormExitCallback] = None,
     ):
-        async def currently_filling_form(update_content: Union[tg.Message, tg.CallbackQuery]) -> bool:
+        async def is_currently_filling_form(update_content: Union[tg.Message, tg.CallbackQuery]) -> bool:
             return await self.form_state_store.exists(update_content.from_user.id)
 
-        async def form_related_update_handler(update: Union[tg.Message, tg.CallbackQuery]):
+        async def form_related_update_handler(update: Union[tg.Message, tg.CallbackQuery]) -> None:
             user = update.from_user
             user_id = user.id
             language = await self.get_maybe_language(user)
@@ -525,13 +532,21 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
                     await on_form_cancelled(form_exit_context)
                 elif state_update_effect.form_action is _FormAction.COMPLETE:
                     await on_form_completed(form_exit_context)
+                return
 
-        @bot.message_handler(func=currently_filling_form, chat_types=[constants.ChatType.private], priority=100)
-        async def form_message_action_handler(message: tg.Message):
+        @bot.message_handler(func=is_currently_filling_form, chat_types=[constants.ChatType.private], priority=100)
+        async def form_message_action_handler(message: tg.Message) -> service.HandlerResult | None:
+            message_cmd = util.extract_command(message.text_content)
+            if any(
+                passthrough_cmd.strip("/") == message_cmd
+                for passthrough_cmd in (self.config.passthrough_commands or [])
+            ):
+                return service.HandlerResult(continue_to_other_handlers=True)
             await form_related_update_handler(message)
+            return None
 
         @bot.callback_query_handler(
-            func=currently_filling_form,
+            func=is_currently_filling_form,
             callback_data=INLINE_FIELD_CALLBACK_DATA,
             auto_answer=True,
         )

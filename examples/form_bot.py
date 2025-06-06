@@ -339,13 +339,14 @@ async def create_form_bot(redis: RedisInterface, token: str):
                 Language.EN: "The command is not supported! When filling out the form the available commands are: {}",
             },
             cancel_cmd="/cancel",
-            cancel_aliases=["/stop", "/menu"],
+            cancel_aliases=["/stop"],
             skip_cmd="/skip",
             keep_existing_field_value_template={
                 Language.RU: "Текущее значение: {}; {} - оставить его.",
                 Language.EN: "Current value: {}; use {} to keep it.",
             },
             keep_cmd="/keep",
+            passthrough_commands=["/help"],
         ),
         language_store=language_store,
     )
@@ -370,7 +371,7 @@ async def create_form_bot(redis: RedisInterface, token: str):
     async def aux_form_start(message: tg.Message):
         await aux_form_handler.start(bot, message.from_user)
 
-    @bot.message_handler()
+    @bot.message_handler(commands=["form"])
     async def default_handler(message: tg.Message):
         await form_handler.start(
             bot,
@@ -382,6 +383,10 @@ async def create_form_bot(redis: RedisInterface, token: str):
                 "favorite_subject": {SchoolSubject.SCIENCE, SchoolSubject.PE},
             },
         )
+
+    @bot.message_handler(commands=["help", "start"])
+    async def start_msg(message: tg.Message):
+        await bot.send_message(chat_id=message.chat.id, text="Hello, this is form demo bot!")
 
     async def on_form_cancelled(context: FormExitContext[FormResultT]):
         user = context.last_update.from_user
