@@ -162,12 +162,12 @@ class KeySetStore(SingleKeyStore[ItemT]):
     @redis_retry()
     async def pop_multiple(self, key: str_able, count: int) -> list[ItemT]:
         dumps = await self.redis.spop(self._full_key(key), count=count)
-        if dumps is None:
-            return []
         if isinstance(dumps, bytes):
             dumps_list = [dumps]
-        else:
+        elif isinstance(dumps, list):
             dumps_list = dumps
+        else:
+            return []
         return [self.loader(d.decode("utf-8")) for d in dumps_list]
 
     @redis_retry()
@@ -207,6 +207,20 @@ class KeyListStore(SingleKeyStore[ItemT]):
         """End index is inclusive, according to Redis convention and unlike Python convention"""
         item_dumps = await self.redis.lrange(self._full_key(key), start, end)
         return [self.loader(item_dump.decode("utf-8")) for item_dump in item_dumps] or None
+
+    async def pop(self, key: str_able) -> ItemT | None:
+        res = await self.pop_multiple(key=key, count=None)
+        return res[0] if len(res) == 1 else None
+
+    @redis_retry()
+    async def pop_multiple(self, key: str_able, count: int | None) -> list[ItemT]:
+        res = await self.redis.rpop(self._full_key(key), count=count)
+        if isinstance(res, list):
+            return [self.loader(item.decode("utf-8")) for item in res]
+        elif isinstance(res, bytes):
+            return [self.loader(res.decode("utf-8"))]
+        else:
+            return []
 
     async def tail(self, key: str_able, start: int) -> list[ItemT] | None:
         return await self.slice(key, start=start, end=-1)
