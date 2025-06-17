@@ -23,8 +23,10 @@ if __name__ == "__main__":
     with open(lang_data_file) as f:
         lang_data_raw = json.load(f)
 
+    assert isinstance(table_body, bs4.Tag)
     for row in table_body.children:
         try:
+            assert isinstance(row, bs4.Tag)
             cols = row.find_all("td")
             lang_el, localized_el = cols
             lang = str(lang_el.text)
