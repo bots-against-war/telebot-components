@@ -165,6 +165,27 @@ async def test_key_list_push_multiple(redis: RedisInterface):
     assert await store.slice("key", 2, 4) == [3, 4, 5]
 
 
+async def test_key_list_pop(redis: RedisInterface):
+    store = KeyListStore[int](
+        name="kerr",
+        prefix=generate_str(),
+        redis=redis,
+    )
+
+    await store.push_multiple("key", (1, 2, 3, 4, 5))
+    assert await store.all("key") == [1, 2, 3, 4, 5]
+    assert await store.pop("key") == 5
+    assert await store.all("key") == [1, 2, 3, 4]
+    assert await store.pop_multiple("key", count=3) == [4, 3, 2]
+    assert await store.all("key") == [1]
+    assert await store.pop("key") == 1
+    assert await store.pop("key") is None
+    assert await store.pop("key") is None
+    assert await store.pop_multiple("key", count=None) == []
+    assert await store.pop_multiple("key", count=1) == []
+    assert await store.pop_multiple("key", count=10) == []
+
+
 @pytest.fixture(
     params=[
         lambda: random.randint(0, 10000),
