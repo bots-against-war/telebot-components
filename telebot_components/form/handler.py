@@ -17,6 +17,8 @@ from telebot_components.form.field import (
     INLINE_FIELD_CALLBACK_DATA,
     CallbackQueryProcessingContext,
     FormField,
+    GetQueryMessageContext,
+    GetReplyMarkupContext,
     InlineFormField,
     MessageProcessingContext,
     MessageProcessingResult,
@@ -163,7 +165,7 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
         )
 
     @classmethod
-    def from_store(self, dump: str, form_fields: list[FormField], logger: logging.Logger) -> Optional["_FormState"]:
+    def from_store(cls, dump: str, form_fields: list[FormField], logger: logging.Logger) -> Optional["_FormState"]:
         try:
             asdict = json.loads(dump)
             form_field_by_name = {f.name: f for f in form_fields}
@@ -180,7 +182,13 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
     async def get_current_field_message(
         self, user: tg.User, language: MaybeLanguage, form_handler_config: FormHandlerConfig
     ) -> str:
-        query = await self.current_field.get_query_message(user, dynamic_data=self.dynamic_data)
+        query = await self.current_field.get_query_message(
+            GetQueryMessageContext(
+                user=user,
+                dynamic_data=self.dynamic_data,
+                result_so_far=self.result_so_far,
+            )
+        )
         sentences = [any_text_to_str(query, language)]
         if not self.current_field.required:
             sentences.append(form_handler_config.can_skip_field_msg(language))
@@ -197,10 +205,13 @@ class _FormState(Generic[FormResultT, FormDynamicDataT]):
 
     async def get_current_field_reply_markup(self, language: MaybeLanguage, user: tg.User) -> tg.ReplyMarkup:
         return await self.current_field.get_reply_markup(
-            language=language,
-            current_value=self.result_so_far.get(self.current_field.name),
-            user=user,
-            dynamic_data=self.dynamic_data,
+            GetReplyMarkupContext(
+                language=language,
+                current_value=self.result_so_far.get(self.current_field.name),
+                user=user,
+                dynamic_data=self.dynamic_data,
+                result_so_far=self.result_so_far,
+            )
         )
 
     async def _get_next_field(self, user: tg.User, language: MaybeLanguage, form: Form) -> FormField | None:

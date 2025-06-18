@@ -22,6 +22,7 @@ from typing import (
     Collection,
     Generic,
     Iterable,
+    Mapping,
     Protocol,
     Type,
     TypeVar,
@@ -211,6 +212,22 @@ class CallbackQueryProcessingResult(Generic[FieldValueT]):
     new_dynamic_data: Any | None = None
 
 
+@dataclass
+class GetReplyMarkupContext(Generic[FieldValueT]):
+    language: MaybeLanguage
+    current_value: FieldValueT | None
+    user: tg.User
+    dynamic_data: Any
+    result_so_far: Mapping[str, Any]
+
+
+@dataclass
+class GetQueryMessageContext:
+    user: tg.User
+    dynamic_data: Any
+    result_so_far: Mapping[str, Any]
+
+
 # endregion
 
 # region: form field base
@@ -278,7 +295,7 @@ class FormField(Generic[FieldValueT]):
         """
         raise NotImplementedError("FormField cannot be used directly, please use concrete subclasses")
 
-    async def get_query_message(self, user: tg.User, dynamic_data: Any) -> AnyText:
+    async def get_query_message(self, context: GetQueryMessageContext) -> AnyText:
         return self.query_message
 
     def value_to_str(self, value: FieldValueT, language: MaybeLanguage) -> str:
@@ -295,13 +312,7 @@ class FormField(Generic[FieldValueT]):
         else:
             return any_text_to_str(self.echo_result_template, language).format(self.value_to_str(value, language))
 
-    async def get_reply_markup(
-        self,
-        language: MaybeLanguage,
-        current_value: FieldValueT | None,
-        user: tg.User,
-        dynamic_data: Any,
-    ) -> tg.ReplyMarkup:
+    async def get_reply_markup(self, context: GetReplyMarkupContext[FieldValueT]) -> tg.ReplyMarkup:
         return tg.ReplyKeyboardRemove()
 
     def texts(self) -> list[AnyText]:
@@ -376,7 +387,7 @@ class IntegerListField(FormField[list[int]]):
         except Exception:
             raise BadFieldValueError(self.not_an_integer_list_error_msg)
 
-    def value_to_str(self, value: list[int], lang: MaybeLanguage) -> str:
+    def value_to_str(self, value: list[int], language: MaybeLanguage) -> str:
         return ", ".join(str(i) for i in value)
 
 
@@ -411,7 +422,7 @@ class DateField(FormField[date]):
         else:
             return []
 
-    def value_to_str(self, value: date, lang: MaybeLanguage) -> str:
+    def value_to_str(self, value: date, language: MaybeLanguage) -> str:
         return value.strftime("%d.%m.%Y")
 
     def value_id(self, value: date) -> str:
@@ -428,7 +439,7 @@ class TimeField(FormField[time]):
         except ValueError:
             raise BadFieldValueError(self.bad_time_format_msg)
 
-    def value_to_str(self, value: time, lang: MaybeLanguage) -> str:
+    def value_to_str(self, value: time, language: MaybeLanguage) -> str:
         return value.isoformat(timespec="minutes")
 
     def value_id(self, value: time) -> str:
@@ -619,15 +630,9 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
                         return enum
         return None
 
-    async def get_reply_markup(
-        self,
-        language: MaybeLanguage,
-        current_value: Enum | None,
-        user: tg.User,
-        dynamic_data: Any,
-    ) -> tg.ReplyKeyboardMarkup:
+    async def get_reply_markup(self, context: GetReplyMarkupContext[FieldValueT]) -> tg.ReplyMarkup:
         kbd = tg.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=self.menu_row_width)
-        kbd.add(*[tg.KeyboardButton(any_text_to_str(option.value, language)) for option in self.EnumClass])
+        kbd.add(*[tg.KeyboardButton(any_text_to_str(option.value, context.language)) for option in self.EnumClass])
         return kbd
 
     def parse(self, message: tg.Message) -> Enum:
@@ -637,9 +642,9 @@ class SingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
         else:
             return parsed_enum
 
-    def value_to_str(self, value: Enum, lang: MaybeLanguage) -> str:
+    def value_to_str(self, value: Enum, language: MaybeLanguage) -> str:
         if is_any_text(value.value):
-            return any_text_to_str(value.value, lang)
+            return any_text_to_str(value.value, language)
         else:
             return str(value.value)
 
@@ -705,13 +710,7 @@ class SearchableSingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
     def custom_texts(self) -> list[AnyText]:
         return [self._as_item(e).button_label for e in self.EnumClass]
 
-    async def get_reply_markup(
-        self,
-        language: MaybeLanguage,
-        current_value: Enum | None,
-        user: tg.User,
-        dynamic_data: Any,
-    ) -> tg.ReplyMarkup:
+    async def get_reply_markup(self, context: GetReplyMarkupContext[FieldValueT]) -> tg.ReplyMarkup:
         # NOTE: no markup at the start, as in text field; later we set to "search results"
         return tg.ReplyKeyboardRemove()
 
@@ -754,10 +753,10 @@ class SearchableSingleSelectField(_EnumDefinedFieldMixin, FormField[Enum]):
                 complete_field=False,
             )
 
-    def value_to_str(self, value: Enum, lang: MaybeLanguage) -> str:
+    def value_to_str(self, value: Enum, language: MaybeLanguage) -> str:
         item = self._as_item(value)
         if is_any_text(item.button_label):
-            return any_text_to_str(item.button_label, lang)
+            return any_text_to_str(item.button_label, language)
         else:
             return str(item.button_label)
 
@@ -908,14 +907,8 @@ class MultipleSelectField(_EnumDefinedFieldMixin, StrictlyInlineFormField[set[En
                 new_field_value=current_value,
             )
 
-    async def get_reply_markup(
-        self,
-        language: MaybeLanguage,
-        current_value: set[Enum] | None,
-        user: tg.User,
-        dynamic_data: Any,
-    ) -> tg.InlineKeyboardMarkup:
-        return self._get_reply_markup_for_page(language=language, current_value=current_value, page=0)
+    async def get_reply_markup(self, context: GetReplyMarkupContext[set[Enum]]) -> tg.ReplyMarkup:
+        return self._get_reply_markup_for_page(language=context.language, current_value=context.current_value, page=0)
 
     def _get_reply_markup_for_page(
         self,
@@ -1022,6 +1015,8 @@ class DateMenuField(StrictlyInlineFormField[date]):
                 complete_field=True,
                 new_field_value=selected_date,
             )
+        else:
+            raise RuntimeError(f"Unexpected payload action: {payload.action}")
 
     def _calendar_keyboard(
         self, year: int | None, month: int | None, selected_value: date | None
@@ -1034,20 +1029,14 @@ class DateMenuField(StrictlyInlineFormField[date]):
             selected_date=selected_value,
         )
 
-    async def get_reply_markup(
-        self,
-        language: MaybeLanguage,
-        current_value: date | None,
-        user: tg.User,
-        dynamic_data: Any,
-    ) -> tg.ReplyMarkup:
+    async def get_reply_markup(self, context: GetReplyMarkupContext[date]) -> tg.ReplyMarkup:
         return self._calendar_keyboard(
-            year=current_value.year if current_value else None,
-            month=current_value.month if current_value else None,
-            selected_value=current_value,
+            year=context.current_value.year if context.current_value else None,
+            month=context.current_value.month if context.current_value else None,
+            selected_value=context.current_value,
         )
 
-    def value_to_str(self, value: date, lang: MaybeLanguage) -> str:
+    def value_to_str(self, value: date, language: MaybeLanguage) -> str:
         return value.strftime("%d.%m.%Y")
 
     def value_id(self, value: date) -> str:
@@ -1093,16 +1082,10 @@ class _DynamicSingleSelectFieldBase(FormField[DynamicSingleSelectFieldValueT], G
             raise RuntimeError("Failed to parse dynamic options, and default options are not set")
         return res
 
-    async def get_reply_markup(
-        self,
-        language: MaybeLanguage,
-        current_value: DynamicSingleSelectFieldValueT | None,
-        user: tg.User,
-        dynamic_data: Any,
-    ) -> tg.ReplyKeyboardMarkup:
-        options = self.parse_dynamic_data(dynamic_data)
+    async def get_reply_markup(self, context: GetReplyMarkupContext[DynamicSingleSelectFieldValueT]) -> tg.ReplyMarkup:
+        options = self.parse_dynamic_data(context.dynamic_data)
         kbd = tg.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=self.menu_row_width)
-        kbd.add(*[tg.KeyboardButton(any_text_to_str(option.label, language)) for option in options])
+        kbd.add(*[tg.KeyboardButton(any_text_to_str(option.label, context.language)) for option in options])
         return kbd
 
     def match_option(self, options: list[DynamicOption], text: str) -> DynamicOption | None:
@@ -1161,8 +1144,7 @@ class DynamicSingleSelectFieldFull(_DynamicSingleSelectFieldBase[DynamicOption])
 
 
 class HasLabel(Protocol):
-    def label(self) -> str:
-        pass
+    def label(self) -> str: ...
 
 
 ListInputItem = TypeVar("ListInputItem", bound=HasLabel)
@@ -1242,17 +1224,11 @@ class ListInputField(InlineFormField[list[ListInputItem]], Generic[ListInputItem
                 delete_last_message=True,
             )
 
-    async def get_reply_markup(
-        self,
-        language: MaybeLanguage,
-        current_value: list[ListInputItem] | None,
-        user: tg.User,
-        dynamic_data: Any,
-    ) -> tg.InlineKeyboardMarkup:
+    async def get_reply_markup(self, context: GetReplyMarkupContext[list[ListInputItem]]) -> tg.ReplyMarkup:
         return await self._get_reply_markup_for_page(
-            language=language,
-            current_value=current_value,
-            user=user,
+            language=context.language,
+            current_value=context.current_value,
+            user=context.user,
             page=0,
         )
 
