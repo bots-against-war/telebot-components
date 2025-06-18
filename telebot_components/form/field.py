@@ -222,7 +222,7 @@ class GetReplyMarkupContext(Generic[FieldValueT]):
 
 
 @dataclass
-class GetQueryMessageContext(Generic[FieldValueT]):
+class GetQueryMessageContext:
     user: tg.User
     dynamic_data: Any
     result_so_far: Mapping[str, Any]
@@ -295,7 +295,7 @@ class FormField(Generic[FieldValueT]):
         """
         raise NotImplementedError("FormField cannot be used directly, please use concrete subclasses")
 
-    async def get_query_message(self, context: GetQueryMessageContext[FieldValueT]) -> AnyText:
+    async def get_query_message(self, context: GetQueryMessageContext) -> AnyText:
         return self.query_message
 
     def value_to_str(self, value: FieldValueT, language: MaybeLanguage) -> str:
