@@ -12,7 +12,7 @@ from typing import (  # type: ignore
     Optional,
     Type,
     Union,
-    _TypedDictMeta,
+    _TypedDictMeta,  # type: ignore
     get_args,
 )
 
@@ -145,7 +145,7 @@ class Form:
             # NOTE: this is semantically set, but we use list for predictability
             vertices_without_incoming_edges: list[Optional[str]] = [self.start_field.name]
             while vertices_without_incoming_edges:
-                vertices_without_incoming_edges.sort()
+                vertices_without_incoming_edges.sort(key=lambda v: str(v))
                 from_ = vertices_without_incoming_edges.pop(0)
                 if from_ is not None:
                     topologically_sorted.append(from_)
