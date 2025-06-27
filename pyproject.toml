@@ -16,7 +16,7 @@ style = "semver"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-telebot-against-war = "^0.7.9"
+telebot-against-war = "^0.7.11"
 redis = "^5.0.1"
 py-trello = "^0.18.0"
 markdownify = "^1.1.0"

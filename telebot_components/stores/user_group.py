@@ -70,7 +70,7 @@ class UserGroupStore:
             return False
 
     def membership_required(self, bot: AsyncTeleBot, membership_required_reply_text: Optional[str] = None):
-        def decorator(handler_func: HandlerFunction[tg.Message]) -> HandlerFunction[tg.Message]:
+        def decorator(handler_func: HandlerFunction) -> HandlerFunction:
             @functools.wraps(handler_func)
             async def wrapped(*args) -> Any:
                 try:

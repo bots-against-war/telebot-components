@@ -1863,13 +1863,13 @@ files = [
 
 [[package]]
 name = "telebot-against-war"
-version = "0.7.10"
+version = "0.7.11"
 description = "Async-first fork of pyTelegramBotApi"
 optional = false
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "telebot_against_war-0.7.10-py3-none-any.whl", hash = "sha256:ffd1c142d2bf4ff919e8019edda21dd777a47a6c5a01babcbf3dfff946916327"},
-    {file = "telebot_against_war-0.7.10.tar.gz", hash = "sha256:fbe32e357903845e26d69ee7d43dfed3e27d4a06417f47acf3a75b98a00aa44a"},
+    {file = "telebot_against_war-0.7.11-py3-none-any.whl", hash = "sha256:1157847d39d9c28ad9908d1d9a1696389827b16aba3789b41f07d14e5641d51c"},
+    {file = "telebot_against_war-0.7.11.tar.gz", hash = "sha256:ac8abae24adf3edd2de18daa72a691b9990fd4f0727336af6ac27d3dcd6abfda"},
 ]
 
 [package.dependencies]
@@ -2213,4 +2213,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "e32063eb3f341b34cde10e447dbb2480109fa5cc8f4d4352c95b6d33882c5670"
+content-hash = "53fffd93d518adf4aec888872e5b2071d02dc94fc9b5c70918ac9e844523bb9b"
