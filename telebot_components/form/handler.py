@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 from dataclasses import dataclass
@@ -12,7 +13,6 @@ from telebot import AsyncTeleBot, util
 from telebot import types as tg
 from telebot.types import constants, service
 
-from telebot_components.constants import times
 from telebot_components.form.field import (
     INLINE_FIELD_CALLBACK_DATA,
     CallbackQueryProcessingContext,
@@ -412,6 +412,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
         form: Form,
         config: FormHandlerConfig,
         language_store: Optional[LanguageStore] = None,
+        form_state_lifetime: datetime.timedelta | None = datetime.timedelta(hours=3),
     ):
         self.config = config
         self.form = form
@@ -422,7 +423,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
             name=f"form-state-for-{name}",
             prefix=bot_prefix,
             redis=redis,
-            expiration_time=3 * times.HOUR,
+            expiration_time=form_state_lifetime,
             dumper=lambda fs: fs.to_store() if fs is not None else "",
             loader=lambda dump: _FormState.from_store(dump, form.fields, logger=self.logger),
         )
@@ -430,7 +431,7 @@ class FormHandler(Generic[FormResultT, FormDynamicDataT]):
             name=f"last-sent-msg-{name}",
             prefix=bot_prefix,
             redis=redis,
-            expiration_time=3 * times.HOUR,
+            expiration_time=form_state_lifetime,
         )
 
         self.language_store = language_store
