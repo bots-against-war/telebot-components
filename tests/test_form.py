@@ -731,3 +731,67 @@ async def test_list_input(redis: RedisInterface) -> None:
     assert ctx.result == {"things": ["ball", "car", "chair", "table", "flower"]}
 
     assert form.result_to_html(ctx.result, lang=None) == "<b>Things</b>\nball, car, chair, table, flower\n"
+
+
+async def test_response_to_user_in_last_message(redis: RedisInterface) -> None:
+    bot_prefix = generate_str()
+
+    form = Form(
+        [
+            PlainTextField(
+                name="value",
+                required=True,
+                query_message="Enter value:",
+                empty_text_error_msg="Empty",
+                echo_result_template="Your value: {}",
+            )
+        ]
+    )
+
+    handler = FormHandler[Any, Any](
+        redis=redis,
+        bot_prefix=bot_prefix,
+        name="testing-form",
+        form=form,
+        config=FormHandlerConfig(
+            form_starting_template="Starting form",
+            echo_filled_field=True,
+            retry_field_msg="retry",
+            unsupported_cmd_error_template="unsupported ({})",
+            cancelling_because_of_error_template="error: {}",
+            can_skip_field_template="({} to skip)",
+            cant_skip_field_msg="cant skip this",
+        ),
+    )
+
+    bot = MockedAsyncTeleBot(token="foobar")
+
+    @bot.message_handler(commands=["form"])
+    async def form_start(message: tg.Message) -> None:
+        await handler.start(bot, user=message.from_user)
+
+    async def form_completed(ctx: FormExitContext) -> None:
+        await bot.send_message(ctx.last_update.from_user.id, "Form completed!")
+
+    handler.setup(bot, on_form_completed=form_completed)
+
+    telegram = TelegramServerMock()
+
+    await telegram.send_message_to_bot(bot, user_id=1, text="/form")
+    assert len(bot.method_calls) == 1
+    assert_list_of_required_subdicts(
+        extract_full_kwargs(bot.method_calls["send_message"]),
+        [{"chat_id": 1, "text": "Starting form\n\nEnter value:"}],
+    )
+    bot.method_calls.clear()
+
+    await telegram.send_message_to_bot(bot, user_id=1, text="1312")
+    assert len(bot.method_calls) == 1
+    assert_list_of_required_subdicts(
+        extract_full_kwargs(bot.method_calls["send_message"]),
+        [
+            {"chat_id": 1, "text": "Your value: 1312"},
+            {"chat_id": 1, "text": "Form completed!"},
+        ],
+    )
+    bot.method_calls.clear()
