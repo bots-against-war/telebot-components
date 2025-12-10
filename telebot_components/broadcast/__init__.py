@@ -1,11 +1,12 @@
 import asyncio
+import functools
 import json
 import logging
 import random
 import time
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Awaitable, Callable, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Literal, Optional, TypeVar
 
 from telebot import AsyncTeleBot
 from telebot import api as telegram_api
@@ -19,10 +20,21 @@ from telebot_components.broadcast.message_senders import (
 from telebot_components.broadcast.subscriber import Subscriber
 from telebot_components.redis_utils.interface import RedisInterface
 from telebot_components.stores.generic import KeyDictStore, KeySetStore, KeyValueStore
-from telebot_components.utils import restart_on_errors
+from telebot_components.utils import AsyncFunctionT
 
 prevent_shutdown_on_consuming_queue = PreventShutdown("consuming broadcast queue")
 prevent_shutdown_on_broadcasting = PreventShutdown("broadcasting")
+
+
+def log_fatal_error(function: AsyncFunctionT) -> AsyncFunctionT:
+    @functools.wraps(function)
+    async def decorated(*args, **kwargs):
+        try:
+            return await function(*args, **kwargs)
+        except Exception:
+            logging.exception(f"Fatal error in {function.__qualname__}, exiting it")
+
+    return decorated  # type: ignore
 
 
 @dataclass(frozen=True)
@@ -60,6 +72,8 @@ class BroadcastHandler:
         redis: RedisInterface,
         bot_prefix: str,
         topic_priority_key: Callable[[str], float] = lambda _: random.random(),
+        send_retries: int = 10,
+        send_backoff_strategy: Literal["constant", "random-exponential", "from-header"] = "from-header",
     ):
         self.topic_priority_key = topic_priority_key
         self.is_broadcasting = False
@@ -93,6 +107,8 @@ class BroadcastHandler:
             loader=QueuedBroadcast.load,
         )
         self.logger = logging.getLogger(__name__ + f"[{bot_prefix}]")
+        self._send_retries = send_retries
+        self._send_backoff_strategy = send_backoff_strategy
 
     async def topics(self) -> list[str]:
         """At least one person should be subscribed to the topic"""
@@ -145,10 +161,10 @@ class BroadcastHandler:
     async def new_broadcast(
         self, topic: str, sender: AbstractMessageSender, schedule_at: Optional[float] = None
     ) -> bool:
-        queued_broadcast = QueuedBroadcast(sender=sender, topic=topic, start_time=schedule_at or time.time())
-        if await self.broadcast_queue_store.add(self.CONST_KEY, queued_broadcast):
+        new_qb = QueuedBroadcast(sender=sender, topic=topic, start_time=schedule_at or time.time())
+        if await self.broadcast_queue_store.add(self.CONST_KEY, new_qb):
             self.next_broadcast_queue_processing_time = min(
-                self.next_broadcast_queue_processing_time, queued_broadcast.start_time
+                self.next_broadcast_queue_processing_time, new_qb.start_time
             )
             return True
         else:
@@ -166,52 +182,54 @@ class BroadcastHandler:
         )
 
     @prevent_shutdown_on_consuming_queue
-    @restart_on_errors
+    @log_fatal_error
     async def _consume_broadcasts_queue(self, on_broadcast_start: Optional[BroadcastCallback] = None):
         while True:
             if time.time() < self.next_broadcast_queue_processing_time:
                 async with prevent_shutdown_on_consuming_queue.allow_shutdown():
                     await asyncio.sleep(5)
                 continue
+
             self.logger.info("Processing broadcast queue")
-            queued_broadcasts = await self.broadcast_queue_store.all(self.CONST_KEY)
-            self.logger.info(f"Found {len(queued_broadcasts)} queued broadcasts")
-            dequeued_broadcasts: list[QueuedBroadcast] = []
-            for qb in queued_broadcasts:
-                if qb.start_time > time.time():
+            broadcast_queue = await self.broadcast_queue_store.pop_multiple(
+                self.CONST_KEY,
+                count=50000,  # NOTE: works only if real queue is shorter than this
+            )
+            self.logger.info(f"Found a total of {len(broadcast_queue)} queued broadcasts")
+            new_broadcast_queue: list[QueuedBroadcast] = []
+            for qb in broadcast_queue:
+                if (
+                    qb.start_time > time.time()
+                    or (await self.current_broadcast_by_topic_store.load(qb.topic)) is not None
+                ):
+                    self.logger.debug(
+                        f"Not starting {qb}, either it's too early "
+                        + "or waiting for previous broadcast on the same topic"
+                    )
+                    new_broadcast_queue.append(qb)
                     continue
-                if (await self.current_broadcast_by_topic_store.load(qb.topic)) is None:
-                    self.logger.info(
-                        f"Starting broadcast on topic {qb.topic} "
-                        + f"scheduled {time.time() - qb.start_time:3f} sec ago "
-                        + f"with sender {qb.sender}"
-                    )
-                    await self.current_broadcast_by_topic_store.save(qb.topic, qb)
-                    await self.current_pending_subscribers_by_topic_store.add_multiple(
-                        qb.topic, await self.topic_subscribers(qb.topic)
-                    )
-                    dequeued_broadcasts.append(qb)
-                    if on_broadcast_start is not None:
-                        try:
-                            await on_broadcast_start(qb)
-                        except Exception:
-                            self.logger.exception("Unexpected error in on_broadcast_start callback, ignoring")
-                    self.is_broadcasting = True
-                else:
-                    self.logger.info(
-                        f"Overdue broadcast on topic {qb.topic} "
-                        + f"scheduled {time.time() - qb.start_time:3f} sec ago "
-                        + f"with sender {qb.sender}, waiting for previous broadcast on this topic to finish"
-                    )
-            if dequeued_broadcasts:
+
+                self.is_broadcasting = True
+                subscribers = await self.topic_subscribers(qb.topic)
                 self.logger.info(
-                    f"{len(dequeued_broadcasts)} broadcasts popped from the queue and started broadcasting"
+                    f"Starting broadcast on topic {qb.topic} to {len(subscribers)} subscribers with sender {qb.sender}; "
+                    + f"was scheduled {time.time() - qb.start_time:3f} sec ago"
                 )
-                for b in dequeued_broadcasts:
-                    await self.broadcast_queue_store.remove(self.CONST_KEY, b)
-                queued_broadcasts = await self.broadcast_queue_store.all(self.CONST_KEY)
+                await self.current_broadcast_by_topic_store.save(qb.topic, qb)
+                await self.current_pending_subscribers_by_topic_store.add_multiple(qb.topic, subscribers)
+                if on_broadcast_start is not None:
+                    try:
+                        await on_broadcast_start(qb)
+                    except Exception:
+                        self.logger.exception("Unexpected error in on_broadcast_start callback, ignoring")
+
+            if new_broadcast_queue:
+                self.logger.info(
+                    f"{len(broadcast_queue) - len(new_broadcast_queue)} broadcasts popped from the queue and started broadcasting"
+                )
+                await self.broadcast_queue_store.add_multiple(self.CONST_KEY, new_broadcast_queue)
             self.next_broadcast_queue_processing_time = (
-                min([qb.start_time for qb in queued_broadcasts]) if queued_broadcasts else time.time() + 300
+                min([qb.start_time for qb in broadcast_queue]) if new_broadcast_queue else time.time() + 300
             )
             self.logger.info(
                 "The next broadcast queue processing scheduled "
@@ -219,7 +237,7 @@ class BroadcastHandler:
             )
 
     @prevent_shutdown_on_broadcasting
-    @restart_on_errors
+    @log_fatal_error
     async def _send_current_broadcasts(self, bot: AsyncTeleBot, on_broadcast_end: Optional[BroadcastCallback] = None):
         BATCH_SIZE = 200  # each batch should take around 10-20 sec to complete
         MESSAGES_PER_SECOND_LIMIT = 20  # telegram rate limit is around 30 msg/sec, but we play safe
