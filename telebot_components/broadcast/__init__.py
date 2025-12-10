@@ -67,6 +67,7 @@ OnBroadcastEndCallback = Callable[[QueuedBroadcast], Awaitable[Any]]
 OnBroadcastStartCallback = Callable[[QueuedBroadcast, list[Subscriber]], Awaitable[Any]]
 
 
+@dataclass(frozen=True)
 class MessageBroadcastingConfig:
     batch_size = 200  # each batch should take around 10-20 sec to complete
     messages_per_second_limit = 20  # telegram rate limit is around 30 msg/sec, but we play safe
