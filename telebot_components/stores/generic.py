@@ -3,6 +3,7 @@ import dataclasses
 import datetime
 import json
 import logging
+import os
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -50,10 +51,15 @@ WrappedFuncT = TypeVar("WrappedFuncT")
 
 
 def redis_retry() -> Callable[[WrappedFuncT], WrappedFuncT]:
+    if os.environ.get("NO_REDIS_RETRY"):
+        retry: tenacity.retry_base = tenacity.retry_never
+    else:
+        retry = tenacity.retry_if_exception_type(RedisError)
+
     return tenacity.retry(  # type: ignore
         wait=tenacity.wait.wait_random_exponential(multiplier=1, max=30, exp_base=2, min=0.5),
         stop=tenacity.stop.stop_after_delay(max_delay=60),
-        retry=tenacity.retry_if_exception_type(RedisError),
+        retry=retry,
         after=tenacity.after.after_log(logger, log_level=logging.WARNING),
     )
 

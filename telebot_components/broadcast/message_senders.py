@@ -22,7 +22,7 @@ class AbstractMessageSender(ABC):
 
     @classmethod
     @abstractmethod
-    def concrete_name(self) -> str: ...
+    def concrete_name(cls) -> str: ...
 
     @abstractmethod
     def dump_concrete(self) -> dict: ...
@@ -35,7 +35,7 @@ class AbstractMessageSender(ABC):
 
     @classmethod
     @abstractmethod
-    def load_concrete(self, dump: dict) -> "AbstractMessageSender": ...
+    def load_concrete(cls, dump: dict) -> "AbstractMessageSender": ...
 
     @classmethod
     def load(cls, dump: dict) -> "AbstractMessageSender":
@@ -44,7 +44,7 @@ class AbstractMessageSender(ABC):
         return type_.load_concrete(dump["concrete_dump"])
 
     @abstractmethod
-    async def send(self, context: MessageSenderContext) -> None: ...
+    async def send(self, context: MessageSenderContext) -> bool | None: ...
 
 
 class DataclassMessageSender(AbstractMessageSender):
@@ -67,7 +67,7 @@ class MessageCopySender(DataclassMessageSender):
     source_message_id: int
 
     @classmethod
-    def concrete_name(self) -> str:
+    def concrete_name(cls) -> str:
         return "MessageCopySender"
 
     @classmethod
@@ -91,7 +91,7 @@ class TextSender(DataclassMessageSender):
     parse_mode: str = "HTML"
 
     @classmethod
-    def concrete_name(self) -> str:
+    def concrete_name(cls) -> str:
         return "TextSender"
 
     async def send(self, context: MessageSenderContext) -> None:
