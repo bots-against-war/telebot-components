@@ -63,7 +63,8 @@ class QueuedBroadcast:
 
 
 TopicActionResultT = TypeVar("TopicActionResultT")
-BroadcastCallback = Callable[[QueuedBroadcast], Awaitable[Any]]
+OnBroadcastEndCallback = Callable[[QueuedBroadcast], Awaitable[Any]]
+OnBroadcastStartCallback = Callable[[QueuedBroadcast, list[Subscriber]], Awaitable[Any]]
 
 
 class MessageBroadcastingConfig:
@@ -181,8 +182,8 @@ class BroadcastHandler:
     async def background_job(
         self,
         bot: AsyncTeleBot,
-        on_broadcast_start: Optional[BroadcastCallback] = None,
-        on_broadcast_end: Optional[BroadcastCallback] = None,
+        on_broadcast_start: Optional[OnBroadcastStartCallback] = None,
+        on_broadcast_end: Optional[OnBroadcastEndCallback] = None,
     ):
         await asyncio.gather(
             self._consume_broadcasts_queue(on_broadcast_start),
@@ -191,7 +192,7 @@ class BroadcastHandler:
 
     @prevent_shutdown_on_consuming_queue
     @log_fatal_error
-    async def _consume_broadcasts_queue(self, on_broadcast_start: Optional[BroadcastCallback] = None):
+    async def _consume_broadcasts_queue(self, on_broadcast_start: OnBroadcastStartCallback | None = None):
         while True:
             if time.time() < self.next_broadcast_queue_processing_time:
                 async with prevent_shutdown_on_consuming_queue.allow_shutdown():
@@ -227,7 +228,7 @@ class BroadcastHandler:
                 await self.current_pending_subscribers_by_topic_store.add_multiple(qb.topic, subscribers)
                 if on_broadcast_start is not None:
                     try:
-                        await on_broadcast_start(qb)
+                        await on_broadcast_start(qb, subscribers)
                     except Exception:
                         self.logger.exception("Unexpected error in on_broadcast_start callback, ignoring")
 
@@ -246,11 +247,13 @@ class BroadcastHandler:
 
     @prevent_shutdown_on_broadcasting
     @log_fatal_error
-    async def _send_current_broadcasts(self, bot: AsyncTeleBot, on_broadcast_end: Optional[BroadcastCallback] = None):
+    async def _send_current_broadcasts(
+        self, bot: AsyncTeleBot, on_broadcast_end: Optional[OnBroadcastEndCallback] = None
+    ):
         self.is_broadcasting = bool(await self.currently_broadcasting_topics())
         while True:
             async with prevent_shutdown_on_broadcasting.allow_shutdown():
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.5)
             if not self.is_broadcasting:
                 continue
 

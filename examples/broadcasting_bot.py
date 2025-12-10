@@ -7,6 +7,7 @@ from telebot.types import constants as tg_constants
 
 from telebot_components.broadcast import BroadcastHandler, QueuedBroadcast
 from telebot_components.broadcast.message_senders import MessageCopySender
+from telebot_components.broadcast.subscriber import Subscriber
 from telebot_components.redis_utils.interface import RedisInterface
 
 
@@ -52,8 +53,8 @@ def create_broadcsting_bot(redis: RedisInterface, token: str, admin_chat_id: int
             return
         await broadcast_handler.new_broadcast(topic, sender=MessageCopySender.from_message(message.reply_to_message))
 
-    async def on_broadcast_start(queued_broadcast: QueuedBroadcast):
-        await bot.send_message(admin_chat_id, f"Starting: {queued_broadcast}")
+    async def on_broadcast_start(queued_broadcast: QueuedBroadcast, subs: list[Subscriber]):
+        await bot.send_message(admin_chat_id, f"Starting: {queued_broadcast} to {len(subs)} subs")
 
     async def on_broadcast_end(queued_broadcast: QueuedBroadcast):
         await bot.send_message(admin_chat_id, f"Completed: {queued_broadcast}")
@@ -75,19 +76,25 @@ if __name__ == "__main__":
     from telebot_components.redis_utils.emulation import RedisEmulation
     from telebot_components.redis_utils.interface import RedisInterface
 
-    load_dotenv()
-    logging.basicConfig(level=logging.INFO)
+    async def main() -> None:
+        load_dotenv()
+        logging.basicConfig(level=logging.DEBUG)
 
-    redis_url = os.environ.get("REDIS_URL")
-    redis: RedisInterface
-    if redis_url is None:
-        redis = RedisEmulation()
-    else:
-        redis = Redis.from_url(os.environ["REDIS_URL"])
-    bot_runner = create_broadcsting_bot(
-        redis=redis,
-        token=os.environ["TOKEN"],
-        admin_chat_id=int(os.environ["ADMIN_CHAT_ID"]),
-    )
+        redis_url = os.environ.get("REDIS_URL")
+        redis: RedisInterface
+        if redis_url is None:
+            redis = RedisEmulation()
+        else:
+            redis = Redis.from_url(redis_url)  # type: ignore
 
-    asyncio.run(bot_runner.run_polling())
+        admin_chat_id = int(os.environ["ADMIN_CHAT_ID"])
+        bot_runner = create_broadcsting_bot(
+            redis=redis,
+            token=os.environ["TOKEN"],
+            admin_chat_id=admin_chat_id,
+        )
+        print(await bot_runner.bot.get_me())
+        print(await bot_runner.bot.get_chat(admin_chat_id))
+        await bot_runner.run_polling()
+
+    asyncio.run(main())
