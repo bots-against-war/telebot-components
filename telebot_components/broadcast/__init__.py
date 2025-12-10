@@ -233,14 +233,17 @@ class BroadcastHandler:
                     except Exception:
                         self.logger.exception("Unexpected error in on_broadcast_start callback, ignoring")
 
-            if new_broadcast_queue:
-                self.logger.info(
-                    f"{len(broadcast_queue) - len(new_broadcast_queue)} broadcasts popped from the queue and started broadcasting"
-                )
-                await self.broadcast_queue_store.add_multiple(self.CONST_KEY, new_broadcast_queue)
-            self.next_broadcast_queue_processing_time = (
-                min([qb.start_time for qb in broadcast_queue]) if new_broadcast_queue else time.time() + 300
+            self.logger.info(
+                f"Of {len(broadcast_queue)} broadcast(s) found in queue, "
+                f"{len(broadcast_queue) - len(new_broadcast_queue)} started broadcasting, "
+                + f"{len(new_broadcast_queue)} is/are put back in the queue"
             )
+            if new_broadcast_queue:
+                await self.broadcast_queue_store.add_multiple(self.CONST_KEY, new_broadcast_queue)
+                self.next_broadcast_queue_processing_time = min([qb.start_time for qb in broadcast_queue])
+            else:
+                self.next_broadcast_queue_processing_time = time.time() + 300
+
             self.logger.info(
                 "The next broadcast queue processing scheduled "
                 + f"in {self.next_broadcast_queue_processing_time - time.time():.2f} sec"
