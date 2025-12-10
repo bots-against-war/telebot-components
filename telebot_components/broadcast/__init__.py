@@ -6,7 +6,7 @@ import random
 import time
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Awaitable, Callable, Literal, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Optional, TypeVar
 
 from telebot import AsyncTeleBot
 from telebot import api as telegram_api
@@ -66,14 +66,23 @@ TopicActionResultT = TypeVar("TopicActionResultT")
 BroadcastCallback = Callable[[QueuedBroadcast], Awaitable[Any]]
 
 
+class MessageBroadcastingConfig:
+    batch_size = 200  # each batch should take around 10-20 sec to complete
+    messages_per_second_limit = 20  # telegram rate limit is around 30 msg/sec, but we play safe
+    message_send_retries: int = 10
+
+    constant_backoff_sec: float | None = 1.0
+    random_exp_backoff_mult_base_sec: tuple[float, float] | None = None
+    from_header_backoff: bool = True
+
+
 class BroadcastHandler:
     def __init__(
         self,
         redis: RedisInterface,
         bot_prefix: str,
         topic_priority_key: Callable[[str], float] = lambda _: random.random(),
-        send_retries: int = 10,
-        send_backoff_strategy: Literal["constant", "random-exponential", "from-header"] = "from-header",
+        broadcasting_config: MessageBroadcastingConfig = MessageBroadcastingConfig(),
     ):
         self.topic_priority_key = topic_priority_key
         self.is_broadcasting = False
@@ -107,8 +116,7 @@ class BroadcastHandler:
             loader=QueuedBroadcast.load,
         )
         self.logger = logging.getLogger(__name__ + f"[{bot_prefix}]")
-        self._send_retries = send_retries
-        self._send_backoff_strategy = send_backoff_strategy
+        self._broadcasting_config = broadcasting_config
 
     async def topics(self) -> list[str]:
         """At least one person should be subscribed to the topic"""
@@ -239,9 +247,6 @@ class BroadcastHandler:
     @prevent_shutdown_on_broadcasting
     @log_fatal_error
     async def _send_current_broadcasts(self, bot: AsyncTeleBot, on_broadcast_end: Optional[BroadcastCallback] = None):
-        BATCH_SIZE = 200  # each batch should take around 10-20 sec to complete
-        MESSAGES_PER_SECOND_LIMIT = 20  # telegram rate limit is around 30 msg/sec, but we play safe
-
         self.is_broadcasting = bool(await self.currently_broadcasting_topics())
         while True:
             async with prevent_shutdown_on_broadcasting.allow_shutdown():
@@ -249,16 +254,15 @@ class BroadcastHandler:
             if not self.is_broadcasting:
                 continue
 
-            self.logger.info("Sending messages to subscribers")
             topics_to_send = await self.currently_broadcasting_topics()
             # sorting in decreasing priority order (top priority = first)
             topics_to_send.sort(key=self.topic_priority_key, reverse=True)
-            self.logger.info(f"Current topic priority: {topics_to_send}")
+            self.logger.info(f"Broadcasting messages to subscribers; topic priority: {topics_to_send}")
 
-            self.logger.info(f"Loading subscriber batch to send (target size {BATCH_SIZE})")
+            self.logger.info(f"Loading subscriber batch to send (target size {self._broadcasting_config.batch_size})")
             batch: list[tuple[QueuedBroadcast, Subscriber]] = []
             for topic in topics_to_send:
-                batch_from_topic = BATCH_SIZE - len(batch)
+                batch_from_topic = self._broadcasting_config.batch_size - len(batch)
                 if batch_from_topic <= 0:
                     break
                 subscribers = await self.current_pending_subscribers_by_topic_store.pop_multiple(
@@ -288,17 +292,27 @@ class BroadcastHandler:
             start_time = time.time()
 
             async def _send_broadcasted_message(
-                broadcast: QueuedBroadcast, subscriber: Subscriber, delay: float
+                broadcast: QueuedBroadcast, subscriber: Subscriber, predelay: float
             ) -> bool:
-                await asyncio.sleep(delay)
-                for _ in range(100):  # retry loop
+                await asyncio.sleep(predelay)
+                for i_retry in range(self._broadcasting_config.message_send_retries):
                     try:
-                        await broadcast.sender.send(MessageSenderContext(bot, subscriber))
-                        return True
+                        res = await broadcast.sender.send(MessageSenderContext(bot, subscriber))
+                        return res if res is not None else True
                     except telegram_api.ApiHTTPException as exc:
                         if exc.response.status == 429:
                             self.logger.info(f"Rate limiting error received from Telegram: {exc!r}")
-                            await asyncio.sleep(1)
+                            if self._broadcasting_config.constant_backoff_sec is not None:
+                                await asyncio.sleep(self._broadcasting_config.constant_backoff_sec)
+                            if self._broadcasting_config.random_exp_backoff_mult_base_sec is not None:
+                                mult, base = self._broadcasting_config.random_exp_backoff_mult_base_sec
+                                await asyncio.sleep(random.random() * mult * base**i_retry)
+                            if (
+                                self._broadcasting_config.from_header_backoff
+                                and exc.error_parameters is not None
+                                and exc.error_parameters.retry_after is not None
+                            ):
+                                await asyncio.sleep(exc.error_parameters.retry_after)
                         else:
                             self.logger.info(f"HTTP error received from Telegram: {exc!r}")
                             return False
@@ -309,7 +323,11 @@ class BroadcastHandler:
                 return False
 
             coroutines = [
-                _send_broadcasted_message(broadcast, subscriber, delay=float(message_idx) / MESSAGES_PER_SECOND_LIMIT)
+                _send_broadcasted_message(
+                    broadcast,
+                    subscriber,
+                    predelay=float(message_idx) / self._broadcasting_config.messages_per_second_limit,
+                )
                 for message_idx, (broadcast, subscriber) in enumerate(batch)
             ]
             success_flags = await asyncio.gather(*coroutines)
