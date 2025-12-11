@@ -205,6 +205,7 @@ class BroadcastHandler:
                 self.CONST_KEY,
                 count=50000,  # NOTE: works only if real queue is shorter than this
             )
+            broadcast_queue.sort(key=lambda qb: qb.start_time)
             self.logger.info(f"Found a total of {len(broadcast_queue)} queued broadcasts")
             new_broadcast_queue: list[QueuedBroadcast] = []
             for qb in broadcast_queue:
@@ -240,7 +241,10 @@ class BroadcastHandler:
             )
             if new_broadcast_queue:
                 await self.broadcast_queue_store.add_multiple(self.CONST_KEY, new_broadcast_queue)
-                self.next_broadcast_queue_processing_time = min([qb.start_time for qb in broadcast_queue])
+                self.next_broadcast_queue_processing_time = max(
+                    min([qb.start_time for qb in broadcast_queue]),
+                    time.time() + 10,
+                )
             else:
                 self.next_broadcast_queue_processing_time = time.time() + 300
 
@@ -255,9 +259,10 @@ class BroadcastHandler:
         self, bot: AsyncTeleBot, on_broadcast_end: Optional[OnBroadcastEndCallback] = None
     ):
         self.is_broadcasting = bool(await self.currently_broadcasting_topics())
+        self.logger.info(f"Starting broadcasting loop, currently is broadcasting: {self.is_broadcasting}")
         while True:
             async with prevent_shutdown_on_broadcasting.allow_shutdown():
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1.0)
             if not self.is_broadcasting:
                 continue
 
