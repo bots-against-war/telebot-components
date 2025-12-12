@@ -6,7 +6,7 @@ import random
 import time
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Awaitable, Callable, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
 
 from telebot import AsyncTeleBot
 from telebot import api as telegram_api
@@ -15,6 +15,7 @@ from telebot.graceful_shutdown import PreventShutdown
 
 from telebot_components.broadcast.message_senders import (
     AbstractMessageSender,
+    CustomMessageSenderContextT,
     MessageSenderContext,
 )
 from telebot_components.broadcast.subscriber import Subscriber
@@ -38,8 +39,8 @@ def log_fatal_error(function: AsyncFunctionT) -> AsyncFunctionT:
 
 
 @dataclass(frozen=True)
-class QueuedBroadcast:
-    sender: AbstractMessageSender
+class QueuedBroadcast(Generic[CustomMessageSenderContextT]):
+    sender: AbstractMessageSender[CustomMessageSenderContextT]
     topic: str
     start_time: float
 
@@ -53,7 +54,7 @@ class QueuedBroadcast:
         )
 
     @classmethod
-    def load(cls, dump: str) -> "QueuedBroadcast":
+    def load(cls, dump: str) -> "QueuedBroadcast[CustomMessageSenderContextT]":
         raw = json.loads(dump)
         return QueuedBroadcast(
             sender=AbstractMessageSender.load(raw["sender"]),
@@ -78,13 +79,14 @@ class MessageBroadcastingConfig:
     from_header_backoff: bool = True
 
 
-class BroadcastHandler:
+class BroadcastHandler(Generic[CustomMessageSenderContextT]):
     def __init__(
         self,
         redis: RedisInterface,
         bot_prefix: str,
         topic_priority_key: Callable[[str], float] = lambda _: random.random(),
         broadcasting_config: MessageBroadcastingConfig = MessageBroadcastingConfig(),
+        sender_custom_context: CustomMessageSenderContextT | None = None,
     ):
         self.topic_priority_key = topic_priority_key
         self.is_broadcasting = False
@@ -95,7 +97,7 @@ class BroadcastHandler:
             redis=redis,
             expiration_time=None,
         )
-        self.current_broadcast_by_topic_store = KeyValueStore[QueuedBroadcast](
+        self.current_broadcast_by_topic_store = KeyValueStore[QueuedBroadcast[CustomMessageSenderContextT]](
             name="current-message-sender-by-topic",
             prefix=bot_prefix,
             redis=redis,
@@ -109,7 +111,7 @@ class BroadcastHandler:
             redis=redis,
             expiration_time=None,
         )
-        self.broadcast_queue_store = KeySetStore[QueuedBroadcast](
+        self.broadcast_queue_store = KeySetStore[QueuedBroadcast[CustomMessageSenderContextT]](
             name="queued-broadcasts",
             prefix=bot_prefix,
             redis=redis,
@@ -119,6 +121,7 @@ class BroadcastHandler:
         )
         self.logger = logging.getLogger(__name__ + f"[{bot_prefix}]")
         self._broadcasting_config = broadcasting_config
+        self._sender_custom_ctx = sender_custom_context
 
     async def topics(self) -> list[str]:
         """At least one person should be subscribed to the topic"""
@@ -169,7 +172,10 @@ class BroadcastHandler:
     CONST_KEY = "const"
 
     async def new_broadcast(
-        self, topic: str, sender: AbstractMessageSender, schedule_at: Optional[float] = None
+        self,
+        topic: str,
+        sender: AbstractMessageSender[CustomMessageSenderContextT],
+        schedule_at: Optional[float] = None,
     ) -> bool:
         new_qb = QueuedBroadcast(sender=sender, topic=topic, start_time=schedule_at or time.time())
         if await self.broadcast_queue_store.add(self.CONST_KEY, new_qb):
@@ -272,7 +278,7 @@ class BroadcastHandler:
             self.logger.info(f"Broadcasting messages to subscribers; topic priority: {topics_to_send}")
 
             self.logger.info(f"Loading subscriber batch to send (target size {self._broadcasting_config.batch_size})")
-            batch: list[tuple[QueuedBroadcast, Subscriber]] = []
+            batch: list[tuple[QueuedBroadcast[CustomMessageSenderContextT], Subscriber]] = []
             for topic in topics_to_send:
                 batch_from_topic = self._broadcasting_config.batch_size - len(batch)
                 if batch_from_topic <= 0:
@@ -304,12 +310,20 @@ class BroadcastHandler:
             start_time = time.time()
 
             async def _send_broadcasted_message(
-                broadcast: QueuedBroadcast, subscriber: Subscriber, predelay: float
+                broadcast: QueuedBroadcast[CustomMessageSenderContextT],
+                subscriber: Subscriber,
+                predelay: float,
             ) -> bool:
                 await asyncio.sleep(predelay)
                 for i_retry in range(self._broadcasting_config.message_send_retries):
                     try:
-                        res = await broadcast.sender.send(MessageSenderContext(bot, subscriber))
+                        res = await broadcast.sender.send(
+                            MessageSenderContext[CustomMessageSenderContextT](
+                                bot,
+                                subscriber,
+                                custom=self._sender_custom_ctx,
+                            )
+                        )
                         return res if res is not None else True
                     except telegram_api.ApiHTTPException as exc:
                         if exc.response.status == 429:

@@ -1,20 +1,23 @@
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, is_dataclass
-from typing import Type
+from typing import Any, Generic, Type, TypeVar
 
 from telebot import AsyncTeleBot
 from telebot import types as tg
 
 from telebot_components.broadcast.subscriber import Subscriber
 
+CustomMessageSenderContextT = TypeVar("CustomMessageSenderContextT")
+
 
 @dataclass
-class MessageSenderContext:
+class MessageSenderContext(Generic[CustomMessageSenderContextT]):
     bot: AsyncTeleBot
     subscriber: Subscriber
+    custom: CustomMessageSenderContextT | None = None
 
 
-class AbstractMessageSender(ABC):
+class AbstractMessageSender(ABC, Generic[CustomMessageSenderContextT]):
     _registry: dict[str, Type["AbstractMessageSender"]] = dict()
 
     def __init_subclass__(cls) -> None:
@@ -44,10 +47,10 @@ class AbstractMessageSender(ABC):
         return type_.load_concrete(dump["concrete_dump"])
 
     @abstractmethod
-    async def send(self, context: MessageSenderContext) -> bool | None: ...
+    async def send(self, context: MessageSenderContext[CustomMessageSenderContextT]) -> bool | None: ...
 
 
-class DataclassMessageSender(AbstractMessageSender):
+class DataclassMessageSender(AbstractMessageSender[CustomMessageSenderContextT]):
     def __new__(cls, *args, **kwargs):
         if not is_dataclass(cls):
             raise RuntimeError("DataclassMessageSender subclasses must be dataclasses")
@@ -62,7 +65,7 @@ class DataclassMessageSender(AbstractMessageSender):
 
 
 @dataclass(frozen=True)
-class MessageCopySender(DataclassMessageSender):
+class MessageCopySender(DataclassMessageSender[Any]):
     source_chat_id: int
     source_message_id: int
 
@@ -77,7 +80,7 @@ class MessageCopySender(DataclassMessageSender):
             source_message_id=message.id,
         )
 
-    async def send(self, context: MessageSenderContext) -> None:
+    async def send(self, context: MessageSenderContext[Any]) -> None:
         await context.bot.copy_message(
             chat_id=context.subscriber["user_id"],
             from_chat_id=self.source_chat_id,
@@ -86,7 +89,7 @@ class MessageCopySender(DataclassMessageSender):
 
 
 @dataclass(frozen=True)
-class TextSender(DataclassMessageSender):
+class TextSender(DataclassMessageSender[Any]):
     text: str
     parse_mode: str = "HTML"
 
@@ -94,7 +97,7 @@ class TextSender(DataclassMessageSender):
     def concrete_name(cls) -> str:
         return "TextSender"
 
-    async def send(self, context: MessageSenderContext) -> None:
+    async def send(self, context: MessageSenderContext[Any]) -> None:
         await context.bot.send_message(
             chat_id=context.subscriber["user_id"],
             text=self.text,

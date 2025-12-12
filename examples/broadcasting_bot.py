@@ -15,7 +15,7 @@ def create_broadcsting_bot(redis: RedisInterface, token: str, admin_chat_id: int
     bot_prefix = "example-broadcasting-bot"
     bot = AsyncTeleBot(token)
 
-    broadcast_handler = BroadcastHandler(redis, bot_prefix)
+    broadcast_handler = BroadcastHandler[None](redis, bot_prefix)
 
     @bot.message_handler(commands=["topics"])
     async def list_topics_cmd_handler(message: tg.Message):
