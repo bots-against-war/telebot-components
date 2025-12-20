@@ -14,7 +14,14 @@ CustomMessageSenderContextT = TypeVar("CustomMessageSenderContextT")
 class MessageSenderContext(Generic[CustomMessageSenderContextT]):
     bot: AsyncTeleBot
     subscriber: Subscriber
-    custom: CustomMessageSenderContextT | None = None
+    previosly_sent_message_ids: list[int] | None
+    custom: CustomMessageSenderContextT | None
+
+
+@dataclass
+class MessageSenderResult:
+    success: bool
+    sent_message_ids: list[int] | None
 
 
 class AbstractMessageSender(ABC, Generic[CustomMessageSenderContextT]):
@@ -47,7 +54,7 @@ class AbstractMessageSender(ABC, Generic[CustomMessageSenderContextT]):
         return type_.load_concrete(dump["concrete_dump"])
 
     @abstractmethod
-    async def send(self, context: MessageSenderContext[CustomMessageSenderContextT]) -> bool | None: ...
+    async def send(self, context: MessageSenderContext[CustomMessageSenderContextT]) -> MessageSenderResult | None: ...
 
 
 class DataclassMessageSender(AbstractMessageSender[CustomMessageSenderContextT]):
@@ -80,12 +87,13 @@ class MessageCopySender(DataclassMessageSender[Any]):
             source_message_id=message.id,
         )
 
-    async def send(self, context: MessageSenderContext[Any]) -> None:
-        await context.bot.copy_message(
+    async def send(self, context: MessageSenderContext[Any]) -> MessageSenderResult:
+        res = await context.bot.copy_message(
             chat_id=context.subscriber["user_id"],
             from_chat_id=self.source_chat_id,
             message_id=self.source_message_id,
         )
+        return MessageSenderResult(success=True, sent_message_ids=[res.message_id])
 
 
 @dataclass(frozen=True)
@@ -97,9 +105,32 @@ class TextSender(DataclassMessageSender[Any]):
     def concrete_name(cls) -> str:
         return "TextSender"
 
-    async def send(self, context: MessageSenderContext[Any]) -> None:
-        await context.bot.send_message(
+    async def send(self, context: MessageSenderContext[Any]) -> MessageSenderResult:
+        message = await context.bot.send_message(
             chat_id=context.subscriber["user_id"],
             text=self.text,
             parse_mode=self.parse_mode,
         )
+        return MessageSenderResult(success=True, sent_message_ids=[message.id])
+
+
+class DeleteLastBroadcastSender(AbstractMessageSender):
+    @classmethod
+    def concrete_name(cls) -> str:
+        return "PreviousMessageDeleter"
+
+    def dump_concrete(self) -> dict:
+        return {}
+
+    @classmethod
+    def load_concrete(cls, dump: dict) -> "AbstractMessageSender":
+        return DeleteLastBroadcastSender()
+
+    async def send(self, context: MessageSenderContext[Any]) -> MessageSenderResult:
+        if context.previosly_sent_message_ids is None:
+            return MessageSenderResult(success=False, sent_message_ids=None)
+        else:
+            success = await context.bot.delete_messages(
+                chat_id=context.subscriber["user_id"], message_ids=context.previosly_sent_message_ids
+            )
+            return MessageSenderResult(success=success, sent_message_ids=None)

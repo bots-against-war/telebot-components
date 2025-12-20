@@ -15,7 +15,11 @@ def create_broadcsting_bot(redis: RedisInterface, token: str, admin_chat_id: int
     bot_prefix = "example-broadcasting-bot"
     bot = AsyncTeleBot(token)
 
-    broadcast_handler = BroadcastHandler[None](redis, bot_prefix)
+    broadcast_handler = BroadcastHandler[None](
+        redis,
+        bot_prefix,
+        deletable_broadcasts=True,
+    )
 
     @bot.message_handler(commands=["topics"])
     async def list_topics_cmd_handler(message: tg.Message):
@@ -53,6 +57,14 @@ def create_broadcsting_bot(redis: RedisInterface, token: str, admin_chat_id: int
             return
         await broadcast_handler.new_broadcast(topic, sender=MessageCopySender.from_message(message.reply_to_message))
 
+    @bot.message_handler(commands=["unbroadcast"], chat_id=[admin_chat_id])
+    async def unbroadcast_cmd(message: tg.Message):
+        topic = message.text_content.removeprefix("/unbroadcast").strip()
+        if not topic:
+            await bot.reply_to(message, "Please specify topic to unbroadcast the last message from")
+            return
+        await broadcast_handler.delete_last_broadcast(topic)
+
     async def on_broadcast_start(queued_broadcast: QueuedBroadcast, subs: list[Subscriber]):
         await bot.send_message(admin_chat_id, f"Starting: {queued_broadcast} to {len(subs)} subs")
 
@@ -78,7 +90,7 @@ if __name__ == "__main__":
 
     async def main() -> None:
         load_dotenv()
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level=logging.INFO)
 
         redis_url = os.environ.get("REDIS_URL")
         redis: RedisInterface

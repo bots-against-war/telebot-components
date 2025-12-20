@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import functools
 import json
 import logging
@@ -16,6 +17,7 @@ from telebot.graceful_shutdown import PreventShutdown
 from telebot_components.broadcast.message_senders import (
     AbstractMessageSender,
     CustomMessageSenderContextT,
+    DeleteLastBroadcastSender,
     MessageSenderContext,
 )
 from telebot_components.broadcast.subscriber import Subscriber
@@ -87,6 +89,7 @@ class BroadcastHandler(Generic[CustomMessageSenderContextT]):
         topic_priority_key: Callable[[str], float] = lambda _: random.random(),
         broadcasting_config: MessageBroadcastingConfig = MessageBroadcastingConfig(),
         sender_custom_context: CustomMessageSenderContextT | None = None,
+        deletable_broadcasts: bool = False,
     ):
         self.topic_priority_key = topic_priority_key
         self.is_broadcasting = False
@@ -118,6 +121,13 @@ class BroadcastHandler(Generic[CustomMessageSenderContextT]):
             expiration_time=None,
             dumper=lambda qb: qb.dump(),
             loader=QueuedBroadcast.load,
+        )
+        self.deletable_broadcasts = deletable_broadcasts
+        self.last_sent_msgs_store = KeyValueStore[list[int]](
+            name="last-sent-msgs",
+            prefix=bot_prefix,
+            redis=redis,
+            expiration_time=datetime.timedelta(days=3),
         )
         self.logger = logging.getLogger(__name__ + f"[{bot_prefix}]")
         self._broadcasting_config = broadcasting_config
@@ -185,6 +195,11 @@ class BroadcastHandler(Generic[CustomMessageSenderContextT]):
             return True
         else:
             return False
+
+    async def delete_last_broadcast(self, topic: str) -> bool:
+        if not self.deletable_broadcasts:
+            raise RuntimeError(f"Can't delete last broadcast because {self.deletable_broadcasts=}")
+        return await self.new_broadcast(topic=topic, sender=DeleteLastBroadcastSender(), schedule_at=None)
 
     async def background_job(
         self,
@@ -317,14 +332,24 @@ class BroadcastHandler(Generic[CustomMessageSenderContextT]):
                 await asyncio.sleep(predelay)
                 for i_retry in range(self._broadcasting_config.message_send_retries):
                     try:
-                        res = await broadcast.sender.send(
+                        if self.deletable_broadcasts:
+                            previously_sent_message_ids = await self.last_sent_msgs_store.load(subscriber["user_id"])
+                        else:
+                            previously_sent_message_ids = None
+
+                        result = await broadcast.sender.send(
                             MessageSenderContext[CustomMessageSenderContextT](
                                 bot,
                                 subscriber,
+                                previosly_sent_message_ids=previously_sent_message_ids,
                                 custom=self._sender_custom_ctx,
                             )
                         )
-                        return res if res is not None else True
+
+                        if self.deletable_broadcasts and result is not None and result.sent_message_ids is not None:
+                            await self.last_sent_msgs_store.save(subscriber["user_id"], result.sent_message_ids)
+
+                        return result.success if result is not None else True
                     except telegram_api.ApiHTTPException as exc:
                         if exc.response.status == 429:
                             self.logger.info(f"Rate limiting error received from Telegram: {exc!r}")
